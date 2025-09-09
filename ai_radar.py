@@ -68,6 +68,11 @@ def get_news_headline(ticker: str):
 def ai_playbook(ticker, gap, relvol, catalyst):
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY in Secrets."
+
+    # Ensure numbers are safe to format
+    gap = 0 if gap is None else gap
+    relvol = 0 if relvol is None else relvol
+
     prompt = f"""
     Ticker: {ticker}
     Gap: {gap:.2f}%
@@ -87,6 +92,7 @@ def ai_playbook(ticker, gap, relvol, catalyst):
         return resp.choices[0].message.content
     except Exception as e:
         return f"AI error: {e}"
+
 
 def scan_session_list(tickers, session):
     rows = []
