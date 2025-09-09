@@ -78,9 +78,15 @@ def get_news_headline(ticker: str):
     except Exception:
         return "News fetch error"
 
+from openai import OpenAI
+
+# Initialize OpenAI client once
+client = OpenAI(api_key=OPENAI_API_KEY)
+
 def ai_playbook(ticker: str, gap: float, relvol: float, catalyst: str) -> str:
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY to generate AI playbooks."
+
     prompt = f"""
     Ticker: {ticker}
     Premarket Gap: {gap:.2f}%
@@ -92,14 +98,16 @@ def ai_playbook(ticker: str, gap: float, relvol: float, catalyst: str) -> str:
     2) Expected duration (minutes vs multi-day) based on typical behavior for this catalyst/float.
     3) Key risks and a suggested stop guideline (e.g., VWAP loss, 1-1.5x ATR).
     """
+
     try:
-        resp = openai.ChatCompletion.create(
+        resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt.strip()}],
         )
-        return resp["choices"][0]["message"]["content"]
+        return resp.choices[0].message.content
     except Exception as e:
         return f"AI error: {e}"
+
 
 st.title("🔥 AI Radar Dashboard")
 st.caption("Premarket predictive scanner with catalysts & AI trading playbooks")
