@@ -69,9 +69,16 @@ def ai_playbook(ticker, gap, relvol, catalyst):
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY in Secrets."
 
-    # Ensure numbers are safe to format
-    gap = 0 if gap is None else gap
-    relvol = 0 if relvol is None else relvol
+    # Fallback defaults
+    try:
+        gap = float(gap) if gap is not None else 0.0
+    except Exception:
+        gap = 0.0
+
+    try:
+        relvol = float(relvol) if relvol is not None else 0.0
+    except Exception:
+        relvol = 0.0
 
     prompt = f"""
     Ticker: {ticker}
@@ -93,6 +100,33 @@ def ai_playbook(ticker, gap, relvol, catalyst):
     except Exception as e:
         return f"AI error: {e}"
 
+# =========================
+# TOP MOVERS FEED (Finnhub)
+# =========================
+@st.cache_data(show_spinner=True, ttl=300)
+def get_top_movers(limit=10):
+    movers = []
+    try:
+        url = f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={NEWS_API_KEY}"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        symbols = r.json()[:200]  # sample subset
+        tickers = [s["symbol"] for s in symbols]
+
+        for t in tickers:
+            try:
+                q = requests.get(f"https://finnhub.io/api/v1/quote?symbol={t}&token={NEWS_API_KEY}").json()
+                pct = ((q["c"] - q["pc"]) / q["pc"]) * 100 if q.get("pc") else 0
+                vol = q.get("v", 0)
+                if abs(pct) >= 5 and vol > 500000:  # filter movers
+                    movers.append((t, pct, vol))
+            except Exception:
+                continue
+    except Exception:
+        return ["AAPL","NVDA","TSLA","AMD","SPY"]
+
+    movers = sorted(movers, key=lambda x: abs(x[1]), reverse=True)[:limit]
+    return [m[0] for m in movers]
 
 def scan_session_list(tickers, session):
     rows = []
@@ -112,22 +146,22 @@ def scan_session_list(tickers, session):
 st.title("🔥 AI Radar 3-Session Scanner")
 st.caption("Market scanners for Premarket, Intraday, and Postmarket movers")
 
-# Temporary demo tickers (later: plug in Top Movers API)
-demo_tickers = ["NVDA", "TSLA", "AAPL", "AMD", "ORCL", "SPY"]
-
 tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket"])
 
 with tabs[0]:
     st.subheader("Premarket Movers")
-    df = scan_session_list(demo_tickers, session="premarket")
+    tickers = get_top_movers(limit=10)
+    df = scan_session_list(tickers, session="premarket")
     st.dataframe(df, use_container_width=True)
 
 with tabs[1]:
     st.subheader("Intraday Explosives")
-    df = scan_session_list(demo_tickers, session="intraday")
+    tickers = get_top_movers(limit=10)
+    df = scan_session_list(tickers, session="intraday")
     st.dataframe(df, use_container_width=True)
 
 with tabs[2]:
     st.subheader("Postmarket Movers")
-    df = scan_session_list(demo_tickers, session="postmarket")
+    tickers = get_top_movers(limit=10)
+    df = scan_session_list(tickers, session="postmarket")
     st.dataframe(df, use_container_width=True)
