@@ -2,62 +2,50 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import requests
-import openai
+from openai import OpenAI
 from datetime import datetime, timedelta
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI Radar Dashboard", layout="wide")
-
-# UI controls
-default_watchlist = "QMMM,NVDA,ORCL,MDB,SPY"
-watchlist = st.text_input("Watchlist (comma-separated tickers)", value=default_watchlist)
-TICKERS = [t.strip().upper() for t in watchlist.split(",") if t.strip()]
-LOOKBACK = st.number_input("Avg volume lookback (days)", min_value=5, max_value=60, value=20, step=1)
-
-# Secrets (set these in Streamlit Cloud under Settings → Secrets)
+st.set_page_config(page_title="AI Radar 3-Session Scanner", layout="wide")
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
+NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")
 
-if not OPENAI_API_KEY or not NEWS_API_KEY:
-    st.warning("Add your OPENAI_API_KEY and NEWS_API_KEY in App settings → Secrets to enable playbooks and news.")
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
+# =========================
+# HELPERS
+# =========================
 @st.cache_data(show_spinner=False, ttl=300)
-def avg_volume(ticker: str, lookback: int = 20):
+def avg_volume(ticker, lookback=20):
     hist = yf.download(ticker, period=f"{lookback}d", interval="1d", progress=False)
     if hist.empty or "Volume" not in hist:
         return None
     return float(hist["Volume"].mean())
 
-@st.cache_data(show_spinner=False, ttl=120)
-def premarket_scan(ticker: str, lookback: int = 20):
+def scan_session(ticker, session="premarket"):
     data = yf.download(ticker, period="1d", interval="5m", prepost=True, progress=False)
-    if data is None or data.empty:
+    if data.empty:
         return None
-    try:
-        pre = data.between_time("04:00", "09:30")
-    except Exception:
-        return None
-    if pre.empty:
-        return None
-
-    try:
-        open_price = float(pre["Open"].iloc[0])
-        last_close = float(pre["Close"].iloc[-1])
-        pre_vol_sum = float(pre["Volume"].sum())
-    except Exception:
-        return None
-
-    avg_vol = avg_volume(ticker, lookback)
-    if avg_vol is None or avg_vol == 0:
-        rel_vol = 0.0
+    
+    if session == "premarket":
+        df = data.between_time("04:00", "09:30")
+    elif session == "intraday":
+        df = data.between_time("09:30", "16:00")
+    elif session == "postmarket":
+        df = data.between_time("16:00", "20:00")
     else:
-        rel_vol = pre_vol_sum / avg_vol
+        return None
+    
+    if df.empty:
+        return None
 
-    pct_gap = ((last_close - open_price) / open_price) * 100 if open_price else 0.0
-    return pct_gap, rel_vol
+    open_price = df["Open"].iloc[0]
+    last_price = df["Close"].iloc[-1]
+    pct_change = (last_price - open_price) / open_price * 100
+    rel_vol = df["Volume"].sum() / (avg_volume(ticker) or 1)
+    return pct_change, rel_vol
 
 @st.cache_data(show_spinner=False, ttl=300)
 def get_news_headline(ticker: str):
@@ -69,8 +57,7 @@ def get_news_headline(ticker: str):
         r.raise_for_status()
         js = r.json()
         if isinstance(js, list) and js:
-            # return the most recent non-empty headline
-            for item in sorted(js, key=lambda x: x.get('datetime', 0), reverse=True):
+            for item in sorted(js, key=lambda x: x.get("datetime", 0), reverse=True):
                 headline = item.get("headline") or item.get("title")
                 if headline:
                     return headline
@@ -78,27 +65,20 @@ def get_news_headline(ticker: str):
     except Exception:
         return "News fetch error"
 
-from openai import OpenAI
-
-# Initialize OpenAI client once
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-def ai_playbook(ticker: str, gap: float, relvol: float, catalyst: str) -> str:
+def ai_playbook(ticker, gap, relvol, catalyst):
     if not OPENAI_API_KEY:
-        return "Add OPENAI_API_KEY to generate AI playbooks."
-
+        return "Add OPENAI_API_KEY in Secrets."
     prompt = f"""
     Ticker: {ticker}
-    Premarket Gap: {gap:.2f}%
-    Relative Volume: {relvol:.2f}x
+    Gap: {gap:.2f}%
+    RelVol: {relvol:.2f}x
     Catalyst: {catalyst}
 
-    Create a concise 3-sentence trading plan:
-    1) Bias (long/short) with an entry idea (e.g., above premarket high or VWAP pullback).
-    2) Expected duration (minutes vs multi-day) based on typical behavior for this catalyst/float.
-    3) Key risks and a suggested stop guideline (e.g., VWAP loss, 1-1.5x ATR).
+    Generate a 3-sentence trading playbook:
+    1) Bias (long/short).
+    2) Expected duration (scalp vs swing).
+    3) Risks (fade, IV crush, market pullback).
     """
-
     try:
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -108,36 +88,40 @@ def ai_playbook(ticker: str, gap: float, relvol: float, catalyst: str) -> str:
     except Exception as e:
         return f"AI error: {e}"
 
-
-st.title("🔥 AI Radar Dashboard")
-st.caption("Premarket predictive scanner with catalysts & AI trading playbooks")
-
-rows = []
-for ticker in TICKERS:
-    scan = premarket_scan(ticker, LOOKBACK)
-    if scan:
+def scan_session_list(tickers, session):
+    rows = []
+    for t in tickers:
+        scan = scan_session(t, session)
+        if not scan:
+            continue
         gap, relvol = scan
-        catalyst = get_news_headline(ticker)
-        playbook = ai_playbook(ticker, gap, relvol, catalyst)
-        rows.append(
-            {
-                "Ticker": ticker,
-                "Gap %": round(gap, 2),
-                "RelVol": round(relvol, 2),
-                "Catalyst": catalyst,
-                "AI Playbook": playbook,
-            }
-        )
+        catalyst = get_news_headline(t)
+        playbook = ai_playbook(t, gap, relvol, catalyst)
+        rows.append([t, round(gap, 2), round(relvol, 2), catalyst, playbook])
+    return pd.DataFrame(rows, columns=["Ticker", "Gap %", "RelVol", "Catalyst", "AI Playbook"])
 
-if rows:
-    df = pd.DataFrame(rows).sort_values(["Gap %", "RelVol"], ascending=[False, False])
-    st.dataframe(df, use_container_width=True, height=520)
-else:
-    st.info("No premarket data available yet. Try adding tickers or check closer to the open (4:00–9:30 ET).")
+# =========================
+# STREAMLIT UI
+# =========================
+st.title("🔥 AI Radar 3-Session Scanner")
+st.caption("Market scanners for Premarket, Intraday, and Postmarket movers")
 
-st.markdown("---")
-st.write("Tip: Deploy on Streamlit Cloud → App settings → **Secrets**:")
-st.code('''
-OPENAI_API_KEY = "sk-..."
-NEWS_API_KEY   = "YOUR_FINNHUB_KEY"
-'''.strip(), language="toml")
+# Temporary demo tickers (later: plug in Top Movers API)
+demo_tickers = ["NVDA", "TSLA", "AAPL", "AMD", "ORCL", "SPY"]
+
+tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket"])
+
+with tabs[0]:
+    st.subheader("Premarket Movers")
+    df = scan_session_list(demo_tickers, session="premarket")
+    st.dataframe(df, use_container_width=True)
+
+with tabs[1]:
+    st.subheader("Intraday Explosives")
+    df = scan_session_list(demo_tickers, session="intraday")
+    st.dataframe(df, use_container_width=True)
+
+with tabs[2]:
+    st.subheader("Postmarket Movers")
+    df = scan_session_list(demo_tickers, session="postmarket")
+    st.dataframe(df, use_container_width=True)
