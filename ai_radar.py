@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI Radar 3-Session Scanner", layout="wide")
+st.set_page_config(page_title="AI Radar 24h Scanner", layout="wide")
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")
 
@@ -24,27 +24,16 @@ def avg_volume(ticker, lookback=20):
         return None
     return float(hist["Volume"].mean())
 
-def scan_session(ticker, session="premarket"):
-    data = yf.download(ticker, period="1d", interval="5m", prepost=True, progress=False)
+def scan_24h(ticker):
+    """Scan last 24h price action (premarket + intraday + postmarket)."""
+    data = yf.download(ticker, period="2d", interval="5m", prepost=True, progress=False)
     if data.empty:
         return None
     
-    if session == "premarket":
-        df = data.between_time("04:00", "09:30")
-    elif session == "intraday":
-        df = data.between_time("09:30", "16:00")
-    elif session == "postmarket":
-        df = data.between_time("16:00", "20:00")
-    else:
-        return None
-    
-    if df.empty:
-        return None
-
-    open_price = df["Open"].iloc[0]
-    last_price = df["Close"].iloc[-1]
-    pct_change = (last_price - open_price) / open_price * 100
-    rel_vol = df["Volume"].sum() / (avg_volume(ticker) or 1)
+    last_price = data["Close"].iloc[-1]
+    prev_close = data["Close"].iloc[0]
+    pct_change = (last_price - prev_close) / prev_close * 100
+    rel_vol = data["Volume"].sum() / (avg_volume(ticker) or 1)
     return pct_change, rel_vol
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -69,7 +58,7 @@ def ai_playbook(ticker, gap, relvol, catalyst):
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY in Secrets."
 
-    # Fallback defaults
+    # Safe fallback values
     try:
         gap = float(gap) if gap is not None else 0.0
     except Exception:
@@ -82,7 +71,7 @@ def ai_playbook(ticker, gap, relvol, catalyst):
 
     prompt = f"""
     Ticker: {ticker}
-    Gap: {gap:.2f}%
+    24h Change: {gap:.2f}%
     RelVol: {relvol:.2f}x
     Catalyst: {catalyst}
 
@@ -101,10 +90,25 @@ def ai_playbook(ticker, gap, relvol, catalyst):
         return f"AI error: {e}"
 
 # =========================
-# TOP MOVERS FEED (Finnhub)
+# EARNINGS CALENDAR
 # =========================
 @st.cache_data(show_spinner=True, ttl=300)
-def get_top_movers(limit=10):
+def get_earnings_today():
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    url = f"https://finnhub.io/api/v1/calendar/earnings?from={today}&to={today}&token={NEWS_API_KEY}"
+    try:
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        js = r.json().get("earningsCalendar", [])
+        return [item["symbol"] for item in js if "symbol" in item]
+    except Exception:
+        return []
+
+# =========================
+# TOP MOVERS FEED
+# =========================
+@st.cache_data(show_spinner=True, ttl=300)
+def get_top_movers(limit=15):
     movers = []
     try:
         url = f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={NEWS_API_KEY}"
@@ -128,40 +132,41 @@ def get_top_movers(limit=10):
     movers = sorted(movers, key=lambda x: abs(x[1]), reverse=True)[:limit]
     return [m[0] for m in movers]
 
-def scan_session_list(tickers, session):
+def scan_list(tickers, tag="24h"):
     rows = []
     for t in tickers:
-        scan = scan_session(t, session)
+        scan = scan_24h(t)
         if not scan:
             continue
         gap, relvol = scan
         catalyst = get_news_headline(t)
         playbook = ai_playbook(t, gap, relvol, catalyst)
         rows.append([t, round(gap, 2), round(relvol, 2), catalyst, playbook])
-    return pd.DataFrame(rows, columns=["Ticker", "Gap %", "RelVol", "Catalyst", "AI Playbook"])
+    return pd.DataFrame(rows, columns=["Ticker", "Change %", "RelVol", "Catalyst", "AI Playbook"])
 
 # =========================
 # STREAMLIT UI
 # =========================
-st.title("🔥 AI Radar 3-Session Scanner")
-st.caption("Market scanners for Premarket, Intraday, and Postmarket movers")
+st.title("🔥 AI Radar 24h Scanner")
+st.caption("Scans Premarket, Intraday, Postmarket, and Earnings Movers (24/7)")
 
 tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket"])
 
+# Always grab top movers + earnings
+tickers = list(set(get_top_movers(limit=15) + get_earnings_today()))
+
 with tabs[0]:
-    st.subheader("Premarket Movers")
-    tickers = get_top_movers(limit=10)
-    df = scan_session_list(tickers, session="premarket")
+    st.subheader("Premarket Movers (4am–9:30am)")
+    df = scan_list(tickers, tag="premarket")
     st.dataframe(df, use_container_width=True)
 
 with tabs[1]:
-    st.subheader("Intraday Explosives")
-    tickers = get_top_movers(limit=10)
-    df = scan_session_list(tickers, session="intraday")
+    st.subheader("Intraday Explosives (9:30am–4pm)")
+    df = scan_list(tickers, tag="intraday")
     st.dataframe(df, use_container_width=True)
 
 with tabs[2]:
-    st.subheader("Postmarket Movers")
-    tickers = get_top_movers(limit=10)
-    df = scan_session_list(tickers, session="postmarket")
+    st.subheader("Postmarket Movers + Earnings")
+    df = scan_list(tickers, tag="postmarket")
     st.dataframe(df, use_container_width=True)
+
