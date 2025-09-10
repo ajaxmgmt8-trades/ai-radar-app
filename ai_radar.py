@@ -38,24 +38,38 @@ def get_session_data(ticker, session):
     start_t, end_t = get_session_times()[session]
     today = datetime.date.today()
 
-    try:
-        bars = polygon_client.get_aggs(
-            ticker=ticker,
-            multiplier=1,
-            timespan="minute",
-            from_=today.strftime("%Y-%m-%d"),
-            to=today.strftime("%Y-%m-%d")
-        )
-    except Exception:
-        return None, None
+    # Helper to fetch bars for a given date
+    def fetch_bars(date):
+        try:
+            bars = polygon_client.get_aggs(
+                ticker=ticker,
+                multiplier=1,
+                timespan="minute",
+                from_=date.strftime("%Y-%m-%d"),
+                to=date.strftime("%Y-%m-%d")
+            )
+            return pd.DataFrame(bars) if bars else pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
 
-    if not bars:
-        return None, None
+    # Try today first
+    df = fetch_bars(today)
 
-    df = pd.DataFrame(bars)
+    # If empty → keep stepping back 1 day until we find data
+    lookback = 1
+    while df.empty and lookback <= 5:  # up to 5 trading days back
+        prev_day = today - datetime.timedelta(days=lookback)
+        df = fetch_bars(prev_day)
+        lookback += 1
+
+    if df.empty:
+        return None, None  # no data found
+
+    # Format timestamps
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms").dt.tz_localize("UTC").dt.tz_convert("US/Eastern")
     df.set_index("timestamp", inplace=True)
 
+    # Slice the chosen session
     session_df = df.between_time(start_t, end_t)
     if session_df.empty:
         return None, None
@@ -64,8 +78,9 @@ def get_session_data(ticker, session):
     close_price = session_df.iloc[-1]["close"]
     change_pct = ((close_price - open_price) / open_price) * 100
 
-    relvol = session_df["volume"].sum() / (df["volume"].sum() / 3)  # crude session relvol
+    relvol = session_df["volume"].sum() / (df["volume"].sum() / 3)  # crude relvol
     return round(change_pct, 2), round(relvol, 2)
+
 
 def scan_session(session):
     movers = []
