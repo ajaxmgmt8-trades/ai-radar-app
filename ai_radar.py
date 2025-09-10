@@ -24,23 +24,35 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # SAFE DATAFRAME HELPER
 # =========================
 def safe_dataframe(df):
-    """Render styled DataFrame with fallback if matplotlib is missing."""
+    """Render styled DataFrame with numeric formatting, gradient if available, and full fallback."""
     try:
-        return st.dataframe(
-            df.style.format({
-                "Change %": "{:+.2f}%",
-                "RelVol": "{:.2f}x"
-            }).background_gradient(subset=["Change %"], cmap="RdYlGn"),
-            use_container_width=True
-        )
-    except ImportError:
-        return st.dataframe(
-            df.style.format({
-                "Change %": "{:+.2f}%",
-                "RelVol": "{:.2f}x"
-            }),
-            use_container_width=True
-        )
+        if df is None or df.empty:
+            return st.write("No data available.")
+
+        # Identify numeric columns only
+        numeric_cols = df.select_dtypes(include=["number"]).columns
+        styler = df.style
+
+        # Apply formatting only to numeric cols
+        for col in numeric_cols:
+            if col.lower().startswith("change"):
+                styler = styler.format({col: "{:+.2f}%"})
+            elif col.lower().startswith("relvol"):
+                styler = styler.format({col: "{:.2f}x"})
+            else:
+                styler = styler.format(precision=2, na_rep="—")
+
+        try:
+            return st.dataframe(
+                styler.background_gradient(subset=[c for c in ["Change %"] if c in df.columns], cmap="RdYlGn"),
+                use_container_width=True
+            )
+        except ImportError:
+            return st.dataframe(styler, use_container_width=True)
+
+    except Exception as e:
+        st.warning(f"⚠️ Styling disabled: {e}")
+        return st.dataframe(df, use_container_width=True)
 
 # =========================
 # HELPERS
@@ -72,8 +84,7 @@ def get_finnhub_news(ticker: str):
         url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start}&to={today}&token={NEWS_API_KEY}"
         r = requests.get(url, timeout=10).json()
         if isinstance(r, list) and r:
-            headline = r[0].get("headline") or r[0].get("title")
-            return headline
+            return r[0].get("headline") or r[0].get("title")
         return "No major Finnhub news"
     except:
         return "Finnhub error"
@@ -106,8 +117,7 @@ def get_stocktwits_trending(limit=5):
     try:
         url = "https://api.stocktwits.com/api/2/trending/symbols.json"
         r = requests.get(url, timeout=10).json()
-        syms = [s["symbol"] for s in r.get("symbols", [])[:limit]]
-        return syms
+        return [s["symbol"] for s in r.get("symbols", [])[:limit]]
     except:
         return []
 
@@ -118,7 +128,6 @@ def ai_playbook(ticker, change, relvol, catalyst):
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY in Secrets."
 
-    # ✅ Safe numeric conversion
     try:
         change = float(change) if change is not None else 0.0
     except:
@@ -237,4 +246,4 @@ with tabs[4]:
     refresh_rate = st.slider("Refresh Catalysts every X minutes", 1, 10, 3)
     st_autorefresh = st.experimental_autorefresh(interval=refresh_rate * 60 * 1000, key="catalyst_refresh")
     df = scan_catalysts(tickers, use_polygon=True, use_finnhub=use_finnhub, use_stocktwits=use_stocktwits)
-    st.dataframe(df, use_container_width=True)
+    safe_dataframe(df)
