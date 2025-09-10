@@ -16,7 +16,15 @@ polygon_client = RESTClient(POLYGON_KEY)
 finnhub_client = finnhub.Client(api_key=NEWS_API_KEY) if NEWS_API_KEY else None
 
 # Default watchlist (can be expanded)
-WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT", "META", "ORCL", "MDB", "GOOG", "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM","COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN","UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF,"WOLF",OKLO,"APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL","SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR","BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND"]
+WATCHLIST = [
+    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
+    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
+    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
+    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
+    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
+    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
+    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND"
+]
 
 # ---------------- HELPERS ----------------
 def get_session_times():
