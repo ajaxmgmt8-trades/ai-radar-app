@@ -1,6 +1,6 @@
-streamlit
 yfinance
 pandas
+streamlit
 requests
 openai
-snscrape
+snscrape==0.7.0.20230622
