@@ -1,139 +1,127 @@
 import streamlit as st
 import pandas as pd
 import requests
-import yfinance as yf
-from datetime import datetime
-from zoneinfo import ZoneInfo
-from streamlit_autorefresh import st_autorefresh
+import datetime
+from polygon import RESTClient
+import finnhub
 
-# ==============================
-# CONFIG
-# ==============================
+# ---------------- CONFIG ----------------
 st.set_page_config(page_title="🔥 AI Radar Pro — Market Scanner", layout="wide")
-st.title("🔥 AI Radar Pro — Market Scanner")
-st.caption("Live Premarket, Intraday, Postmarket Movers with RelVol")
 
-TZ_ET = ZoneInfo("US/Eastern")
 POLYGON_KEY = st.secrets["POLYGON_API_KEY"]
+FINNHUB_KEY = st.secrets["FINNHUB_API_KEY"]
 
-# ==============================
-# HELPERS
-# ==============================
+polygon_client = RESTClient(POLYGON_KEY)
+finnhub_client = finnhub.Client(api_key=FINNHUB_KEY)
 
-def get_avg_daily_vol(ticker: str, lookback: int = 20) -> float | None:
-    """20d average daily volume via yfinance."""
-    hist = yf.download(ticker, period=f"{lookback}d", interval="1d", progress=False)
-    if hist.empty or "Volume" not in hist:
-        return None
-    return float(hist["Volume"].mean())
+WATCHLIST = ["AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT", "META", "ORCL", "MDB", "GOOG"]
 
-def get_polygon_session_change(ticker, session="intraday"):
-    """Session % change and RelVol from Polygon 1m bars."""
-    today = datetime.now(TZ_ET).strftime("%Y-%m-%d")
-    url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{today}/{today}?adjusted=true&sort=asc&limit=50000&apiKey={POLYGON_KEY}"
-    r = requests.get(url, timeout=10)
-    if r.status_code != 200:
-        return None, None
-    bars = r.json().get("results", [])
+# ---------------- HELPERS ----------------
+def get_session_times():
+    return {
+        "premarket": (datetime.time(4, 0), datetime.time(9, 30)),
+        "intraday": (datetime.time(9, 30), datetime.time(16, 0)),
+        "postmarket": (datetime.time(16, 0), datetime.time(20, 0)),
+    }
+
+def get_session_data(ticker, session):
+    start_t, end_t = get_session_times()[session]
+    today = datetime.date.today()
+
+    bars = polygon_client.get_aggs(
+        ticker=ticker,
+        multiplier=1,
+        timespan="minute",
+        from_=(today.strftime("%Y-%m-%d")),
+        to=(today.strftime("%Y-%m-%d"))
+    )
     if not bars:
         return None, None
 
     df = pd.DataFrame(bars)
-    df["t"] = pd.to_datetime(df["t"], unit="ms", utc=True).dt.tz_convert(TZ_ET)
-    df = df.set_index("t")
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms").dt.tz_localize("UTC").dt.tz_convert("US/Eastern")
+    df.set_index("timestamp", inplace=True)
 
-    if session == "premarket":
-        start, end = "04:00", "09:30"
-    elif session == "intraday":
-        start, end = "09:30", "16:00"
-    elif session == "postmarket":
-        start, end = "16:00", "20:00"
-    else:
+    session_df = df.between_time(start_t, end_t)
+    if session_df.empty:
         return None, None
 
-    sess = df.between_time(start, end)
-    if sess.empty:
-        return None, None
+    open_price = session_df.iloc[0]["open"]
+    close_price = session_df.iloc[-1]["close"]
+    change_pct = ((close_price - open_price) / open_price) * 100
 
-    open_px = sess["o"].iloc[0]
-    last_px = sess["c"].iloc[-1]
-    change = (last_px - open_px) / open_px * 100
+    relvol = session_df["volume"].sum() / (df["volume"].sum() / 3)  # session vol ÷ avg 3 sessions
+    return round(change_pct, 2), round(relvol, 2)
 
-    vol = sess["v"].sum()
-    avg_vol = get_avg_daily_vol(ticker) or 1.0
-    relvol = vol / avg_vol
-
-    return round(change, 2), round(relvol, 2)
-
-def polygon_top_universe(direction="gainers"):
-    """Fetch top gainers/losers from Polygon snapshot."""
-    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/{direction}?apiKey={POLYGON_KEY}"
-    r = requests.get(url, timeout=10)
-    if r.status_code != 200:
-        return []
-    return [t["ticker"] for t in r.json().get("tickers", [])]
-
-def get_top10(session="intraday"):
-    """Rank top 10 movers by session-specific % change."""
-    tickers = polygon_top_universe("gainers") + polygon_top_universe("losers")
+def scan_session(session):
     movers = []
-    for t in tickers[:50]:  # limit universe for speed
-        change, relvol = get_polygon_session_change(t, session)
-        if change is None:
-            continue
-        movers.append({
-            "Ticker": t,
-            "Change %": change,
-            "RelVol": relvol,
-            "Catalyst": "No major Polygon/Benzinga news",
-            "AI Playbook": f"Bias: {'Long' if change > 0 else 'Short'} — {change:.2f}%, RelVol {relvol:.2f}x"
-        })
-    df = pd.DataFrame(movers)
-    if df.empty:
-        return df
-    df = df.reindex(df["Change %"].abs().sort_values(ascending=False).index)
-    df = df.head(10).reset_index(drop=True)
-    df.index = df.index + 1
+    for t in WATCHLIST:
+        try:
+            change, relvol = get_session_data(t, session)
+            if change is not None:
+                movers.append({"Ticker": t, "Change %": change, "RelVol": relvol})
+        except Exception as e:
+            pass
+    df = pd.DataFrame(movers).sort_values("Change %", ascending=False).head(10)
+    df.index = range(1, len(df) + 1)
     return df
 
-def safe_dataframe(df: pd.DataFrame, height=480):
-    if df is None or df.empty:
-        st.info("No data available.")
-        return
-    styler = df.style.format({
-        "Change %": "{:+.2f}%",
-        "RelVol": "{:.2f}x"
-    }).background_gradient(subset=["Change %"], cmap="RdYlGn")
-    st.dataframe(styler, use_container_width=True, height=height)
+def get_stocktwits_feed(ticker):
+    url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = r.json()
+        msgs = [m["body"] for m in data.get("messages", [])[:3]]
+        return msgs if msgs else ["No chatter found"]
+    except Exception as e:
+        return [f"StockTwits error: {e}"]
 
-# ==============================
-# SEARCH BAR
-# ==============================
-search_ticker = st.text_input("🔍 Search a ticker (e.g., TSLA, NVDA, SPY)", "").upper()
-if search_ticker:
-    st.subheader(f"Search: {search_ticker}")
-    change, relvol = get_polygon_session_change(search_ticker, "intraday")
-    if change is not None:
-        st.write(f"Change: {change:+.2f}%, RelVol: {relvol:.2f}x")
-    else:
-        st.write("No intraday data available")
+def get_catalysts():
+    news_items = []
+    for t in WATCHLIST:
+        try:
+            res = finnhub_client.company_news(t, _from=str(datetime.date.today()), to=str(datetime.date.today()))
+            for n in res[:2]:
+                news_items.append({"Ticker": t, "Headline": n["headline"], "Source": n["source"], "Time": n["datetime"]})
+        except:
+            pass
+    return pd.DataFrame(news_items)
 
-# ==============================
-# TABS
-# ==============================
-tabs = st.tabs(["📊 Premarket", "☀️ Intraday", "🌙 Postmarket"])
+# ---------------- UI ----------------
+st.title("🔥 AI Radar Pro — Market Scanner")
+st.caption("Live Premarket, Intraday, Postmarket Movers with RelVol, StockTwits chatter & Catalysts")
+
+query = st.text_input("🔍 Search a ticker (e.g., TSLA, NVDA, SPY)", "")
+
+tabs = st.tabs(["📈 Premarket", "🌞 Intraday", "🌙 Postmarket", "💬 StockTwits Feed", "📰 Catalysts"])
 
 with tabs[0]:
     st.subheader("Premarket Movers (04:00–09:30 ET)")
-    st_autorefresh(interval=60*1000, key="pre_refresh")
-    safe_dataframe(get_top10("premarket"))
+    df = scan_session("premarket")
+    st.dataframe(df, use_container_width=True)
 
 with tabs[1]:
     st.subheader("Intraday Movers (09:30–16:00 ET)")
-    st_autorefresh(interval=60*1000, key="intra_refresh")
-    safe_dataframe(get_top10("intraday"))
+    df = scan_session("intraday")
+    st.dataframe(df, use_container_width=True)
 
 with tabs[2]:
     st.subheader("Postmarket Movers (16:00–20:00 ET)")
-    st_autorefresh(interval=60*1000, key="post_refresh")
-    safe_dataframe(get_top10("postmarket"))
+    df = scan_session("postmarket")
+    st.dataframe(df, use_container_width=True)
+
+with tabs[3]:
+    st.subheader("💬 StockTwits Feed")
+    for t in WATCHLIST:
+        st.markdown(f"### {t}")
+        msgs = get_stocktwits_feed(t)
+        for m in msgs:
+            st.write(f"👉 {m}")
+
+with tabs[4]:
+    st.subheader("📰 Catalysts")
+    df_cat = get_catalysts()
+    if not df_cat.empty:
+        st.dataframe(df_cat, use_container_width=True, height=400)
+    else:
+        st.info("No major catalysts today.")
