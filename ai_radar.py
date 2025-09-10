@@ -4,7 +4,6 @@ import streamlit as st
 import requests
 from openai import OpenAI
 from datetime import datetime, timedelta
-from snscrape.modules import twitter   # stable import
 
 # =========================
 # CONFIG
@@ -20,14 +19,6 @@ NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
 POLYGON_API_KEY = st.secrets.get("POLYGON_API_KEY", "")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-
-# =========================
-# AUTO REFRESH (every 5 min default)
-# =========================
-refresh_interval = st.sidebar.slider("Auto-refresh interval (minutes)", 1, 15, 5)
-st_autorefresh = st.experimental_data_editor  # placeholder
-st_autorefresh = st.experimental_rerun
-st_autorefresh  # ensures reload
 
 # =========================
 # HELPERS
@@ -75,28 +66,27 @@ def get_polygon_news(ticker: str):
     except Exception as e:
         return f"Polygon news error: {e}"
 
-def get_twitter_news(ticker, limit=2):
+def get_stocktwits_messages(ticker, limit=3):
     try:
-        query = f"${ticker} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
-        tweets = []
-        for i, tweet in enumerate(twitter.TwitterSearchScraper(query).get_items()):
-            if i >= limit: break
-            tweets.append(tweet.content)
-        return tweets if tweets else ["No fresh Twitter chatter"]
-    except Exception as e:
-        return [f"Twitter error: {e}"]
+        url = f"https://api.stocktwits.com/api/2/streams/symbol/{ticker}.json"
+        r = requests.get(url, timeout=10).json()
+        msgs = []
+        for m in r.get("messages", [])[:limit]:
+            user = m.get("user", {}).get("username", "user")
+            body = m.get("body", "")
+            msgs.append(f"@{user}: {body}")
+        return msgs if msgs else ["No chatter"]
+    except:
+        return ["StockTwits error"]
 
-def get_twitter_accounts(accounts, limit=3):
-    tweets = []
+def get_stocktwits_trending(limit=5):
     try:
-        for account in accounts:
-            query = f"from:{account} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
-            for i, tweet in enumerate(twitter.TwitterSearchScraper(query).get_items()):
-                if i >= limit: break
-                tweets.append(f"@{account}: {tweet.content}")
-        return tweets if tweets else ["No fresh tweets from accounts"]
-    except Exception as e:
-        return [f"Twitter account error: {e}"]
+        url = "https://api.stocktwits.com/api/2/trending/symbols.json"
+        r = requests.get(url, timeout=10).json()
+        syms = [s["symbol"] for s in r.get("symbols", [])[:limit]]
+        return syms
+    except:
+        return []
 
 # =========================
 # AI PLAYBOOK
@@ -127,12 +117,12 @@ def ai_playbook(ticker, change, relvol, catalyst):
         return f"AI error: {e}"
 
 # =========================
-# TOP MOVERS
+# SCANNERS
 # =========================
 def get_top_movers(limit=10):
     return ["AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG"]
 
-def scan_list(tickers, use_polygon, use_finnhub, use_twitter, use_accounts, accounts):
+def scan_list(tickers, use_polygon, use_finnhub):
     rows = []
     for t in tickers:
         scan = scan_24h(t)
@@ -143,17 +133,14 @@ def scan_list(tickers, use_polygon, use_finnhub, use_twitter, use_accounts, acco
         rows.append([t, round(change,2), round(relvol,2), catalyst, playbook])
     return pd.DataFrame(rows, columns=["Ticker","Change %","RelVol","Catalyst","AI Playbook"])
 
-def scan_catalysts(tickers, use_polygon=True, use_finnhub=True, use_twitter=True, accounts=[]):
+def scan_catalysts(tickers, use_polygon=True, use_finnhub=True, use_stocktwits=True):
     rows = []
     for t in tickers:
         polygon_headline = get_polygon_news(t) if use_polygon else ""
         finnhub_headline = get_finnhub_news(t) if use_finnhub else ""
-        twitter_headline = get_twitter_news(t,1)[0] if use_twitter else ""
-        acct_headline = ""
-        if accounts:
-            acct_headline = get_twitter_accounts(accounts,1)[0]
-        rows.append([t, polygon_headline, finnhub_headline, twitter_headline, acct_headline])
-    return pd.DataFrame(rows, columns=["Ticker","Polygon/Benzinga","Finnhub","Twitter","Accounts"])
+        stocktwits_headline = get_stocktwits_messages(t,1)[0] if use_stocktwits else ""
+        rows.append([t, polygon_headline, finnhub_headline, stocktwits_headline])
+    return pd.DataFrame(rows, columns=["Ticker","Polygon/Benzinga","Finnhub","StockTwits"])
 
 # =========================
 # STREAMLIT UI
@@ -162,40 +149,31 @@ st.markdown(
     "<h1 style='text-align: center; color: orange;'>🔥 AI Radar Pro — Market Scanner</h1>",
     unsafe_allow_html=True
 )
-st.caption("Premarket, Intraday, Postmarket, Twitter Feed, and AI Playbooks")
+st.caption("Premarket, Intraday, Postmarket, StockTwits, and AI Playbooks")
 
 # Sidebar
 st.sidebar.header("⚙️ News Settings")
 use_polygon = st.sidebar.checkbox("Use Polygon (Benzinga)", value=True)
 use_finnhub = st.sidebar.checkbox("Use Finnhub", value=True)
-use_twitter = st.sidebar.checkbox("Use Twitter by Ticker", value=True)
-use_accounts = st.sidebar.checkbox("Use Twitter Accounts", value=False)
-
-accounts_list = []
-if use_accounts:
-    accounts_input = st.sidebar.text_area(
-        "Enter Twitter accounts (comma separated)",
-        "tradytics, unusual_whales, benzinga"
-    )
-    accounts_list = [a.strip() for a in accounts_input.split(",")]
+use_stocktwits = st.sidebar.checkbox("Use StockTwits chatter", value=True)
 
 # Search box
 search_ticker = st.text_input("🔍 Search a ticker (e.g. TSLA, NVDA, SPY)")
 if search_ticker:
     st.subheader(f"Search Results for {search_ticker.upper()}")
-    df = scan_list([search_ticker.upper()], use_polygon, use_finnhub, use_twitter, use_accounts, accounts_list)
+    df = scan_list([search_ticker.upper()], use_polygon, use_finnhub)
     st.dataframe(df.style.format({
         "Change %": "{:+.2f}%",
         "RelVol": "{:.2f}x"
     }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 # Tabs
-tabs = st.tabs(["📊 Premarket","💥 Intraday","🌙 Postmarket","🐦 Twitter Feed","📰 Catalysts"])
+tabs = st.tabs(["📊 Premarket","💥 Intraday","🌙 Postmarket","💬 StockTwits Feed","📰 Catalysts"])
 tickers = get_top_movers(limit=8)
 
 with tabs[0]:
     st.subheader("Premarket Movers")
-    df = scan_list(tickers, use_polygon, use_finnhub, use_twitter, use_accounts, accounts_list)
+    df = scan_list(tickers, use_polygon, use_finnhub)
     st.dataframe(df.style.format({
         "Change %": "{:+.2f}%",
         "RelVol": "{:.2f}x"
@@ -203,7 +181,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.subheader("Intraday Movers")
-    df = scan_list(tickers, use_polygon, use_finnhub, use_twitter, use_accounts, accounts_list)
+    df = scan_list(tickers, use_polygon, use_finnhub)
     st.dataframe(df.style.format({
         "Change %": "{:+.2f}%",
         "RelVol": "{:.2f}x"
@@ -211,19 +189,28 @@ with tabs[1]:
 
 with tabs[2]:
     st.subheader("Postmarket Movers")
-    df = scan_list(tickers, use_polygon, use_finnhub, use_twitter, use_accounts, accounts_list)
+    df = scan_list(tickers, use_polygon, use_finnhub)
     st.dataframe(df.style.format({
         "Change %": "{:+.2f}%",
         "RelVol": "{:.2f}x"
     }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 with tabs[3]:
-    st.subheader("🐦 Twitter Feed (Watchlist Accounts)")
-    tweets = get_twitter_accounts(accounts_list if accounts_list else ["tradytics","unusual_whales"], limit=5)
-    for tw in tweets:
-        st.markdown(f"<p style='font-size:14px'>👉 {tw}</p>", unsafe_allow_html=True)
+    st.subheader("💬 StockTwits Feed (Watchlist + Trending)")
+    for t in tickers:
+        st.markdown(f"### {t}")
+        msgs = get_stocktwits_messages(t, limit=3)
+        for m in msgs:
+            st.write(f"👉 {m}")
+
+    st.markdown("---")
+    st.markdown("### 📈 Market Trending")
+    trending = get_stocktwits_trending(limit=5)
+    st.write(", ".join(trending))
 
 with tabs[4]:
-    st.subheader("📰 Catalyst Feed (Polygon + Finnhub + Twitter)")
-    df = scan_catalysts(tickers, use_polygon=True, use_finnhub=use_finnhub, use_twitter=use_twitter, accounts=accounts_list)
+    st.subheader("📰 Catalyst Feed (Polygon + Finnhub + StockTwits)")
+    refresh_rate = st.slider("Refresh Catalysts every X minutes", 1, 10, 3)
+    st_autorefresh = st.experimental_autorefresh(interval=refresh_rate * 60 * 1000, key="catalyst_refresh")
+    df = scan_catalysts(tickers, use_polygon=True, use_finnhub=use_finnhub, use_stocktwits=use_stocktwits)
     st.dataframe(df, use_container_width=True)
