@@ -32,7 +32,8 @@ def avg_volume(ticker, lookback=20):
 
 def scan_24h(ticker):
     data = yf.download(ticker, period="2d", interval="5m", prepost=True, progress=False)
-    if data.empty: return None
+    if data.empty:
+        return None
     last_price = data["Close"].iloc[-1]
     prev_close = data["Close"].iloc[0]
     pct_change = (last_price - prev_close) / prev_close * 100
@@ -92,9 +93,18 @@ def get_stocktwits_trending(limit=5):
 # AI PLAYBOOK
 # =========================
 def ai_playbook(ticker, change, relvol, catalyst):
-    if not OPENAI_API_KEY: return "Add OPENAI_API_KEY in Secrets."
-    change = float(change or 0.0)
-    relvol = float(relvol or 0.0)
+    if not OPENAI_API_KEY:
+        return "Add OPENAI_API_KEY in Secrets."
+
+    # ✅ Safe numeric conversion
+    try:
+        change = float(change) if change is not None else 0.0
+    except:
+        change = 0.0
+    try:
+        relvol = float(relvol) if relvol is not None else 0.0
+    except:
+        relvol = 0.0
 
     prompt = f"""
     Ticker: {ticker}
@@ -126,10 +136,14 @@ def scan_list(tickers, use_polygon, use_finnhub):
     rows = []
     for t in tickers:
         scan = scan_24h(t)
-        if not scan: continue
+        if not scan:
+            continue
         change, relvol = scan
         catalyst = get_polygon_news(t) if use_polygon else get_finnhub_news(t)
-        playbook = ai_playbook(t, change, relvol, catalyst)
+        try:
+            playbook = ai_playbook(t, change, relvol, catalyst)
+        except:
+            playbook = "AI Playbook error"
         rows.append([t, round(change,2), round(relvol,2), catalyst, playbook])
     return pd.DataFrame(rows, columns=["Ticker","Change %","RelVol","Catalyst","AI Playbook"])
 
