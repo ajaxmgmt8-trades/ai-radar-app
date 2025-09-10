@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 from openai import OpenAI
 from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh  # ✅ new autorefresh
 
 # =========================
 # CONFIG
@@ -24,7 +25,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # SAFE DATAFRAME HELPER
 # =========================
 def safe_dataframe(df):
-    """Render styled DataFrame with numeric formatting, gradient if available, and full fallback."""
+    """Render styled DataFrame with numeric formatting, gradient if available, and fallback."""
     try:
         if df is None or df.empty:
             return st.write("No data available.")
@@ -44,7 +45,10 @@ def safe_dataframe(df):
 
         try:
             return st.dataframe(
-                styler.background_gradient(subset=[c for c in ["Change %"] if c in df.columns], cmap="RdYlGn"),
+                styler.background_gradient(
+                    subset=[c for c in ["Change %"] if c in df.columns],
+                    cmap="RdYlGn"
+                ),
                 use_container_width=True
             )
         except ImportError:
@@ -72,7 +76,7 @@ def scan_24h(ticker):
     prev_close = data["Close"].iloc[0]
     pct_change = (last_price - prev_close) / prev_close * 100
     rel_vol = data["Volume"].sum() / (avg_volume(ticker) or 1)
-    return pct_change, rel_vol
+    return float(pct_change), float(rel_vol)
 
 # =========================
 # NEWS SOURCES
@@ -175,7 +179,13 @@ def scan_list(tickers, use_polygon, use_finnhub):
             playbook = ai_playbook(t, change, relvol, catalyst)
         except:
             playbook = "AI Playbook error"
-        rows.append([t, round(change,2), round(relvol,2), catalyst, playbook])
+        rows.append([
+            t,
+            float(round(change,2)),
+            float(round(relvol,2)),
+            catalyst,
+            playbook
+        ])
     return pd.DataFrame(rows, columns=["Ticker","Change %","RelVol","Catalyst","AI Playbook"])
 
 def scan_catalysts(tickers, use_polygon=True, use_finnhub=True, use_stocktwits=True):
@@ -244,6 +254,6 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("📰 Catalyst Feed (Polygon + Finnhub + StockTwits)")
     refresh_rate = st.slider("Refresh Catalysts every X minutes", 1, 10, 3)
-    st_autorefresh = st.experimental_autorefresh(interval=refresh_rate * 60 * 1000, key="catalyst_refresh")
+    st_autorefresh(interval=refresh_rate * 60 * 1000, key="catalyst_refresh")  # ✅ fixed
     df = scan_catalysts(tickers, use_polygon=True, use_finnhub=use_finnhub, use_stocktwits=use_stocktwits)
     safe_dataframe(df)
