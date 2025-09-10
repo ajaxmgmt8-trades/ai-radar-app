@@ -2,15 +2,16 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import requests
+import snscrape.modules.twitter as sntwitter
 from openai import OpenAI
 from datetime import datetime, timedelta
 
 # =========================
 # CONFIG
 # =========================
-st.set_page_config(page_title="AI Radar 24h Scanner", layout="wide")
+st.set_page_config(page_title="AI Radar v3.0", layout="wide")
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")
+NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -37,7 +38,8 @@ def scan_24h(ticker):
     return pct_change, rel_vol
 
 @st.cache_data(show_spinner=False, ttl=300)
-def get_news_headline(ticker: str):
+def get_finnhub_news(ticker: str):
+    """Get company news from Finnhub."""
     try:
         today = datetime.utcnow().strftime("%Y-%m-%d")
         start = (datetime.utcnow() - timedelta(days=3)).strftime("%Y-%m-%d")
@@ -50,19 +52,37 @@ def get_news_headline(ticker: str):
                 headline = item.get("headline") or item.get("title")
                 if headline:
                     return headline
-        return "No major news"
+        return "No major Finnhub news"
     except Exception:
         return "News fetch error"
 
-def ai_playbook(ticker, gap, relvol, catalyst):
+def get_twitter_news(ticker, limit=2):
+    """Scrape latest tweets mentioning a ticker symbol like $TSLA."""
+    try:
+        query = f"${ticker} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
+        tweets = []
+        for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
+            if i >= limit: break
+            tweets.append(tweet.content)
+        return tweets if tweets else ["No fresh Twitter chatter"]
+    except Exception as e:
+        return [f"Twitter error: {e}"]
+
+def get_combined_news(ticker):
+    """Merge Finnhub + Twitter into one catalyst string."""
+    finnhub_headline = get_finnhub_news(ticker)
+    twitter_chatter = get_twitter_news(ticker, limit=1)
+    return f"Finnhub: {finnhub_headline} | Twitter: {twitter_chatter[0]}"
+
+def ai_playbook(ticker, change, relvol, catalyst):
     if not OPENAI_API_KEY:
         return "Add OPENAI_API_KEY in Secrets."
 
     # Safe fallback values
     try:
-        gap = float(gap) if gap is not None else 0.0
+        change = float(change) if change is not None else 0.0
     except Exception:
-        gap = 0.0
+        change = 0.0
 
     try:
         relvol = float(relvol) if relvol is not None else 0.0
@@ -71,7 +91,7 @@ def ai_playbook(ticker, gap, relvol, catalyst):
 
     prompt = f"""
     Ticker: {ticker}
-    24h Change: {gap:.2f}%
+    24h Change: {change:.2f}%
     RelVol: {relvol:.2f}x
     Catalyst: {catalyst}
 
@@ -90,22 +110,7 @@ def ai_playbook(ticker, gap, relvol, catalyst):
         return f"AI error: {e}"
 
 # =========================
-# EARNINGS CALENDAR
-# =========================
-@st.cache_data(show_spinner=True, ttl=300)
-def get_earnings_today():
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    url = f"https://finnhub.io/api/v1/calendar/earnings?from={today}&to={today}&token={NEWS_API_KEY}"
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        js = r.json().get("earningsCalendar", [])
-        return [item["symbol"] for item in js if "symbol" in item]
-    except Exception:
-        return []
-
-# =========================
-# TOP MOVERS FEED
+# TOP MOVERS + EARNINGS
 # =========================
 @st.cache_data(show_spinner=True, ttl=300)
 def get_top_movers(limit=15):
@@ -114,7 +119,7 @@ def get_top_movers(limit=15):
         url = f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={NEWS_API_KEY}"
         r = requests.get(url, timeout=10)
         r.raise_for_status()
-        symbols = r.json()[:200]  # sample subset
+        symbols = r.json()[:200]
         tickers = [s["symbol"] for s in symbols]
 
         for t in tickers:
@@ -122,7 +127,7 @@ def get_top_movers(limit=15):
                 q = requests.get(f"https://finnhub.io/api/v1/quote?symbol={t}&token={NEWS_API_KEY}").json()
                 pct = ((q["c"] - q["pc"]) / q["pc"]) * 100 if q.get("pc") else 0
                 vol = q.get("v", 0)
-                if abs(pct) >= 5 and vol > 500000:  # filter movers
+                if abs(pct) >= 5 and vol > 500000:
                     movers.append((t, pct, vol))
             except Exception:
                 continue
@@ -132,41 +137,49 @@ def get_top_movers(limit=15):
     movers = sorted(movers, key=lambda x: abs(x[1]), reverse=True)[:limit]
     return [m[0] for m in movers]
 
-def scan_list(tickers, tag="24h"):
+def scan_list(tickers):
     rows = []
     for t in tickers:
         scan = scan_24h(t)
         if not scan:
             continue
-        gap, relvol = scan
-        catalyst = get_news_headline(t)
-        playbook = ai_playbook(t, gap, relvol, catalyst)
-        rows.append([t, round(gap, 2), round(relvol, 2), catalyst, playbook])
+        change, relvol = scan
+        catalyst = get_combined_news(t)
+        playbook = ai_playbook(t, change, relvol, catalyst)
+        rows.append([t, round(change, 2), round(relvol, 2), catalyst, playbook])
     return pd.DataFrame(rows, columns=["Ticker", "Change %", "RelVol", "Catalyst", "AI Playbook"])
 
 # =========================
 # STREAMLIT UI
 # =========================
-st.title("🔥 AI Radar 24h Scanner")
-st.caption("Scans Premarket, Intraday, Postmarket, and Earnings Movers (24/7)")
+st.title("🔥 AI Radar v3.0 — 24h Scanner + News + AI Playbooks")
 
+# --- Search box ---
+search_ticker = st.text_input("🔍 Search a ticker for instant analysis (e.g. TSLA, NVDA, SPY)")
+
+if search_ticker:
+    st.subheader(f"Search Results for {search_ticker.upper()}")
+    df = scan_list([search_ticker.upper()])
+    st.dataframe(df, use_container_width=True)
+
+# --- Auto scanner tabs ---
 tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket"])
 
-# Always grab top movers + earnings
-tickers = list(set(get_top_movers(limit=15) + get_earnings_today()))
+tickers = get_top_movers(limit=10)
 
 with tabs[0]:
     st.subheader("Premarket Movers (4am–9:30am)")
-    df = scan_list(tickers, tag="premarket")
+    df = scan_list(tickers)
     st.dataframe(df, use_container_width=True)
 
 with tabs[1]:
     st.subheader("Intraday Explosives (9:30am–4pm)")
-    df = scan_list(tickers, tag="intraday")
+    df = scan_list(tickers)
     st.dataframe(df, use_container_width=True)
 
 with tabs[2]:
     st.subheader("Postmarket Movers + Earnings")
-    df = scan_list(tickers, tag="postmarket")
+    df = scan_list(tickers)
     st.dataframe(df, use_container_width=True)
+
 
