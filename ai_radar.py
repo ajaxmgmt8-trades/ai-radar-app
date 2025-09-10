@@ -2,14 +2,9 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import requests
+import snscrape.modules.twitter as sntwitter  # stable import
 from openai import OpenAI
 from datetime import datetime, timedelta
-
-# Defensive import for Twitter/X scraping
-try:
-    import snscrape.modules.x as sntwitter
-except ImportError:
-    import snscrape.modules.twitter as sntwitter
 
 # =========================
 # CONFIG
@@ -36,7 +31,6 @@ def avg_volume(ticker, lookback=20):
     return float(hist["Volume"].mean())
 
 def scan_24h(ticker):
-    """Scan last 24h price action."""
     data = yf.download(ticker, period="2d", interval="5m", prepost=True, progress=False)
     if data.empty: return None
     last_price = data["Close"].iloc[-1]
@@ -72,14 +66,14 @@ def get_twitter_news(ticker, limit=2):
     except Exception as e:
         return [f"Twitter error: {e}"]
 
-def get_twitter_accounts(accounts, limit=2):
+def get_twitter_accounts(accounts, limit=3):
     tweets = []
     try:
         for account in accounts:
             query = f"from:{account} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
             for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
                 if i >= limit: break
-                tweets.append(f"{account}: {tweet.content}")
+                tweets.append(f"@{account}: {tweet.content}")
         return tweets if tweets else ["No fresh tweets from accounts"]
     except Exception as e:
         return [f"Twitter account error: {e}"]
@@ -142,10 +136,13 @@ def scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts):
 # =========================
 # STREAMLIT UI
 # =========================
-st.markdown("<h1 style='text-align: center; color: orange;'>🔥 AI Radar Pro — Market Scanner</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<h1 style='text-align: center; color: orange;'>🔥 AI Radar Pro — Market Scanner</h1>",
+    unsafe_allow_html=True
+)
 st.caption("Premarket, Intraday, Postmarket, Twitter Feed, and AI Playbooks")
 
-# Sidebar controls
+# Sidebar
 st.sidebar.header("⚙️ News Settings")
 use_finnhub = st.sidebar.checkbox("Use Finnhub", value=True)
 use_twitter = st.sidebar.checkbox("Use Twitter by Ticker", value=True)
@@ -153,7 +150,10 @@ use_accounts = st.sidebar.checkbox("Use Twitter Accounts", value=False)
 
 accounts_list = []
 if use_accounts:
-    accounts_input = st.sidebar.text_area("Enter Twitter accounts (comma separated)", "tradytics, unusual_whales, benzinga")
+    accounts_input = st.sidebar.text_area(
+        "Enter Twitter accounts (comma separated)",
+        "tradytics, unusual_whales, benzinga"
+    )
     accounts_list = [a.strip() for a in accounts_input.split(",")]
 
 # Search box
@@ -186,4 +186,4 @@ with tabs[3]:
     st.subheader("🐦 Twitter Feed (Watchlist Accounts)")
     tweets = get_twitter_accounts(accounts_list if accounts_list else ["tradytics","unusual_whales"], limit=5)
     for tw in tweets:
-        st.markdown(f"👉 {tw}")
+        st.markdown(f"<p style='font-size:14px'>👉 {tw}</p>", unsafe_allow_html=True)
