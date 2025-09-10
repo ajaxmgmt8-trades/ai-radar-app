@@ -2,7 +2,7 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import requests
-import snscrape.modules.twitter as sntwitter  # stable import
+import importlib
 from openai import OpenAI
 from datetime import datetime, timedelta
 
@@ -19,6 +19,19 @@ OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+
+# =========================
+# SNSCRAPE IMPORT (bulletproof)
+# =========================
+sntwitter = None
+for mod in ["snscrape.modules.twitter", "snscrape.modules.x"]:
+    try:
+        sntwitter = importlib.import_module(mod)
+        break
+    except ImportError:
+        continue
+if not sntwitter:
+    raise ImportError("snscrape is not installed correctly. Check requirements.txt")
 
 # =========================
 # HELPERS
@@ -119,7 +132,7 @@ def ai_playbook(ticker, change, relvol, catalyst):
 # TOP MOVERS
 # =========================
 def get_top_movers(limit=10):
-    # Placeholder: using static tickers until upgraded to Polygon/Benzinga
+    # Placeholder: static list until Polygon/Benzinga added
     return ["AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG"]
 
 def scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts):
@@ -161,7 +174,10 @@ search_ticker = st.text_input("🔍 Search a ticker (e.g. TSLA, NVDA, SPY)")
 if search_ticker:
     st.subheader(f"Search Results for {search_ticker.upper()}")
     df = scan_list([search_ticker.upper()], use_finnhub, use_twitter, use_accounts, accounts_list)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df.style.format({
+        "Change %": "{:+.2f}%",
+        "RelVol": "{:.2f}x"
+    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 # Tabs
 tabs = st.tabs(["📊 Premarket","💥 Intraday","🌙 Postmarket","🐦 Twitter Feed"])
@@ -170,17 +186,26 @@ tickers = get_top_movers(limit=8)
 with tabs[0]:
     st.subheader("Premarket Movers")
     df = scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts_list)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df.style.format({
+        "Change %": "{:+.2f}%",
+        "RelVol": "{:.2f}x"
+    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 with tabs[1]:
     st.subheader("Intraday Movers")
     df = scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts_list)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df.style.format({
+        "Change %": "{:+.2f}%",
+        "RelVol": "{:.2f}x"
+    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 with tabs[2]:
     st.subheader("Postmarket Movers")
     df = scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts_list)
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df.style.format({
+        "Change %": "{:+.2f}%",
+        "RelVol": "{:.2f}x"
+    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
 
 with tabs[3]:
     st.subheader("🐦 Twitter Feed (Watchlist Accounts)")
