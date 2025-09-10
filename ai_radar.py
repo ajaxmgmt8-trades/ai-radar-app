@@ -21,6 +21,28 @@ POLYGON_API_KEY = st.secrets.get("POLYGON_API_KEY", "")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =========================
+# SAFE DATAFRAME HELPER
+# =========================
+def safe_dataframe(df):
+    """Render styled DataFrame with fallback if matplotlib is missing."""
+    try:
+        return st.dataframe(
+            df.style.format({
+                "Change %": "{:+.2f}%",
+                "RelVol": "{:.2f}x"
+            }).background_gradient(subset=["Change %"], cmap="RdYlGn"),
+            use_container_width=True
+        )
+    except ImportError:
+        return st.dataframe(
+            df.style.format({
+                "Change %": "{:+.2f}%",
+                "RelVol": "{:.2f}x"
+            }),
+            use_container_width=True
+        )
+
+# =========================
 # HELPERS
 # =========================
 @st.cache_data(show_spinner=False, ttl=300)
@@ -176,10 +198,7 @@ search_ticker = st.text_input("🔍 Search a ticker (e.g. TSLA, NVDA, SPY)")
 if search_ticker:
     st.subheader(f"Search Results for {search_ticker.upper()}")
     df = scan_list([search_ticker.upper()], use_polygon, use_finnhub)
-    st.dataframe(df.style.format({
-        "Change %": "{:+.2f}%",
-        "RelVol": "{:.2f}x"
-    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
+    safe_dataframe(df)
 
 # Tabs
 tabs = st.tabs(["📊 Premarket","💥 Intraday","🌙 Postmarket","💬 StockTwits Feed","📰 Catalysts"])
@@ -188,26 +207,17 @@ tickers = get_top_movers(limit=8)
 with tabs[0]:
     st.subheader("Premarket Movers")
     df = scan_list(tickers, use_polygon, use_finnhub)
-    st.dataframe(df.style.format({
-        "Change %": "{:+.2f}%",
-        "RelVol": "{:.2f}x"
-    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
+    safe_dataframe(df)
 
 with tabs[1]:
     st.subheader("Intraday Movers")
     df = scan_list(tickers, use_polygon, use_finnhub)
-    st.dataframe(df.style.format({
-        "Change %": "{:+.2f}%",
-        "RelVol": "{:.2f}x"
-    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
+    safe_dataframe(df)
 
 with tabs[2]:
     st.subheader("Postmarket Movers")
     df = scan_list(tickers, use_polygon, use_finnhub)
-    st.dataframe(df.style.format({
-        "Change %": "{:+.2f}%",
-        "RelVol": "{:.2f}x"
-    }).background_gradient(subset=["Change %"], cmap="RdYlGn"), use_container_width=True)
+    safe_dataframe(df)
 
 with tabs[3]:
     st.subheader("💬 StockTwits Feed (Watchlist + Trending)")
