@@ -15,7 +15,7 @@ NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", None)
 polygon_client = RESTClient(POLYGON_KEY)
 finnhub_client = finnhub.Client(api_key=NEWS_API_KEY) if NEWS_API_KEY else None
 
-# Default watchlist (can be expanded)
+# Default watchlist
 WATCHLIST = [
     "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
     "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
@@ -34,42 +34,28 @@ def get_session_times():
         "postmarket": (datetime.time(16, 0), datetime.time(20, 0)),
     }
 
-def get_session_data(ticker, session):
+def get_session_data(ticker, session, date_override=None):
     start_t, end_t = get_session_times()[session]
-    today = datetime.date.today()
+    target_date = date_override or datetime.date.today()
 
-    # Helper to fetch bars for a given date
-    def fetch_bars(date):
-        try:
-            bars = polygon_client.get_aggs(
-                ticker=ticker,
-                multiplier=1,
-                timespan="minute",
-                from_=date.strftime("%Y-%m-%d"),
-                to=date.strftime("%Y-%m-%d")
-            )
-            return pd.DataFrame(bars) if bars else pd.DataFrame()
-        except Exception:
-            return pd.DataFrame()
+    try:
+        bars = polygon_client.get_aggs(
+            ticker=ticker,
+            multiplier=1,
+            timespan="minute",
+            from_=target_date.strftime("%Y-%m-%d"),
+            to=target_date.strftime("%Y-%m-%d")
+        )
+    except Exception:
+        return None, None
 
-    # Try today first
-    df = fetch_bars(today)
+    if not bars:
+        return None, None
 
-    # If empty → keep stepping back 1 day until we find data
-    lookback = 1
-    while df.empty and lookback <= 5:  # up to 5 trading days back
-        prev_day = today - datetime.timedelta(days=lookback)
-        df = fetch_bars(prev_day)
-        lookback += 1
-
-    if df.empty:
-        return None, None  # no data found
-
-    # Format timestamps
+    df = pd.DataFrame(bars)
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms").dt.tz_localize("UTC").dt.tz_convert("US/Eastern")
     df.set_index("timestamp", inplace=True)
 
-    # Slice the chosen session
     session_df = df.between_time(start_t, end_t)
     if session_df.empty:
         return None, None
@@ -81,13 +67,30 @@ def get_session_data(ticker, session):
     relvol = session_df["volume"].sum() / (df["volume"].sum() / 3)  # crude relvol
     return round(change_pct, 2), round(relvol, 2)
 
-
 def scan_session(session):
     movers = []
+
+    # Try today first
     for t in WATCHLIST:
         change, relvol = get_session_data(t, session)
         if change is not None:
             movers.append({"Ticker": t, "Change %": change, "RelVol": relvol})
+
+    # If empty, look back up to 5 previous sessions
+    if not movers:
+        today = datetime.date.today()
+        lookback = 1
+        while not movers and lookback <= 5:
+            prev_day = today - datetime.timedelta(days=lookback)
+            for t in WATCHLIST:
+                change, relvol = get_session_data(t, session, date_override=prev_day)
+                if change is not None:
+                    movers.append({"Ticker": t, "Change %": change, "RelVol": relvol})
+            lookback += 1
+
+    if not movers:
+        return pd.DataFrame(columns=["Ticker", "Change %", "RelVol"])
+
     df = pd.DataFrame(movers).sort_values("Change %", ascending=False).head(10)
     df.index = range(1, len(df) + 1)
     return df
