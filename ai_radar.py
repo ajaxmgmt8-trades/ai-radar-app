@@ -2,9 +2,9 @@ import yfinance as yf
 import pandas as pd
 import streamlit as st
 import requests
-import importlib
 from openai import OpenAI
 from datetime import datetime, timedelta
+from snscrape.modules import twitter   # ✅ stable import
 
 # =========================
 # CONFIG
@@ -19,19 +19,6 @@ OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
 NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
 
 client = OpenAI(api_key=OPENAI_API_KEY)
-
-# =========================
-# SNSCRAPE IMPORT (bulletproof)
-# =========================
-sntwitter = None
-for mod in ["snscrape.modules.twitter", "snscrape.modules.x"]:
-    try:
-        sntwitter = importlib.import_module(mod)
-        break
-    except ImportError:
-        continue
-if not sntwitter:
-    raise ImportError("snscrape is not installed correctly. Check requirements.txt")
 
 # =========================
 # HELPERS
@@ -72,7 +59,7 @@ def get_twitter_news(ticker, limit=2):
     try:
         query = f"${ticker} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
         tweets = []
-        for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
+        for i, tweet in enumerate(twitter.TwitterSearchScraper(query).get_items()):
             if i >= limit: break
             tweets.append(tweet.content)
         return tweets if tweets else ["No fresh Twitter chatter"]
@@ -84,7 +71,7 @@ def get_twitter_accounts(accounts, limit=3):
     try:
         for account in accounts:
             query = f"from:{account} since:{(datetime.utcnow() - timedelta(days=1)).date()}"
-            for i, tweet in enumerate(sntwitter.TwitterSearchScraper(query).get_items()):
+            for i, tweet in enumerate(twitter.TwitterSearchScraper(query).get_items()):
                 if i >= limit: break
                 tweets.append(f"@{account}: {tweet.content}")
         return tweets if tweets else ["No fresh tweets from accounts"]
@@ -132,7 +119,6 @@ def ai_playbook(ticker, change, relvol, catalyst):
 # TOP MOVERS
 # =========================
 def get_top_movers(limit=10):
-    # Placeholder: static list until Polygon/Benzinga added
     return ["AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG"]
 
 def scan_list(tickers, use_finnhub, use_twitter, use_accounts, accounts):
