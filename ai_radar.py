@@ -11,6 +11,8 @@ import time
 import threading
 from zoneinfo import ZoneInfo
 import concurrent.futures
+import google.generativeai as genai
+import openai
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -51,14 +53,23 @@ if "selected_tz" not in st.session_state:
 FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
 POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
 OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
+# Initialize AI clients
 openai_client = None
 if OPENAI_KEY:
     try:
-        import openai
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
     except Exception as e:
         st.warning(f"Could not initialize OpenAI client. Check API key and library: {e}")
+
+gemini_model = None
+if GEMINI_KEY:
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.warning(f"Could not initialize Gemini model. Check API key and library: {e}")
 
 # Helper function to add ticker to watchlist
 def add_ticker_to_watchlist(ticker: str):
@@ -71,7 +82,7 @@ def add_ticker_to_watchlist(ticker: str):
     else:
         st.warning(f"{ticker} is already in the watchlist.")
 
-# Data functions
+# Data functions (unchanged from previous version)
 @st.cache_data(ttl=60)
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
@@ -100,7 +111,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "change_percent": total_change,
             "premarket_change": premarket_change,
             "intraday_change": intraday_change,
-            "postmarket_change": 0, # yfinance doesn't easily provide this directly
+            "postmarket_change": 0,
             "previous_close": previous_close,
             "market_open": regular_market_open,
             "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
@@ -157,7 +168,6 @@ def get_polygon_news() -> List[Dict]:
 def get_all_news() -> List[Dict]:
     all_news = []
     
-    # Finnhub news
     finnhub_news = get_finnhub_news()
     for item in finnhub_news:
         all_news.append({
@@ -169,7 +179,6 @@ def get_all_news() -> List[Dict]:
             "related": item.get("related", "")
         })
     
-    # Polygon news
     polygon_news = get_polygon_news()
     for item in polygon_news:
         all_news.append({
@@ -181,7 +190,6 @@ def get_all_news() -> List[Dict]:
             "related": ",".join(item.get("tickers", []))
         })
     
-    # Sort by datetime
     try:
         all_news.sort(key=lambda x: x["datetime"], reverse=True)
     except:
@@ -213,9 +221,11 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     else:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
-def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
-    if not openai_client:
-        return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
+def ai_playbook(ticker: str, change: float, catalyst: str = "", model_choice: str = "Gemini") -> str:
+    if model_choice == "OpenAI" and not openai_client:
+        return f"**{ticker} Analysis** (OpenAI API not configured)"
+    if model_choice == "Gemini" and not gemini_model:
+        return f"**{ticker} Analysis** (Gemini API not configured)"
     
     try:
         prompt = f"""
@@ -232,20 +242,26 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
         Keep concise and actionable, under 250 words.
         """
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=400
-        )
-        
-        return response.choices[0].message.content
+        if model_choice == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            return response.choices[0].message.content
+        else: # Gemini
+            response = gemini_model.generate_content(prompt)
+            return response.text
+    
     except Exception as e:
         return f"AI Error: {str(e)}"
 
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    if not openai_client:
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict], model_choice: str = "Gemini") -> str:
+    if model_choice == "OpenAI" and not openai_client:
         return "OpenAI API not configured for AI analysis."
+    if model_choice == "Gemini" and not gemini_model:
+        return "Gemini API not configured for AI analysis."
     
     try:
         news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
@@ -269,61 +285,49 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
         Keep it under 200 words and actionable.
         """
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300
-        )
-        
-        return response.choices[0].message.content
+        if model_choice == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            return response.choices[0].message.content
+        else: # Gemini
+            response = gemini_model.generate_content(prompt)
+            return response.text
+    
     except Exception as e:
         return f"AI Analysis Error: {str(e)}"
 
-def ai_auto_generate_plays(tz: str):
-    """
-    Auto-generates trading plays by scanning watchlist and market movers
-    """
+def ai_auto_generate_plays(tz: str, model_choice: str) -> List[Dict]:
     plays = []
     
     try:
-        # Get current watchlist
         current_watchlist = st.session_state.watchlists[st.session_state.active_watchlist]
-        
-        # Combine watchlist with core tickers for broader scan
         scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
-        
-        # Scan for significant movers
         candidates = []
         
         for ticker in scan_tickers:
             quote = get_live_quote(ticker, tz)
-            if not quote["error"]:
-                # Look for significant moves (>1.5% change)
-                if abs(quote["change_percent"]) >= 1.5:
-                    candidates.append({
-                        "ticker": ticker,
-                        "quote": quote,
-                        "significance": abs(quote["change_percent"])
-                    })
+            if not quote["error"] and abs(quote["change_percent"]) >= 1.5:
+                candidates.append({
+                    "ticker": ticker,
+                    "quote": quote,
+                    "significance": abs(quote["change_percent"])
+                })
         
-        # Sort by significance and take top candidates
         candidates.sort(key=lambda x: x["significance"], reverse=True)
-        top_candidates = candidates[:5]  # Limit to top 5 to avoid API limits
+        top_candidates = candidates[:5]
         
-        # Generate plays for top candidates
         for candidate in top_candidates:
             ticker = candidate["ticker"]
             quote = candidate["quote"]
-            
-            # Get recent news for context
             news = get_finnhub_news(ticker)
-            catalyst = ""
-            if news:
-                catalyst = news[0].get('headline', '')[:100] + "..."
+            catalyst = news[0].get('headline', '')[:100] + "..." if news else ""
             
-            # Generate AI analysis if OpenAI is available
-            if openai_client:
+            if (model_choice == "OpenAI" and openai_client) or \
+               (model_choice == "Gemini" and gemini_model):
                 try:
                     play_prompt = f"""
                     Generate a concise trading play for {ticker}:
@@ -346,15 +350,18 @@ def ai_auto_generate_plays(tz: str):
                     Keep under 200 words, be specific and actionable.
                     """
                     
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": play_prompt}],
-                        temperature=0.3,
-                        max_tokens=300
-                    )
-                    
-                    play_analysis = response.choices[0].message.content
-                    
+                    if model_choice == "OpenAI":
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[{"role": "user", "content": play_prompt}],
+                            temperature=0.3,
+                            max_tokens=300
+                        )
+                        play_analysis = response.choices[0].message.content
+                    else: # Gemini
+                        response = gemini_model.generate_content(play_prompt)
+                        play_analysis = response.text
+                
                 except Exception as ai_error:
                     play_analysis = f"""
                     **{ticker} Trading Opportunity**
@@ -371,7 +378,6 @@ def ai_auto_generate_plays(tz: str):
                     *AI analysis unavailable: {str(ai_error)[:50]}...*
                     """
             else:
-                # Fallback analysis without AI
                 direction = "bullish" if quote['change_percent'] > 0 else "bearish"
                 play_analysis = f"""
                 **{ticker} Trading Setup**
@@ -387,10 +393,9 @@ def ai_auto_generate_plays(tz: str):
                 
                 **Setup:** Monitor for continuation or reversal. Consider risk management around current price levels.
                 
-                *Configure OpenAI API for detailed AI analysis*
+                *Configure API for detailed AI analysis*
                 """
             
-            # Create play dictionary
             play = {
                 "ticker": ticker,
                 "current_price": quote['last'],
@@ -405,11 +410,8 @@ def ai_auto_generate_plays(tz: str):
                 "volume": quote['volume'],
                 "timestamp": quote['last_updated']
             }
-            
             plays.append(play)
-        
         return plays
-        
     except Exception as e:
         st.error(f"Error generating auto plays: {str(e)}")
         return []
@@ -417,18 +419,30 @@ def ai_auto_generate_plays(tz: str):
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# Timezone toggle (made smaller with column and smaller font)
-col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
+# Sidebar for AI model selection
+with st.sidebar:
+    st.header("AI Settings")
+    ai_options = []
+    if gemini_model:
+        ai_options.append("Gemini")
+    if openai_client:
+        ai_options.append("OpenAI")
+        
+    if not ai_options:
+        st.error("No AI models available. Please configure your API keys in `.streamlit/secrets.toml`.")
+        selected_ai_model = None
+    else:
+        selected_ai_model = st.selectbox("Select AI Model", ai_options)
+
+col_tz, _ = st.columns([1, 10])
 with col_tz:
     st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
                                                 label_visibility="collapsed", help="Select Timezone (ET/CT)")
 
-# Get current time in selected TZ
 tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
 current_tz = datetime.datetime.now(tz_zone)
 tz_label = st.session_state.selected_tz
 
-# Auto-refresh controls
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
 with col1:
     st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
@@ -447,18 +461,14 @@ with col4:
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time} {tz_label}")
 
-# Create tabs
 tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks"])
 
-# Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
 st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp}</div>", unsafe_allow_html=True)
 
-# TAB 1: Live Quotes
 with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
-    # Session status (using selected TZ)
     current_tz_hour = current_tz.hour
     if 4 <= current_tz_hour < 9:
         session_status = "🌅 Premarket"
@@ -469,14 +479,12 @@ with tabs[0]:
     
     st.markdown(f"**Trading Session ({tz_label}):** {session_status}")
     
-    # Search bar
     col1, col2 = st.columns([3, 1])
     with col1:
         search_ticker = st.text_input("🔍 Search Individual Stock", placeholder="Enter ticker", key="search_quotes").upper().strip()
     with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
-    # Search result
     if search_quotes and search_ticker:
         with st.status(f"Getting quote for {search_ticker}...", expanded=True) as status:
             quote = get_live_quote(search_ticker, tz_label)
@@ -488,7 +496,6 @@ with tabs[0]:
                 col2.metric("Bid/Ask", f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
                 col3.metric("Volume", f"{quote['volume']:,}")
                 
-                # Session breakdown
                 st.markdown("#### Session Performance")
                 sess_col1, sess_col2, sess_col3 = st.columns(3)
                 sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
@@ -502,7 +509,6 @@ with tabs[0]:
                 status.update(label=f"Could not get quote for {search_ticker}: {quote['error']}", state="error")
                 st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
     
-    # Watchlist display
     tickers = st.session_state.watchlists[st.session_state.active_watchlist]
     
     if not tickers:
@@ -510,7 +516,6 @@ with tabs[0]:
     else:
         st.markdown("### Your Watchlist")
         
-        # Use concurrent futures for parallel fetching
         quotes = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(tickers)) as executor:
             future_to_ticker = {executor.submit(get_live_quote, ticker, tz_label): ticker for ticker in tickers}
@@ -526,7 +531,6 @@ with tabs[0]:
             if quote and not quote["error"]:
                 with st.container():
                     col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
-                    
                     col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                     col2.write("**Bid/Ask**")
                     col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
@@ -534,22 +538,19 @@ with tabs[0]:
                     col3.write(f"{quote['volume']:,}")
                     col3.caption(f"Updated: {quote['last_updated']}")
                     
-                    if abs(quote['change_percent']) >= 2.0:
+                    if abs(quote['change_percent']) >= 2.0 and selected_ai_model:
                         if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}"):
-                            with st.status(f"Analyzing {ticker}...", expanded=True) as status:
-                                analysis = ai_playbook(ticker, quote['change_percent'])
+                            with st.status(f"Analyzing {ticker} with {selected_ai_model}...", expanded=True) as status:
+                                analysis = ai_playbook(ticker, quote['change_percent'], model_choice=selected_ai_model)
                                 status.update(label=f"🤖 {ticker} Analysis Complete", state="complete")
                                 st.markdown(analysis)
                     
-                    # Session data
                     sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
                     sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
                     sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
                     sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
                     
-                    # Expandable detailed view
                     with st.expander(f"🔎 Expand {ticker}"):
-                        # Catalyst headlines
                         news = get_finnhub_news(ticker)
                         if news:
                             st.write("### 📰 Catalysts (last 24h)")
@@ -558,21 +559,21 @@ with tabs[0]:
                         else:
                             st.info("No recent news.")
                         
-                        # AI Playbook
                         st.markdown("### 🎯 AI Playbook")
-                        catalyst_title = news[0].get('headline', '') if news else ""
-                        st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title))
+                        if selected_ai_model:
+                            catalyst_title = news[0].get('headline', '') if news else ""
+                            st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, model_choice=selected_ai_model))
+                        else:
+                            st.info("Please select an AI model from the sidebar.")
                     
                     st.divider()
             else:
                 st.error(f"Could not get quote for {ticker}: {quote['error']}")
 
 
-# TAB 2: Watchlist Manager
 with tabs[1]:
     st.subheader("📋 Watchlist Manager")
     
-    # Search and add
     st.markdown("### 🔍 Search & Add Stocks")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -585,7 +586,6 @@ with tabs[1]:
             else:
                 st.error(f"Invalid ticker: {search_add_ticker}")
     
-    # Watchlist management
     st.markdown("### 📋 Manage Watchlists")
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -600,15 +600,12 @@ with tabs[1]:
             st.rerun()
     
     current_tickers = st.session_state.watchlists[st.session_state.active_watchlist].copy()
-    
-    # Clean up any existing duplicates
     unique_current_tickers = list(dict.fromkeys(current_tickers))
     if len(unique_current_tickers) != len(current_tickers):
         st.session_state.watchlists[st.session_state.active_watchlist] = unique_current_tickers
         current_tickers = unique_current_tickers
-        st.rerun()  # Refresh to show cleaned list
+        st.rerun()
     
-    # Popular tickers
     st.markdown("### ⭐ Popular Tickers")
     cols = st.columns(6)
     for i, ticker in enumerate(CORE_TICKERS):
@@ -616,7 +613,6 @@ with tabs[1]:
             if st.button(f"+ {ticker}", key=f"add_{ticker}"):
                 add_ticker_to_watchlist(ticker)
     
-    # Current watchlist
     st.markdown("### 📊 Current Watchlist")
     if current_tickers:
         for i in range(0, len(current_tickers), 5):
@@ -631,11 +627,9 @@ with tabs[1]:
     else:
         st.info("Watchlist is empty. Search for stocks above or add popular tickers.")
 
-# TAB 3: Catalyst Scanner
 with tabs[2]:
     st.subheader("🔥 Real-Time Catalyst Scanner")
     
-    # Search specific stock
     col1, col2 = st.columns([3, 1])
     with col1:
         search_catalyst_ticker = st.text_input("🔍 Search catalysts for stock", placeholder="Enter ticker", key="search_catalyst").upper().strip()
@@ -654,11 +648,10 @@ with tabs[2]:
                 col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                 col2.metric("Volume", f"{quote['volume']:,}")
                 
-                # Session breakdown
                 st.markdown("#### Session Performance")
                 sess_col1, sess_col2, sess_col3 = st.columns(3)
                 sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%") 
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
                 sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
                 
                 if col3.button(f"Add {search_catalyst_ticker} to WL", key="add_catalyst_search"):
@@ -681,31 +674,20 @@ with tabs[2]:
                 status.update(label=f"Could not get quote for {search_catalyst_ticker}: {quote['error']}", state="error")
                 st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
-    # Main catalyst scan
     if st.button("🔍 Scan for Market Catalysts", type="primary"):
         with st.status("Scanning for catalysts...", expanded=True) as status:
             all_news = get_all_news()
-            
-            # Get movers
             movers = []
             for ticker in CORE_TICKERS[:20]:
                 quote = get_live_quote(ticker, tz_label)
                 if not quote["error"] and abs(quote["change_percent"]) >= 1.5:
-                    movers.append({
-                        "ticker": ticker,
-                        "change_pct": quote["change_percent"],
-                        "price": quote["last"],
-                        "volume": quote["volume"]
-                    })
-            
+                    movers.append({"ticker": ticker,"change_pct": quote["change_percent"],"price": quote["last"],"volume": quote["volume"]})
             movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
             status.update(label="Scanning for catalysts... Complete", state="complete")
             
-            # Display news catalysts
             st.markdown("### 📰 News Catalysts")
             for news in all_news[:10]:
                 sentiment, confidence = analyze_news_sentiment(news["title"], news["summary"])
-                
                 with st.expander(f"{sentiment} ({confidence}%) - {news['title'][:100]}..."):
                     st.write(f"**Source:** {news['source']}")
                     st.write(f"**Summary:** {news['summary']}")
@@ -714,26 +696,19 @@ with tabs[2]:
                     if news["url"]:
                         st.markdown(f"[Read Article]({news['url']})")
             
-            # Display market movers
             st.markdown("### 📊 Significant Market Moves")
             for mover in movers[:10]:
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     direction = "🚀" if mover["change_pct"] > 0 else "📉"
-                    st.metric(
-                        f"{direction} {mover['ticker']}", 
-                        f"${mover['price']:.2f}",
-                        f"{mover['change_pct']:+.2f}%"
-                    )
+                    st.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}",f"{mover['change_pct']:+.2f}%")
                 with col2:
                     if st.button(f"Add to WL", key=f"add_mover_{mover['ticker']}"):
                         add_ticker_to_watchlist(mover['ticker'])
 
-# TAB 4: Market Analysis
 with tabs[3]:
     st.subheader("📈 AI Market Analysis")
     
-    # Search individual analysis
     col1, col2 = st.columns([3, 1])
     with col1:
         search_analysis_ticker = st.text_input("🔍 Analyze specific stock", placeholder="Enter ticker", key="search_analysis").upper().strip()
@@ -741,118 +716,103 @@ with tabs[3]:
         search_analysis = st.button("Analyze Stock", key="search_analysis_btn")
     
     if search_analysis and search_analysis_ticker:
-        with st.status(f"AI analyzing {search_analysis_ticker}...", expanded=True) as status:
-            quote = get_live_quote(search_analysis_ticker, tz_label)
-            if not quote["error"]:
-                news = get_finnhub_news(search_analysis_ticker)
-                catalyst = news[0].get('headline', '') if news else "Recent market movement"
+        if selected_ai_model:
+            with st.status(f"AI analyzing {search_analysis_ticker} with {selected_ai_model}...", expanded=True) as status:
+                quote = get_live_quote(search_analysis_ticker, tz_label)
+                if not quote["error"]:
+                    news = get_finnhub_news(search_analysis_ticker)
+                    catalyst = news[0].get('headline', '') if news else "Recent market movement"
+                    analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst, model_choice=selected_ai_model)
+                    status.update(label=f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']}", state="complete")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                    col2.metric("Volume", f"{quote['volume']:,}")
+                    col3.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                    if col4.button(f"Add {search_analysis_ticker} to WL", key="add_analysis_search"):
+                        add_ticker_to_watchlist(search_analysis_ticker)
+                    
+                    st.markdown("#### Session Performance")
+                    sess_col1, sess_col2, sess_col3 = st.columns(3)
+                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                    
+                    st.markdown("### 🎯 AI Analysis")
+                    st.markdown(analysis)
+                    
+                    if news:
+                        with st.expander(f"📰 Recent News Context"):
+                            for item in news[:3]:
+                                st.write(f"**{item.get('headline', 'No title')}**")
+                                st.write(item.get('summary', 'No summary')[:200] + "...")
+                                st.write("---")
+                    st.divider()
+                else:
+                    status.update(label=f"Could not analyze {search_analysis_ticker}: {quote['error']}", state="error")
+                    st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
+        else:
+            st.info("Please select an AI model from the sidebar to analyze a stock.")
+    
+    if st.button("🤖 Generate Market Analysis", type="primary"):
+        if selected_ai_model:
+            with st.status(f"AI analyzing market conditions with {selected_ai_model}...", expanded=True) as status:
+                news_items = get_all_news()
+                movers = []
+                for ticker in CORE_TICKERS[:15]:
+                    quote = get_live_quote(ticker, tz_label)
+                    if not quote["error"]:
+                        movers.append({"ticker": ticker,"change_pct": quote["change_percent"],"price": quote["last"]})
                 
-                analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst)
+                analysis = ai_market_analysis(news_items, movers, model_choice=selected_ai_model)
+                status.update(label="🤖 AI Market Analysis Complete", state="complete")
                 
-                status.update(label=f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']}", state="complete")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Volume", f"{quote['volume']:,}")
-                col3.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                if col4.button(f"Add {search_analysis_ticker} to WL", key="add_analysis_search"):
-                    add_ticker_to_watchlist(search_analysis_ticker)
-                
-                # Session breakdown
-                st.markdown("#### Session Performance")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                st.markdown("### 🎯 AI Analysis")
                 st.markdown(analysis)
                 
-                if news:
-                    with st.expander(f"📰 Recent News Context"):
-                        for item in news[:3]:
-                            st.write(f"**{item.get('headline', 'No title')}**")
-                            st.write(item.get('summary', 'No summary')[:200] + "...")
-                            st.write("---")
-                
-                st.divider()
-            else:
-                status.update(label=f"Could not analyze {search_analysis_ticker}: {quote['error']}", state="error")
-                st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
-    
-    # Main market analysis
-    if st.button("🤖 Generate Market Analysis", type="primary"):
-        with st.status("AI analyzing market conditions...", expanded=True) as status:
-            news_items = get_all_news()
-            
-            movers = []
-            for ticker in CORE_TICKERS[:15]:
-                quote = get_live_quote(ticker, tz_label)
-                if not quote["error"]:
-                    movers.append({
-                        "ticker": ticker,
-                        "change_pct": quote["change_percent"],
-                        "price": quote["last"]
-                    })
-            
-            analysis = ai_market_analysis(news_items, movers)
-            status.update(label="🤖 AI Market Analysis Complete", state="complete")
-            
-            st.markdown(analysis)
-            
-            with st.expander("📊 Supporting Data"):
-                st.write("**Top Market Movers:**")
-                for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
-                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}%")
-                
-                st.write("**Key News Headlines:**")
-                for news in news_items[:3]:
-                    st.write(f"• {news['title']}")
+                with st.expander("📊 Supporting Data"):
+                    st.write("**Top Market Movers:**")
+                    for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
+                        st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}%")
+                    st.write("**Key News Headlines:**")
+                    for news in news_items[:3]:
+                        st.write(f"• {news['title']}")
+        else:
+            st.info("Please select an AI model from the sidebar to generate a market analysis.")
 
-# TAB 5: AI Playbooks
 with tabs[4]:
     st.subheader("🤖 AI Trading Playbooks")
     
-    # Auto-generated plays section
     st.markdown("### 🎯 Auto-Generated Trading Plays")
     col1, col2 = st.columns([3, 1])
     with col1:
         st.caption("AI automatically scans your watchlist and market movers to suggest trading opportunities")
     with col2:
         if st.button("🚀 Generate Auto Plays", type="primary"):
-            with st.status("AI generating trading plays from market scan...", expanded=True) as status:
-                auto_plays = ai_auto_generate_plays(tz_label)
-                
-                if auto_plays:
-                    status.update(label=f"🤖 Generated {len(auto_plays)} Trading Plays", state="complete")
-                    
-                    for i, play in enumerate(auto_plays):
-                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%)"):
-                            
-                            # Display session data
-                            sess_col1, sess_col2, sess_col3 = st.columns(3)
-                            sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
-                            sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
-                            sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
-                            
-                            # Display catalyst
-                            if play['catalyst']:
-                                st.write(f"**Catalyst:** {play['catalyst']}")
-                            
-                            # Display AI play analysis
-                            st.markdown("**AI Trading Play:**")
-                            st.markdown(play['play_analysis'])
-                            
-                            # Add to watchlist option
-                            if st.button(f"Add {play['ticker']} to Watchlist", key=f"add_auto_play_{i}"):
-                                add_ticker_to_watchlist(play['ticker'])
-                else:
-                    st.info("No significant trading opportunities detected at this time. Market conditions may be consolidating.")
-                    status.update(label="No significant trading opportunities detected.", state="complete")
+            if selected_ai_model:
+                with st.status(f"AI generating trading plays from market scan with {selected_ai_model}...", expanded=True) as status:
+                    auto_plays = ai_auto_generate_plays(tz_label, model_choice=selected_ai_model)
+                    if auto_plays:
+                        status.update(label=f"🤖 Generated {len(auto_plays)} Trading Plays", state="complete")
+                        for i, play in enumerate(auto_plays):
+                            with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%)"):
+                                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                                sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
+                                sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
+                                sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
+                                if play['catalyst']:
+                                    st.write(f"**Catalyst:** {play['catalyst']}")
+                                st.markdown("**AI Trading Play:**")
+                                st.markdown(play['play_analysis'])
+                                if st.button(f"Add {play['ticker']} to Watchlist", key=f"add_auto_play_{i}"):
+                                    add_ticker_to_watchlist(play['ticker'])
+                    else:
+                        st.info("No significant trading opportunities detected at this time. Market conditions may be consolidating.")
+                        status.update(label="No significant trading opportunities detected.", state="complete")
+            else:
+                st.info("Please select an AI model from the sidebar to generate plays.")
     
     st.divider()
     
-    # Search any stock
     st.markdown("### 🔍 Custom Stock Analysis")
     col1, col2 = st.columns([3, 1])
     with col1:
@@ -861,47 +821,45 @@ with tabs[4]:
         search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
     
     if search_playbook and search_playbook_ticker:
-        with st.status(f"AI generating playbook for {search_playbook_ticker}...", expanded=True) as status:
-            quote = get_live_quote(search_playbook_ticker, tz_label)
-            
-            if not quote["error"]:
-                news = get_finnhub_news(search_playbook_ticker)
-                catalyst = news[0].get('headline', '') if news else ""
-                
-                playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst)
-                
-                status.update(label=f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']}", state="complete")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                col3.metric("Volume", f"{quote['volume']:,}")
-                if col4.button(f"Add {search_playbook_ticker} to WL", key="add_playbook_search"):
-                    add_ticker_to_watchlist(search_playbook_ticker)
-                
-                # Session performance
-                st.markdown("#### Session Performance")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                st.markdown("### 🎯 AI Trading Playbook")
-                st.markdown(playbook)
-                
-                if news:
-                    with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
-                        for item in news[:3]:
-                            st.write(f"**{item.get('headline', 'No title')}**")
-                            st.write(item.get('summary', 'No summary')[:200] + "...")
-                            st.write("---")
-                
-                st.divider()
-            else:
-                status.update(label=f"Could not get data for {search_playbook_ticker}: {quote['error']}", state="error")
-                st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
+        if selected_ai_model:
+            with st.status(f"AI generating playbook for {search_playbook_ticker} with {selected_ai_model}...", expanded=True) as status:
+                quote = get_live_quote(search_playbook_ticker, tz_label)
+                if not quote["error"]:
+                    news = get_finnhub_news(search_playbook_ticker)
+                    catalyst = news[0].get('headline', '') if news else ""
+                    playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst, model_choice=selected_ai_model)
+                    
+                    status.update(label=f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']}", state="complete")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                    col3.metric("Volume", f"{quote['volume']:,}")
+                    if col4.button(f"Add {search_playbook_ticker} to WL", key="add_playbook_search"):
+                        add_ticker_to_watchlist(search_playbook_ticker)
+                    
+                    st.markdown("#### Session Performance")
+                    sess_col1, sess_col2, sess_col3 = st.columns(3)
+                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                    
+                    st.markdown("### 🎯 AI Trading Playbook")
+                    st.markdown(playbook)
+                    
+                    if news:
+                        with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
+                            for item in news[:3]:
+                                st.write(f"**{item.get('headline', 'No title')}**")
+                                st.write(item.get('summary', 'No summary')[:200] + "...")
+                                st.write("---")
+                    st.divider()
+                else:
+                    status.update(label=f"Could not get data for {search_playbook_ticker}: {quote['error']}", state="error")
+                    st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
+        else:
+            st.info("Please select an AI model from the sidebar to generate a playbook.")
     
-    # Watchlist playbooks
     tickers = st.session_state.watchlists[st.session_state.active_watchlist]
     
     if tickers:
@@ -910,42 +868,43 @@ with tabs[4]:
         catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, etc.", key="catalyst_input")
         
         if st.button("🤖 Generate Watchlist Playbook", type="secondary"):
-            with st.status(f"AI analyzing {selected_ticker}...", expanded=True) as status:
-                quote = get_live_quote(selected_ticker, tz_label)
-                
-                if not quote["error"]:
-                    playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input)
+            if selected_ai_model:
+                with st.status(f"AI analyzing {selected_ticker} with {selected_ai_model}...", expanded=True) as status:
+                    quote = get_live_quote(selected_ticker, tz_label)
                     
-                    status.update(label=f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']}", state="complete")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                    col3.metric("Volume", f"{quote['volume']:,}")
-                    
-                    # Session performance
-                    st.markdown("#### Session Breakdown")
-                    sess_col1, sess_col2, sess_col3 = st.columns(3)
-                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                    
-                    st.markdown("### 🎯 AI Analysis")
-                    st.markdown(playbook)
-                    
-                    news = get_finnhub_news(selected_ticker)
-                    if news:
-                        with st.expander(f"📰 Recent News for {selected_ticker}"):
-                            for item in news[:3]:
-                                st.write(f"**{item.get('headline', 'No title')}**")
-                                st.write(item.get('summary', 'No summary')[:200] + "...")
-                                st.write("---")
-                else:
-                    status.update(label=f"Could not get data for {selected_ticker}: {quote['error']}", state="error")
+                    if not quote["error"]:
+                        playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input, model_choice=selected_ai_model)
+                        
+                        status.update(label=f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']}", state="complete")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                        col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                        col3.metric("Volume", f"{quote['volume']:,}")
+                        
+                        st.markdown("#### Session Breakdown")
+                        sess_col1, sess_col2, sess_col3 = st.columns(3)
+                        sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                        sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                        sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                        
+                        st.markdown("### 🎯 AI Analysis")
+                        st.markdown(playbook)
+                        
+                        news = get_finnhub_news(selected_ticker)
+                        if news:
+                            with st.expander(f"📰 Recent News for {selected_ticker}"):
+                                for item in news[:3]:
+                                    st.write(f"**{item.get('headline', 'No title')}**")
+                                    st.write(item.get('summary', 'No summary')[:200] + "...")
+                                    st.write("---")
+                    else:
+                        status.update(label=f"Could not get data for {selected_ticker}: {quote['error']}", state="error")
+            else:
+                st.info("Please select an AI model from the sidebar to generate a playbook.")
     else:
         st.info("Add stocks to watchlist or use search above.")
     
-    # Quick tips for auto-generated plays
     with st.expander("💡 About Auto-Generated Plays"):
         st.markdown("""
         **Auto-Generated Plays** scan your watchlist and top market movers to identify:
@@ -963,17 +922,15 @@ with tabs[4]:
         **Note:** These are AI-generated suggestions for educational purposes. Always do your own research and risk management.
         """)
 
-# Auto refresh
 if st.session_state.auto_refresh:
     time.sleep(0.1)
     if st.session_state.refresh_interval == 10:
         st.rerun()
 
-# Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "🔥 AI Radar Pro | Live data: yfinance | News: Finnhub/Polygon | AI: OpenAI"
+    "🔥 AI Radar Pro | Live data: yfinance | News: Finnhub/Polygon | AI: OpenAI/Gemini"
     "</div>",
     unsafe_allow_html=True
 )
