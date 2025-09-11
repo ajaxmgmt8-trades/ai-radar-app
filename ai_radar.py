@@ -1,14 +1,3 @@
-Based on your request to use both Gemini and OpenAI, I can provide a modified version of the script that includes a toggle for selecting between the two.
-
-The original script you provided is configured to use only the OpenAI API. To add Gemini functionality, I have modified the code to:
-
-1.  Include the necessary Google Gemini API client library.
-2.  Create a `st.selectbox` element in the user interface for you to choose between "Gemini" and "OpenAI".
-3.  Add conditional logic in the `ai_playbook` and `ai_market_analysis` functions to call the appropriate API based on your selection.
-
-Here is the updated `ai_radar (2).py` script with the Gemini/OpenAI toggle and the "Important News" tab:
-
-```python
 import streamlit as st
 import pandas as pd
 import requests
@@ -1159,5 +1148,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
-```
