@@ -9,8 +9,8 @@ import streamlit as st
 def debug_public_api():
     """Debug function to test Public.com API endpoints"""
     
-    # NOTE: Replace this with your actual SECRET KEY from Public.com settings
-    secret_key = "YOUR_SECRET_KEY_HERE"  # Get this from Account Settings > Security > API
+    # Your actual SECRET KEY from Public.com settings
+    secret_key = "yIj4fmqCbyLWYQZtQlOkreE5ToT2fbZj"
     
     # Step 1: Get access token using official flow
     auth_url = "https://api.public.com/userapiauthservice/personal/access-tokens"
