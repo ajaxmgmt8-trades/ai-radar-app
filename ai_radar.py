@@ -450,10 +450,13 @@ with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     # Session status
-    current_hour = datetime.datetime.now().hour
-    if 4 <= current_hour < 9:
+    central = pytz.timezone("US/Central")
+    current_hour = datetime.datetime.now(central).hour
+    current_minute = datetime.datetime.now(central).minute
+    
+    if 4 <= current_hour < 8 or (current_hour == 8 and current_minute < 30):
         session_status = "🌅 Premarket"
-    elif 9 <= current_hour < 16:
+    elif 8 <= current_hour < 15 or (current_hour == 15 and current_minute <= 0):
         session_status = "🟢 Market Open"
     else:
         session_status = "🌆 After Hours"
