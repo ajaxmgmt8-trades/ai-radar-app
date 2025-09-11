@@ -5,13 +5,14 @@ import datetime
 import json
 import yfinance as yf
 from typing import Dict, List
-import numpy as np
 import time
+import openai
 
-# Configure page
+# =========================
+# CONFIG
+# =========================
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
-# Core tickers for selection
 CORE_TICKERS = [
     "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
     "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
@@ -23,242 +24,178 @@ CORE_TICKERS = [
     "CELH","PDD"
 ]
 
-# Initialize session state
-if "watchlists" not in st.session_state:
-    st.session_state.watchlists = {"Default": ["AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT"]}
-if "active_watchlist" not in st.session_state:
-    st.session_state.active_watchlist = "Default"
-if "auto_refresh" not in st.session_state:
-    st.session_state.auto_refresh = False
-if "refresh_interval" not in st.session_state:
-    st.session_state.refresh_interval = 30
+# =========================
+# API KEYS
+# =========================
+FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
+POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
 
-# API Keys
-try:
-    FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
-    POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
-    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
-    if OPENAI_KEY:
-        import openai
-        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
-    else:
-        openai_client = None
-except:
-    FINNHUB_KEY = ""
-    POLYGON_KEY = ""
+if OPENAI_KEY:
+    openai_client = openai.OpenAI(api_key=OPENAI_KEY)
+else:
     openai_client = None
 
-# ==================
-# Data Functions
-# ==================
+# =========================
+# HELPERS
+# =========================
 @st.cache_data(ttl=10)
 def get_live_quote(ticker: str) -> Dict:
+    """Live quote & session data using yfinance."""
     try:
         stock = yf.Ticker(ticker)
-        info = stock.info
-        hist_2d = stock.history(period="2d", interval="1m")
-        hist_1d = stock.history(period="1d", interval="1m")
-        if hist_1d.empty:
-            hist_1d = stock.history(period="1d")
-        if hist_2d.empty:
-            hist_2d = stock.history(period="2d")
-        current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
-        regular_market_open = info.get('regularMarketOpen', 0)
-        previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
-        premarket_change = 0
-        intraday_change = 0
-        postmarket_change = 0
-        if regular_market_open and previous_close:
-            premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
-            if current_price and regular_market_open:
-                intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
-        current_hour = datetime.datetime.now().hour
-        if current_hour >= 16 or current_hour < 4:
-            regular_close = info.get('regularMarketPrice', current_price)
-            if current_price != regular_close and regular_close:
-                postmarket_change = ((current_price - regular_close) / regular_close) * 100
-        total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+        hist = stock.history(period="2d", interval="1m", prepost=True)
+        if hist.empty:
+            return {"error": "No data"}
+
+        last = float(hist["Close"].iloc[-1])
+        prev = float(hist["Close"].iloc[0])
+        change_pct = (last - prev) / prev * 100 if prev else 0
+
         return {
-            "last": float(current_price),
-            "bid": float(info.get('bid', current_price - 0.01)),
-            "ask": float(info.get('ask', current_price + 0.01)),
-            "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
-            "change": float(info.get('regularMarketChange', current_price - previous_close if previous_close else 0)),
-            "change_percent": float(total_change),
-            "premarket_change": float(premarket_change),
-            "intraday_change": float(intraday_change),
-            "postmarket_change": float(postmarket_change),
-            "previous_close": float(previous_close),
-            "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S ET"),
+            "last": last,
+            "volume": int(hist["Volume"].iloc[-1]),
+            "change_percent": change_pct,
+            "previous_close": prev,
+            "last_updated": datetime.datetime.now().strftime("%I:%M:%S %p"),
             "error": None
         }
     except Exception as e:
-        return {"last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
-                "change": 0.0, "change_percent": 0.0,
-                "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
-                "previous_close": 0.0, "market_open": 0.0,
-                "last_updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S ET"),
-                "error": str(e)}
+        return {"error": str(e)}
+
+@st.cache_data(ttl=600)
+def get_polygon_news(symbol: str = None) -> List[Dict]:
+    if not POLYGON_KEY:
+        return []
+    try:
+        url = f"https://api.polygon.io/v2/reference/news?limit=10&apiKey={POLYGON_KEY}"
+        if symbol:
+            url += f"&ticker={symbol}"
+        r = requests.get(url, timeout=10).json()
+        return r.get("results", [])
+    except:
+        return []
 
 @st.cache_data(ttl=600)
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
-    if not FINNHUB_KEY: return []
+    if not FINNHUB_KEY:
+        return []
     try:
         if symbol:
-            url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={datetime.date.today()}&to={datetime.date.today()}&token={FINNHUB_KEY}"
+            url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={datetime.date.today()-datetime.timedelta(days=1)}&to={datetime.date.today()}&token={FINNHUB_KEY}"
         else:
             url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_KEY}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.json()[:10]
-    except: pass
-    return []
+        r = requests.get(url, timeout=10).json()
+        return r if isinstance(r, list) else []
+    except:
+        return []
 
-@st.cache_data(ttl=600)
-def get_polygon_news() -> List[Dict]:
-    if not POLYGON_KEY: return []
-    try:
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        url = f"https://api.polygon.io/v2/reference/news?published_utc.gte={today}&limit=20&apikey={POLYGON_KEY}"
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            return response.json().get("results", [])
-    except: pass
-    return []
+def analyze_sentiment(title, summary=""):
+    text = (title + " " + summary).lower()
+    if any(w in text for w in ["soars","surge","beats","record","rocket"]):
+        return "🚀 Explosive"
+    elif any(w in text for w in ["rise","gain","partnership","approval"]):
+        return "📈 Bullish"
+    elif any(w in text for w in ["fall","weak","delay","warning"]):
+        return "📉 Bearish"
+    return "⚪ Neutral"
 
-def get_all_news() -> List[Dict]:
-    all_news = []
-    finnhub_news = get_finnhub_news()
-    for item in finnhub_news:
-        all_news.append({"title": item.get("headline", ""), "summary": item.get("summary", ""),
-                         "source": "Finnhub", "url": item.get("url", ""),
-                         "datetime": item.get("datetime", 0), "related": item.get("related", "")})
-    polygon_news = get_polygon_news()
-    for item in polygon_news:
-        all_news.append({"title": item.get("title", ""), "summary": item.get("description", ""),
-                         "source": "Polygon", "url": item.get("article_url", ""),
-                         "datetime": item.get("published_utc", ""), "related": ",".join(item.get("tickers", []))})
-    try: all_news.sort(key=lambda x: x["datetime"], reverse=True)
-    except: pass
-    return all_news[:15]
-
-def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
+def ai_playbook(ticker, change, catalyst=""):
     if not openai_client:
-        return f"**{ticker} Analysis** (OpenAI not set)\nChange: {change:+.2f}%\nCatalyst: {catalyst}"
+        return f"⚠️ OpenAI key missing. Change: {change:+.2f}%. Catalyst: {catalyst}"
     try:
-        prompt = f"""Analyze {ticker} with {change:+.2f}% change today.
-Catalyst: {catalyst or "Market movement"}.
-Give sentiment, scalp/day/swing setups, and key levels under 250 words."""
+        prompt = f"""
+        Analyze {ticker}:
+        Change: {change:+.2f}%
+        Catalyst: {catalyst or "Market Movement"}
+        Give:
+        1. Sentiment
+        2. Scalp setup
+        3. Day trade setup
+        4. Swing setup
+        """
         resp = openai_client.chat.completions.create(
-            model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}],
-            temperature=0.3, max_tokens=400)
+            model="gpt-4o-mini",
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=350,
+            temperature=0.3
+        )
         return resp.choices[0].message.content
     except Exception as e:
         return f"AI Error: {e}"
 
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    if not openai_client: return "OpenAI not set."
-    try:
-        news_context = "\n".join([f"- {n['title']}" for n in news_items[:5]])
-        movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
-        prompt = f"""Analyze market with:
-News:\n{news_context}\nMovers:\n{movers_context}
-Give sentiment, themes, sectors, and opportunities under 200 words."""
-        resp = openai_client.chat.completions.create(
-            model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}],
-            temperature=0.3, max_tokens=300)
-        return resp.choices[0].message.content
-    except Exception as e: return f"AI Error: {e}"
-
-# NEW: Auto-generate plays
-def ai_auto_generate_plays(limit: int = 5):
-    plays = []
-    tickers = st.session_state.watchlists.get(st.session_state.active_watchlist, CORE_TICKERS[:20])
-    for ticker in tickers:
-        quote = get_live_quote(ticker)
-        if quote["error"]: continue
-        if abs(quote["change_percent"]) < 1.5: continue
-        news = get_finnhub_news(ticker)
-        catalyst = news[0].get("headline", "") if news else "No major catalyst"
-        analysis = ai_playbook(ticker, quote["change_percent"], catalyst)
-        plays.append({
-            "ticker": ticker, "current_price": quote["last"],
-            "change_percent": quote["change_percent"],
-            "volume": quote["volume"], "catalyst": catalyst,
-            "play_analysis": analysis,
-            "session_data": {"premarket": quote["premarket_change"],
-                             "intraday": quote["intraday_change"],
-                             "afterhours": quote["postmarket_change"]}
-        })
-    plays.sort(key=lambda x: abs(x["change_percent"]), reverse=True)
-    return plays[:limit]
-
-# ==================
-# Main App
-# ==================
+# =========================
+# APP LAYOUT
+# =========================
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# Auto-refresh controls
-col1, col2, col3, col4 = st.columns([2,1,1,2])
-with col1: st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
-with col2: st.session_state.refresh_interval = st.selectbox("Interval", [10,30,60], index=1)
-with col3:
-    if st.button("🔄 Refresh Now"):
-        st.cache_data.clear(); st.rerun()
-with col4:
-    now = datetime.datetime.now()
-    st.write(f"**{'🟢 Open' if 9<=now.hour<16 else '🔴 Closed'}** | {now.strftime('%I:%M:%S %p ET')}")
-
-tabs = st.tabs(["📊 Live Quotes","📋 Watchlist","🔥 Catalyst Scanner","📈 Market Analysis","🤖 AI Playbooks"])
+tabs = st.tabs(["📊 Live Quotes","📋 Watchlist","🔥 Catalyst Scanner","🤖 AI Playbooks"])
 
 # TAB 1: Live Quotes
 with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
-    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-    for t in tickers:
+
+    search = st.text_input("🔍 Search ticker", "").upper()
+    if search:
+        q = get_live_quote(search)
+        if not q["error"]:
+            st.metric(search, f"${q['last']:.2f}", f"{q['change_percent']:+.2f}%")
+            with st.expander(f"More on {search}"):
+                news = get_polygon_news(search)[:3] + get_finnhub_news(search)[:3]
+                for n in news:
+                    st.write(f"- {n.get('title', '')}")
+                st.markdown("### 🤖 AI Playbook")
+                st.write(ai_playbook(search, q["change_percent"], news[0].get("title") if news else ""))
+        else:
+            st.error(q["error"])
+
+    st.markdown("### Your Watchlist")
+    for t in CORE_TICKERS[:10]:  # quick demo slice
         q = get_live_quote(t)
         if q["error"]: continue
-        with st.expander(f"{t} — ${q['last']:.2f} ({q['change_percent']:+.2f}%)"):
-            st.write(f"Bid/Ask: ${q['bid']:.2f} / ${q['ask']:.2f}")
-            st.write(f"Volume: {q['volume']:,}")
-            st.write(f"Premarket {q['premarket_change']:+.2f}% | Day {q['intraday_change']:+.2f}% | AH {q['postmarket_change']:+.2f}%")
-            if abs(q['change_percent']) >= 2:
-                st.markdown("### 🎯 AI Details")
-                st.markdown(ai_playbook(t, q['change_percent']))
+        col1, col2 = st.columns([2,1])
+        col1.metric(t, f"${q['last']:.2f}", f"{q['change_percent']:+.2f}%")
+        with col2.expander("📂 Details"):
+            news = get_polygon_news(t)[:2] + get_finnhub_news(t)[:2]
+            for n in news:
+                st.write(f"{analyze_sentiment(n.get('title',''))} {n.get('title','')}")
+            st.write(ai_playbook(t, q["change_percent"], news[0].get("title") if news else ""))
 
-# TAB 2: Watchlist Manager
+# TAB 2: Watchlist
 with tabs[1]:
     st.subheader("📋 Manage Watchlist")
-    # (Claude's manager code omitted here for brevity — keep as is in your file)
+    st.info("Coming soon: Persistent custom watchlists")
 
 # TAB 3: Catalyst Scanner
 with tabs[2]:
-    st.subheader("🔥 Real-Time Catalyst Scanner")
-    all_news = get_all_news()
-    for n in all_news[:10]:
-        with st.expander(f"{n['title']}"):
-            st.write(n['summary'])
-            st.write(f"Source: {n['source']}")
-            if n['url']: st.markdown(f"[Read]({n['url']})")
+    st.subheader("🔥 24h Catalyst Scanner")
+    news = get_polygon_news() + get_finnhub_news()
+    for n in news[:15]:
+        sent = analyze_sentiment(n.get("title",""), n.get("summary",""))
+        with st.expander(f"{sent} {n.get('title','')[:80]}"):
+            st.write(n.get("summary",""))
+            related = n.get("tickers") or n.get("related")
+            if related: st.write(f"Tickers: {related}")
+            if st.button(f"AI Playbook {related}", key=n.get("title","")):
+                st.write(ai_playbook(related,0,n.get("title","")))
 
-# TAB 4: Market Analysis
+# TAB 4: AI Playbooks
 with tabs[3]:
-    st.subheader("📈 AI Market Analysis")
-    movers = []
-    for t in CORE_TICKERS[:10]:
-        q = get_live_quote(t)
+    st.subheader("🤖 AI Playbook Generator")
+    custom = st.text_input("Enter ticker for playbook", "").upper()
+    if st.button("Generate"):
+        q = get_live_quote(custom)
         if not q["error"]:
-            movers.append({"ticker":t,"change_pct":q["change_percent"],"price":q["last"]})
-    st.markdown(ai_market_analysis(get_all_news(), movers))
+            news = get_polygon_news(custom)
+            st.write(ai_playbook(custom, q["change_percent"], news[0].get("title") if news else ""))
 
-# TAB 5: AI Playbooks
-with tabs[4]:
-    st.subheader("🤖 AI Trading Playbooks")
-    if st.button("🚀 Generate Auto Plays"):
-        plays = ai_auto_generate_plays()
-        for p in plays:
-            with st.expander(f"{p['ticker']} — ${p['current_price']:.2f} ({p['change_percent']:+.2f}%)"):
-                st.write(f"Catalyst: {p['catalyst']}")
-                st.write(p['play_analysis'])
-
+    st.markdown("### Auto Plays (Top Movers)")
+    movers = []
+    for t in CORE_TICKERS[:15]:
+        q = get_live_quote(t)
+        if not q["error"] and abs(q["change_percent"])>2:
+            movers.append((t,q))
+    for t,q in movers:
+        with st.expander(f"{t} {q['change_percent']:+.2f}%"):
+            news = get_polygon_news(t)
+            st.write(ai_playbook(t, q["change_percent"], news[0].get("title") if news else ""))
