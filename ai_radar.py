@@ -522,6 +522,41 @@ def ai_auto_generate_plays(tz: str):
     except Exception as e:
         st.error(f"Error generating auto plays: {str(e)}")
         return []
+ # Function to get important economic events using Gemini
+def get_important_events() -> List[Dict]:
+    if not openai_client:
+        return []
+    
+    try:
+        prompt = f"""
+        Provide a list of the most important economic events for the current week.
+        Focus on events that are known to move the market, such as CPI, FOMC meetings,
+        Unemployment Reports, and major Fed speeches.
+        
+        Format the response as a JSON array of objects, with each object having the following keys:
+        - "event": (string) The name of the event.
+        - "date": (string) The date of the event (e.g., "Monday, June 17").
+        - "time": (string) The time of the event (e.g., "10:00 AM ET").
+        - "impact": (string) The expected market impact (e.g., "High", "Medium", "Low").
+        
+        Do not include any text, notes, or explanations outside of the JSON.
+        """
+        
+        # Use OpenAI client to get the response
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=300
+        )
+        
+        json_string = response.choices[0].message.content
+        events = json.loads(json_string)
+        
+        return events
+    except Exception as e:
+        st.error(f"Error fetching economic events: {str(e)}")
+        return []       
 # Placeholder functions for advanced data
 def get_options_data(ticker: str) -> Optional[Dict]:
     """
@@ -596,7 +631,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -1257,7 +1292,26 @@ with tabs[7]:
                     with st.expander(f"🔮 AI Predicts Play for {ticker}"):
                         st.markdown(ai_analysis_text)
                     st.divider()
+# TAB 9: Important News & Economic Calendar
+with tabs[8]:
+    st.subheader("📰 Important News & Economic Calendar")
 
+    if st.button("📊 Get This Week's Events", type="primary"):
+        with st.spinner("Fetching important events..."):
+            important_events = get_important_events()
+
+            if not important_events:
+                st.info("No major economic events scheduled for this week.")
+            else:
+                st.markdown("### Major Market-Moving Events")
+
+                for event in sorted(important_events, key=lambda x: x['date']):
+                    st.markdown(f"**{event['event']}**")
+                    st.write(f"**Date:** {event['date']}")
+                    st.write(f"**Time:** {event['time']}")
+                    st.write(f"**Impact:** {event['impact']}")
+                    st.divider()
+                    
 # Auto refresh
 if st.session_state.auto_refresh:
     time.sleep(0.1)
