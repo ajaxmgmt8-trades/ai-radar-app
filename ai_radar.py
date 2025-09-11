@@ -82,17 +82,27 @@ def get_top_movers():
     for t in CORE_TICKERS[:50]:  # limit for speed
         try:
             data = yf.download(t, period="2d", interval="1m", prepost=True, progress=False)
-            if data.empty: continue
+            if data.empty:
+                continue
             last = data["Close"].iloc[-1]
             prev = data["Close"].iloc[0]
             change = (last - prev) / prev * 100
             movers.append({"Ticker": t, "Price": last, "Change %": change})
         except:
             continue
-    df = pd.DataFrame(movers).sort_values("Change %", ascending=False).head(10)
+
+    if not movers:
+        return pd.DataFrame(columns=["Ticker","Price","Change %"])
+
+    df = pd.DataFrame(movers)
+    df = df.sort_values("Change %", ascending=False).head(10)
+
+    # ✅ format only for display
     df["Price"] = df["Price"].map(lambda x: f"${x:.2f}")
     df["Change %"] = df["Change %"].map(lambda x: f"{x:+.2f}%")
+
     return df
+
 
 def ai_playbook(ticker: str, change: float, catalyst: str = ""):
     prompt = f"""
