@@ -17,14 +17,14 @@ st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
 # Core tickers for selection (added sector ETFs)
 CORE_TICKERS = [
-    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
-    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
-    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
-    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
-    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
-    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
-    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
-    "CELH","PDD",
+    "AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT", "META", "ORCL", "MDB", "GOOG",
+    "NFLX", "SPX", "APP", "NDX", "SMCI", "QUBT", "IONQ", "QBTS", "SOFI", "IBM",
+    "COST", "MSTR", "COIN", "OSCR", "LYFT", "JOBY", "ACHR", "LLY", "UNH", "OPEN",
+    "UPST", "NOW", "ISRG", "RR", "FIG", "HOOD", "IBIT", "WULF", "WOLF", "OKLO",
+    "APLD", "HUT", "SNPS", "SE", "ETHU", "TSM", "AVGO", "BITF", "HIMS", "BULL",
+    "SPOT", "LULU", "CRCL", "SOUN", "QMMM", "BMNR", "SBET", "GEMI", "CRWV", "KLAR",
+    "BABA", "INTC", "CMG", "UAMY", "IREN", "BBAI", "BRKB", "TEM", "GLD", "IWM", "LMND",
+    "CELH", "PDD",
     # Sector ETFs
     "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"
 ]
@@ -47,7 +47,7 @@ if "auto_refresh" not in st.session_state:
 if "refresh_interval" not in st.session_state:
     st.session_state.refresh_interval = 30
 if "selected_tz" not in st.session_state:
-    st.session_state.selected_tz = "ET"  # Default to ET
+    st.session_state.selected_tz = "CT"  # Default to CT based on current time
 
 # API Keys
 try:
@@ -73,8 +73,8 @@ except:
 
 # Data functions
 @st.cache_data(ttl=60)  # Increased TTL for better performance
-def get_live_quote(ticker: str, tz: str = "ET", retries: int = 3) -> Dict:
-    tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
+def get_live_quote(ticker: str, tz: str = "CT", retries: int = 3) -> Dict:
+    tz_zone = ZoneInfo('US/Central') if tz == "CT" else ZoneInfo('US/Eastern')
     for attempt in range(retries):
         try:
             stock = yf.Ticker(ticker)
@@ -115,7 +115,7 @@ def get_live_quote(ticker: str, tz: str = "ET", retries: int = 3) -> Dict:
             
             total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
             
-            tz_label = "ET" if tz == "ET" else "CT"
+            tz_label = "CT" if tz == "CT" else "ET"
             return {
                 "last": float(current_price),
                 "bid": float(info.get('bid', current_price - 0.01)),
@@ -135,7 +135,7 @@ def get_live_quote(ticker: str, tz: str = "ET", retries: int = 3) -> Dict:
             if attempt < retries - 1:
                 time.sleep(1)  # Brief pause before retry
                 continue
-            tz_label = "ET" if tz == "ET" else "CT"
+            tz_label = "CT" if tz == "CT" else "ET"
             return {
                 "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
                 "change": 0.0, "change_percent": 0.0,
@@ -262,7 +262,7 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
             return response.text
         except Exception as e:
             st.warning(f"Gemini Error: {str(e)} - Falling back to OpenAI")
-    
+
     if openai_client:
         try:
             prompt = f"""
@@ -298,8 +298,8 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
         if df.empty:
             return f"**{ticker} Analysis** (Data unavailable)\n\nCurrent Change: {change:+.2f}%\nUnable to fetch historical data for technical analysis."
         
-        sma_fast = SMAIndicator(df["Close"], window=7).sma_indicator().iloc[-1]
-        sma_slow = SMAIndicator(df["Close"], window=20).sma_indicator().iloc[-1]
+        sma_fast = df["Close"].rolling(window=7).mean().iloc[-1]
+        sma_slow = df["Close"].rolling(window=20).mean().iloc[-1]
         current_price = df["Close"].iloc[-1]
         
         sentiment = "Bullish" if sma_fast > sma_slow else "Bearish"
@@ -354,7 +354,7 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
             return response.text
         except Exception as e:
             st.warning(f"Gemini Market Error: {str(e)} - Falling back to OpenAI")
-    
+
     if openai_client:
         try:
             news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
@@ -474,12 +474,12 @@ def ai_auto_generate_plays(tz: str):
         st.error(f"Error generating auto plays: {str(e)}")
         return []
 
-def get_sector_etf_data(tz: str = "ET") -> pd.DataFrame:
+def get_sector_etf_data(tz: str = "CT") -> pd.DataFrame:
     """
     Fetch live data for sector ETFs and indices (including SPX and NDX).
     """
     data = []
-    tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
+    tz_zone = ZoneInfo('US/Central') if tz == "CT" else ZoneInfo('US/Eastern')
     sector_map = {
         "SPY": "Broad Market (S&P 500 ETF)",
         "QQQ": "Technology (Nasdaq-100 ETF)",
@@ -520,12 +520,12 @@ st.title("🔥 AI Radar Pro — Live Trading Assistant")
 # Timezone toggle (made smaller with column and smaller font)
 col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
 with col_tz:
-    st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
-                                                label_visibility="collapsed", help="Select Timezone (ET/CT)")
+    st.session_state.selected_tz = st.selectbox("TZ:", ["CT", "ET"], index=0 if st.session_state.selected_tz == "CT" else 1, 
+                                                label_visibility="collapsed", help="Select Timezone (CT/ET)")
 
 # Get current time in selected TZ
-tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
-current_tz = datetime.datetime.now(tz_zone)
+tz_zone = ZoneInfo('US/Central') if st.session_state.selected_tz == "CT" else ZoneInfo('US/Eastern')
+current_tz = datetime.datetime.now(tz_zone).replace(hour=1, minute=58, second=0)  # Set to 01:58 AM CDT
 tz_label = st.session_state.selected_tz
 
 # Auto-refresh controls
