@@ -50,6 +50,8 @@ if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
+if "public_client" not in st.session_state:
+    st.session_state.public_client = None
 
 # API Keys
 try:
@@ -88,7 +90,6 @@ class PublicDataClient:
             "User-Agent": "AI-Radar-Pro/1.0"
         }
         self.working_endpoints = {}
-        self.authenticated = False
         
         # Authenticate immediately
         self._authenticate()
@@ -109,23 +110,35 @@ class PublicDataClient:
                 if self.access_token:
                     self.headers["Authorization"] = f"Bearer {self.access_token}"
                     self.token_expires_at = datetime.datetime.now() + datetime.timedelta(minutes=120)
-                    self.authenticated = True
                     return True
         except Exception as e:
-            print(f"Public.com authentication error: {str(e)}")
+            print(f"Authentication error: {str(e)}")
         
-        self.authenticated = False
         return False
     
     def _ensure_authenticated(self):
         """Make sure we have a valid access token"""
-        if not self.authenticated or not self.access_token:
+        if not self.access_token or (self.token_expires_at and datetime.datetime.now() >= self.token_expires_at):
             return self._authenticate()
-        
-        if self.token_expires_at and datetime.datetime.now() >= self.token_expires_at:
-            return self._authenticate()
-        
         return True
+    
+    def test_connection(self) -> Dict:
+        """Test connection and find working endpoints"""
+        if not self._ensure_authenticated():
+            return {"status": "failed", "error": "Authentication failed"}
+        
+        try:
+            # Test the official account endpoint
+            test_url = f"{self.base_url}/userapigateway/trading/account"
+            response = requests.get(test_url, headers=self.headers, timeout=10)
+            
+            if response.status_code == 200:
+                return {"status": "connected", "endpoint": test_url, "response": response.status_code}
+            else:
+                return {"status": "failed", "error": f"Status {response.status_code}"}
+                
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
     
     def get_quote(self, symbol: str) -> Dict:
         """Get quote with multiple endpoint attempts"""
@@ -154,7 +167,7 @@ class PublicDataClient:
                     # Cache this working endpoint
                     self.working_endpoints['quote'] = endpoint
                     
-                    # Map the response data
+                    # Map the response data (structure will depend on actual API)
                     return self._map_quote_response(data, symbol)
                     
                 elif response.status_code == 401:
@@ -164,7 +177,9 @@ class PublicDataClient:
                         if response.status_code == 200:
                             data = response.json()
                             return self._map_quote_response(data, symbol)
-                    return {"error": "Authentication failed"}
+                    return {"error": "Authentication failed - check secret key"}
+                elif response.status_code == 403:
+                    return {"error": "Access forbidden - check API permissions"}
                     
             except Exception as e:
                 continue
@@ -252,21 +267,49 @@ class PublicDataClient:
         except Exception as e:
             return {"error": f"Error mapping response: {str(e)}", "raw_data": data}
 
-# Initialize Public.com client automatically
-if "public_client" not in st.session_state:
+def setup_public_client(secret_key: str):
+    """Setup Public.com client in Streamlit session state"""
     try:
-        secret_key = "yIj4fmqCbyLWYQZtQlOkreE5ToT2fbZj"
-        public_client = PublicDataClient(secret_key)
-        if public_client.authenticated:
-            st.session_state.public_client = public_client
-            st.session_state.public_connected = True
+        client = PublicDataClient(secret_key)
+        test_result = client.test_connection()
+        
+        if test_result.get("status") == "connected":
+            st.session_state.public_client = client
+            st.success("✅ Public.com connected successfully!")
+            return True
         else:
-            st.session_state.public_client = None
-            st.session_state.public_connected = False
+            st.error(f"❌ Connection failed: {test_result.get('error')}")
+            return False
     except Exception as e:
-        st.session_state.public_client = None
-        st.session_state.public_connected = False
-        print(f"Failed to initialize Public.com client: {str(e)}")
+        st.error(f"❌ Setup failed: {str(e)}")
+        return False
+
+def debug_public_integration():
+    """Add this to your Streamlit sidebar for debugging"""
+    
+    st.sidebar.subheader("🔧 Public.com Debug")
+    
+    if st.sidebar.button("Test API Connection"):
+        if st.session_state.get('public_client'):
+            with st.spinner("Testing Public.com API..."):
+                # Test connection
+                result = st.session_state.public_client.test_connection()
+                st.sidebar.write(f"Connection test: {result}")
+                
+                # Test quote endpoint
+                quote_result = st.session_state.public_client.get_quote("AAPL")
+                st.sidebar.write("AAPL Quote test:")
+                st.sidebar.json(quote_result)
+        else:
+            st.sidebar.error("No Public.com client initialized")
+    
+    if st.sidebar.button("Debug Raw API Response"):
+        if st.session_state.get('public_client'):
+            # Show raw API response for debugging
+            quote = st.session_state.public_client.get_quote("AAPL")
+            if "raw_data" in quote:
+                st.sidebar.write("Raw API Response:")
+                st.sidebar.json(quote["raw_data"])
 
 # Enhanced primary data function - Public.com first, Yahoo Finance fallback
 @st.cache_data(ttl=60)  # Cache for 60 seconds
@@ -278,7 +321,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     tz_label = "ET" if tz == "ET" else "CT"
     
     # Try Public.com first if available
-    if st.session_state.get('public_client') and st.session_state.get('public_connected'):
+    if st.session_state.get('public_client'):
         try:
             public_quote = st.session_state.public_client.get_quote(ticker)
             
@@ -288,9 +331,13 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
                 public_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
                 public_quote["data_source"] = "Public.com"
                 return public_quote
+            else:
+                # Log the error for debugging but continue to fallback
+                if public_quote.get("error"):
+                    print(f"Public.com error for {ticker}: {public_quote['error']}")
                 
         except Exception as e:
-            print(f"Public.com error for {ticker}: {str(e)}")
+            print(f"Public.com exception for {ticker}: {str(e)}")
     
     # Fall back to Yahoo Finance
     try:
@@ -313,7 +360,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         regular_market_open = info.get('regularMarketOpen', 0)
         previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
         
-        # Calculate session changes
+        # Calculate session changes with better logic
         premarket_change = 0
         intraday_change = 0
         postmarket_change = 0
@@ -330,6 +377,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
                 
                 # Filter for different sessions
                 market_hours = hist_1d_tz.between_time('09:30', '16:00')
+                premarket_hours = hist_1d_tz.between_time('04:00', '09:29')
                 
                 if not market_hours.empty:
                     market_open_price = market_hours['Open'].iloc[0]
@@ -872,11 +920,18 @@ if st.session_state.model == "OpenAI" and not OPENAI_KEY:
 # Data source status
 st.sidebar.subheader("Data Sources")
 
-# Public.com status
-if st.session_state.get('public_connected'):
+# Public.com Integration
+st.sidebar.markdown("**Public.com API**")
+if st.session_state.get('public_client'):
     st.sidebar.success("✅ Public.com Connected")
 else:
-    st.sidebar.warning("⚠️ Public.com Not Connected")
+    if st.sidebar.button("Connect Public.com"):
+        secret_key = "yIj4fmqCbyLWYQZtQlOkreE5ToT2fbZj"  # Your secret key
+        setup_public_client(secret_key)
+
+# Add debug interface
+if st.session_state.get('public_client'):
+    debug_public_integration()
 
 st.sidebar.success("✅ Yahoo Finance Connected")
 
@@ -914,7 +969,7 @@ tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Sca
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
-data_source_info = "Public.com + Yahoo Finance" if st.session_state.get('public_connected') else "Yahoo Finance"
+data_source_info = "Public.com + Yahoo Finance" if st.session_state.get('public_client') else "Yahoo Finance"
 st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Powered by {data_source_info}</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
@@ -1662,7 +1717,7 @@ if st.session_state.auto_refresh:
 
 # Footer
 st.markdown("---")
-footer_text = "🔥 AI Radar Pro | Data: Public.com + Yahoo Finance | News: Finnhub/Polygon | AI: OpenAI/Gemini" if st.session_state.get('public_connected') else "🔥 AI Radar Pro | Live data: Yahoo Finance | News: Finnhub/Polygon | AI: OpenAI/Gemini"
+footer_text = "🔥 AI Radar Pro | Data: Public.com + Yahoo Finance | News: Finnhub/Polygon | AI: OpenAI/Gemini" if st.session_state.get('public_client') else "🔥 AI Radar Pro | Live data: Yahoo Finance | News: Finnhub/Polygon | AI: OpenAI/Gemini"
 st.markdown(
     f"<div style='text-align: center; color: #666;'>"
     f"{footer_text}"
