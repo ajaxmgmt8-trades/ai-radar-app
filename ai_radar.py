@@ -568,6 +568,14 @@ tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else Zo
 current_tz = datetime.datetime.now(tz_zone)
 tz_label = st.session_state.selected_tz
 
+# >>> ADD THE AI SETTINGS CODE HERE <<<
+st.sidebar.subheader("AI Settings")
+st.session_state.model = st.sidebar.selectbox("AI Model", ("OpenAI", "Gemini"))
+if st.session_state.model == "Gemini" and not GEMINI_KEY:
+    st.sidebar.warning("Gemini API Key not found. Please add to Streamlit secrets.")
+if st.session_state.model == "OpenAI" and not OPENAI_KEY:
+    st.sidebar.warning("OpenAI API Key not found. Please add to Streamlit secrets.")
+
 # Auto-refresh controls
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
 with col1:
