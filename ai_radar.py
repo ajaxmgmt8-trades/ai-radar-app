@@ -1,133 +1,76 @@
-def ai_auto_generate_plays() -> List[Dict]:
-    """
-    Auto-generates trading plays by scanning watchlist and market movers
-    """
+# --- keep your full code above unchanged ---
+
+# New: Auto-generate plays
+def ai_auto_generate_plays(limit: int = 5):
     plays = []
-    
-    try:
-        # Get current watchlist
-        current_watchlist = st.session_state.watchlists[st.session_state.active_watchlist]
-        
-        # Combine watchlist with core tickers for broader scan
-        scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
-        
-        # Scan for significant movers
-        candidates = []
-        
-        for ticker in scan_tickers:
-            quote = get_live_quote(ticker)
-            if not quote["error"]:
-                # Look for significant moves (>1.5% change)
-                if abs(quote["change_percent"]) >= 1.5:
-                    candidates.append({
-                        "ticker": ticker,
-                        "quote": quote,
-                        "significance": abs(quote["change_percent"])
-                    })
-        
-        # Sort by significance and take top candidates
-        candidates.sort(key=lambda x: x["significance"], reverse=True)
-        top_candidates = candidates[:5]  # Limit to top 5 to avoid API limits
-        
-        # Generate plays for top candidates
-        for candidate in top_candidates:
-            ticker = candidate["ticker"]
-            quote = candidate["quote"]
-            
-            # Get recent news for context
-            news = get_finnhub_news(ticker)
-            catalyst = ""
-            if news:
-                catalyst = news[0].get('headline', '')[:100] + "..."
-            
-            # Generate AI analysis if OpenAI is available
-            if openai_client:
-                try:
-                    play_prompt = f"""
-                    Generate a concise trading play for {ticker}:
-                    
-                    Current Price: ${quote['last']:.2f}
-                    Change: {quote['change_percent']:+.2f}%
-                    Premarket: {quote['premarket_change']:+.2f}%
-                    Intraday: {quote['intraday_change']:+.2f}%
-                    After Hours: {quote['postmarket_change']:+.2f}%
-                    Volume: {quote['volume']:,}
-                    Catalyst: {catalyst if catalyst else "Market movement"}
-                    
-                    Provide:
-                    1. Play type (Scalp/Day/Swing)
-                    2. Entry strategy and levels
-                    3. Target and stop levels
-                    4. Risk/reward ratio
-                    5. Confidence (1-10)
-                    
-                    Keep under 200 words, be specific and actionable.
-                    """
-                    
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": play_prompt}],
-                        temperature=0.3,
-                        max_tokens=300
-                    )
-                    
-                    play_analysis = response.choices[0].message.content
-                    
-                except Exception as ai_error:
-                    play_analysis = f"""
-                    **{ticker} Trading Opportunity**
-                    
-                    **Movement:** {quote['change_percent']:+.2f}% change with {quote['volume']:,} volume
-                    
-                    **Session Breakdown:**
-                    • Premarket: {quote['premarket_change']:+.2f}%
-                    • Intraday: {quote['intraday_change']:+.2f}%
-                    • After Hours: {quote['postmarket_change']:+.2f}%
-                    
-                    **Quick Setup:** Watch for continuation or reversal around current levels
-                    
-                    *AI analysis unavailable: {str(ai_error)[:50]}...*
-                    """
-            else:
-                # Fallback analysis without AI
-                direction = "bullish" if quote['change_percent'] > 0 else "bearish"
-                play_analysis = f"""
-                **{ticker} Trading Setup**
-                
-                **Movement:** {quote['change_percent']:+.2f}% change showing {direction} momentum
-                
-                **Session Analysis:**
-                • Premarket: {quote['premarket_change']:+.2f}%
-                • Intraday: {quote['intraday_change']:+.2f}%
-                • After Hours: {quote['postmarket_change']:+.2f}%
-                
-                **Volume:** {quote['volume']:,} shares
-                
-                **Setup:** Monitor for continuation or reversal. Consider risk management around current price levels.
-                
-                *Configure OpenAI API for detailed AI analysis*
-                """
-            
-            # Create play dictionary
-            play = {
-                "ticker": ticker,
-                "current_price": quote['last'],
-                "change_percent": quote['change_percent'],
-                "session_data": {
-                    "premarket": quote['premarket_change'],
-                    "intraday": quote['intraday_change'],
-                    "afterhours": quote['postmarket_change']
-                },
-                "catalyst": catalyst if catalyst else f"Market movement: {quote['change_percent']:+.2f}%",
-                "play_analysis": play_analysis,
-                "volume": quote['volume'],
-                "timestamp": quote['last_updated']
+    tickers = st.session_state.watchlists.get(st.session_state.active_watchlist, CORE_TICKERS[:20])
+
+    for ticker in tickers:
+        quote = get_live_quote(ticker)
+        if quote["error"]:
+            continue
+
+        # Only pick movers
+        if abs(quote["change_percent"]) < 1.5:
+            continue
+
+        # Get catalyst
+        news = get_finnhub_news(ticker)
+        catalyst = news[0].get("headline", "") if news else "No major catalyst"
+
+        # Generate AI playbook
+        analysis = ai_playbook(ticker, quote["change_percent"], catalyst)
+
+        plays.append({
+            "ticker": ticker,
+            "current_price": quote["last"],
+            "change_percent": quote["change_percent"],
+            "volume": quote["volume"],
+            "catalyst": catalyst,
+            "play_analysis": analysis,
+            "session_data": {
+                "premarket": quote["premarket_change"],
+                "intraday": quote["intraday_change"],
+                "afterhours": quote["postmarket_change"],
             }
-            
-            plays.append(play)
-        
-        return plays
-        
-    except Exception as e:
-        st.error(f"Error generating auto plays: {str(e)}")
-        return []
+        })
+
+    # Sort by absolute % move
+    plays.sort(key=lambda x: abs(x["change_percent"]), reverse=True)
+    return plays[:limit]
+
+# --- in TAB 5 (AI Playbooks), replace the Auto-Generated Plays section with this ---
+
+# Auto-generated plays section
+st.markdown("### 🎯 Auto-Generated Trading Plays")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.caption("AI scans your watchlist + movers for trading setups")
+with col2:
+    if st.button("🚀 Generate Auto Plays", type="primary"):
+        with st.spinner("AI generating trading plays from market scan..."):
+            auto_plays = ai_auto_generate_plays()
+
+            if auto_plays:
+                st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
+                for i, play in enumerate(auto_plays):
+                    with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%)"):
+                        sess_col1, sess_col2, sess_col3 = st.columns(3)
+                        sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
+                        sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
+                        sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
+
+                        st.write(f"**Catalyst:** {play['catalyst']}")
+                        st.markdown("**AI Trading Play:**")
+                        st.markdown(play['play_analysis'])
+
+                        if st.button(f"Add {play['ticker']} to Watchlist", key=f"add_auto_{i}"):
+                            wl = st.session_state.watchlists[st.session_state.active_watchlist]
+                            if play['ticker'] not in wl:
+                                wl.append(play['ticker'])
+                                st.session_state.watchlists[st.session_state.active_watchlist] = wl
+                                st.success(f"Added {play['ticker']}")
+                                st.rerun()
+            else:
+                st.info("No significant setups found now.")
+
