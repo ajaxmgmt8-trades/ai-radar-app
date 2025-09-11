@@ -426,8 +426,11 @@ def ai_auto_generate_plays(tz: str):
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# Timezone toggle (placed here for global access)
-st.session_state.selected_tz = st.selectbox("🌍 Timezone", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1)
+# Timezone toggle (made smaller with column and smaller font)
+col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
+with col_tz:
+    st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
+                                                label_visibility="collapsed", help="Select Timezone (ET/CT)")
 
 # Get current time in selected TZ
 tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
