@@ -10,6 +10,8 @@ import numpy as np
 import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
+import google.generativeai as genai
+import openai
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -54,15 +56,23 @@ try:
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
-    if OPENAI_KEY:
-        import openai
-        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
-    else:
-        openai_client = None
-except:
-    FINNHUB_KEY = ""
-    POLYGON_KEY = ""
+    GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+
     openai_client = None
+    gemini_model = None
+    
+    if OPENAI_KEY:
+        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
+        st.session_state.model = 'OpenAI'
+    if GEMINI_KEY:
+        genai.configure(api_key=GEMINI_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+        st.session_state.model = 'Gemini'
+
+except Exception as e:
+    st.error(f"Error loading API keys: {e}")
+    openai_client = None
+    gemini_model = None
 
 # Data functions
 @st.cache_data(ttl=60)  # Optimized with caching
