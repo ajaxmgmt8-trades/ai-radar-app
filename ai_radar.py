@@ -10,11 +10,13 @@ import numpy as np
 import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
+from ta.trend import SMAIndicator  # For rule-based fallback
+import google.generativeai as genai  # For free Gemini integration
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
-# Core tickers for selection
+# Core tickers for selection (added sector ETFs)
 CORE_TICKERS = [
     "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
     "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
@@ -23,7 +25,15 @@ CORE_TICKERS = [
     "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
     "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
     "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
-    "CELH","PDD"
+    "CELH","PDD",
+    # Sector ETFs
+    "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"
+]
+
+# ETF list for sector tracking (including SPX and NDX)
+ETF_TICKERS = [
+    "SPY", "QQQ", "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC",
+    "SPX", "NDX"
 ]
 
 # Initialize session state
@@ -45,86 +55,96 @@ try:
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
     if OPENAI_KEY:
         import openai
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
     else:
         openai_client = None
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel("gemini-1.5-flash")  # Free tier model
+    else:
+        gemini_model = None
 except:
     FINNHUB_KEY = ""
     POLYGON_KEY = ""
     openai_client = None
+    gemini_model = None
 
 # Data functions
-@st.cache_data(ttl=10)
-def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
+@st.cache_data(ttl=60)  # Increased TTL for better performance
+def get_live_quote(ticker: str, tz: str = "ET", retries: int = 3) -> Dict:
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
-        # Get historical data
-        hist_2d = stock.history(period="2d", interval="1m")
-        hist_1d = stock.history(period="1d", interval="1m")
-        
-        if hist_1d.empty:
-            hist_1d = stock.history(period="1d")
-        if hist_2d.empty:
-            hist_2d = stock.history(period="2d")
-        
-        # Current price
-        current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
-        
-        # Session data
-        regular_market_open = info.get('regularMarketOpen', 0)
-        previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
-        
-        # Calculate session changes
-        premarket_change = 0
-        intraday_change = 0
-        postmarket_change = 0
-        
-        if regular_market_open and previous_close:
-            premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
-            if current_price and regular_market_open:
-                intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
-        
-        # After hours (using selected TZ)
-        current_hour = datetime.datetime.now(tz_zone).hour
-        if current_hour >= 16 or current_hour < 4:
-            regular_close = info.get('regularMarketPrice', current_price)
-            if current_price != regular_close and regular_close:
-                postmarket_change = ((current_price - regular_close) / regular_close) * 100
-        
-        total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
-        
-        tz_label = "ET" if tz == "ET" else "CT"
-        return {
-            "last": float(current_price),
-            "bid": float(info.get('bid', current_price - 0.01)),
-            "ask": float(info.get('ask', current_price + 0.01)),
-            "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
-            "change": float(info.get('regularMarketChange', current_price - previous_close if previous_close else 0)),
-            "change_percent": float(total_change),
-            "premarket_change": float(premarket_change),
-            "intraday_change": float(intraday_change),
-            "postmarket_change": float(postmarket_change),
-            "previous_close": float(previous_close),
-            "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-            "error": None
-        }
-    except Exception as e:
-        tz_label = "ET" if tz == "ET" else "CT"
-        tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
-        return {
-            "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
-            "change": 0.0, "change_percent": 0.0,
-            "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
-            "previous_close": 0.0, "market_open": 0.0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-            "error": str(e)
-        }
+    for attempt in range(retries):
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            # Get historical data
+            hist_2d = stock.history(period="2d", interval="1m")
+            hist_1d = stock.history(period="1d", interval="1m")
+            
+            if hist_1d.empty:
+                hist_1d = stock.history(period="1d")
+            if hist_2d.empty:
+                hist_2d = stock.history(period="2d")
+            
+            # Current price
+            current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
+            
+            # Session data
+            regular_market_open = info.get('regularMarketOpen', 0)
+            previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
+            
+            # Calculate session changes
+            premarket_change = 0
+            intraday_change = 0
+            postmarket_change = 0
+            
+            if regular_market_open and previous_close:
+                premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
+                if current_price and regular_market_open:
+                    intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
+            
+            # After hours (using selected TZ)
+            current_hour = datetime.datetime.now(tz_zone).hour
+            if current_hour >= 16 or current_hour < 4:
+                regular_close = info.get('regularMarketPrice', current_price)
+                if current_price != regular_close and regular_close:
+                    postmarket_change = ((current_price - regular_close) / regular_close) * 100
+            
+            total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+            
+            tz_label = "ET" if tz == "ET" else "CT"
+            return {
+                "last": float(current_price),
+                "bid": float(info.get('bid', current_price - 0.01)),
+                "ask": float(info.get('ask', current_price + 0.01)),
+                "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
+                "change": float(info.get('regularMarketChange', current_price - previous_close if previous_close else 0)),
+                "change_percent": float(total_change),
+                "premarket_change": float(premarket_change),
+                "intraday_change": float(intraday_change),
+                "postmarket_change": float(postmarket_change),
+                "previous_close": float(previous_close),
+                "market_open": float(regular_market_open) if regular_market_open else 0,
+                "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+                "error": None
+            }
+        except Exception as e:
+            if attempt < retries - 1:
+                time.sleep(1)  # Brief pause before retry
+                continue
+            tz_label = "ET" if tz == "ET" else "CT"
+            return {
+                "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
+                "change": 0.0, "change_percent": 0.0,
+                "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
+                "previous_close": 0.0, "market_open": 0.0,
+                "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+                "error": str(e)
+            }
 
 @st.cache_data(ttl=600)
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
@@ -223,71 +243,168 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
 def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
-    if not openai_client:
-        return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
+    # Try Gemini first (free tier), fallback to OpenAI, then rule-based
+    if gemini_model:
+        try:
+            prompt = f"""
+            Analyze {ticker} with {change:+.2f}% change today.
+            Catalyst: {catalyst if catalyst else "Market movement"}
+            
+            Provide trading analysis with:
+            1. Sentiment (Bullish/Bearish/Neutral) with confidence
+            2. Scalp setup (1-5 min timeframe)
+            3. Day trade setup (15-30 min)
+            4. Swing setup (4H-Daily)
+            5. Key levels to watch
+            
+            Keep concise and actionable, under 250 words.
+            """
+            response = gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            st.warning(f"Gemini Error: {str(e)} - Falling back to OpenAI")
     
+    if openai_client:
+        try:
+            prompt = f"""
+            Analyze {ticker} with {change:+.2f}% change today.
+            Catalyst: {catalyst if catalyst else "Market movement"}
+            
+            Provide trading analysis with:
+            1. Sentiment (Bullish/Bearish/Neutral) with confidence
+            2. Scalp setup (1-5 min timeframe)
+            3. Day trade setup (15-30 min)
+            4. Swing setup (4H-Daily)
+            5. Key levels to watch
+            
+            Keep concise and actionable, under 250 words.
+            """
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            st.warning(f"OpenAI Error: {str(e)} - Falling back to rule-based")
+    else:
+        st.warning("No AI API configured - Using rule-based analysis")
+    
+    # Rule-based fallback
     try:
-        prompt = f"""
-        Analyze {ticker} with {change:+.2f}% change today.
-        Catalyst: {catalyst if catalyst else "Market movement"}
+        df = yf.download(ticker, period="10d", interval="1h")
+        if df.empty:
+            return f"**{ticker} Analysis** (Data unavailable)\n\nCurrent Change: {change:+.2f}%\nUnable to fetch historical data for technical analysis."
         
-        Provide trading analysis with:
-        1. Sentiment (Bullish/Bearish/Neutral) with confidence
-        2. Scalp setup (1-5 min timeframe)
-        3. Day trade setup (15-30 min)
-        4. Swing setup (4H-Daily)
-        5. Key levels to watch
+        sma_fast = SMAIndicator(df["Close"], window=7).sma_indicator().iloc[-1]
+        sma_slow = SMAIndicator(df["Close"], window=20).sma_indicator().iloc[-1]
+        current_price = df["Close"].iloc[-1]
         
-        Keep concise and actionable, under 250 words.
+        sentiment = "Bullish" if sma_fast > sma_slow else "Bearish"
+        confidence = 70 if abs(sma_fast - sma_slow) > current_price * 0.01 else 50
+        
+        scalp_setup = f"Watch 1-5m charts for {sentiment.lower()} continuation around ${current_price:.2f}."
+        day_setup = f"Day trade: Enter on pullback to SMA7 (${sma_fast:.2f}), target 1% gain."
+        swing_setup = f"Swing: Hold if {sentiment}, stop below SMA20 (${sma_slow:.2f})."
+        key_levels = f"Support: ${sma_slow:.2f}, Resistance: ${current_price * 1.02:.2f}"
+        
+        return f"""
+        **{ticker} Rule-Based Analysis**
+        
+        1. Sentiment: {sentiment} ({confidence}% confidence)
+        2. Scalp setup: {scalp_setup}
+        3. Day trade setup: {day_setup}
+        4. Swing setup: {swing_setup}
+        5. Key levels: {key_levels}
+        
+        Current Change: {change:+.2f}%
+        Configure Gemini/OpenAI for advanced AI analysis.
         """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=400
-        )
-        
-        return response.choices[0].message.content
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"**{ticker} Analysis Error**\n\nCurrent Change: {change:+.2f}%\nError: {str(e)}"
 
 def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    if not openai_client:
-        return "OpenAI API not configured for AI analysis."
+    # Use Gemini or OpenAI, fallback to rule-based summary
+    if gemini_model:
+        try:
+            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+            
+            prompt = f"""
+            Analyze current market conditions based on:
+
+            Top News Headlines:
+            {news_context}
+
+            Top Market Movers:
+            {movers_context}
+
+            Provide a brief market analysis covering:
+            1. Overall market sentiment
+            2. Key themes driving movement
+            3. Sectors to watch
+            4. Trading opportunities
+
+            Keep it under 200 words and actionable.
+            """
+            
+            response = gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            st.warning(f"Gemini Market Error: {str(e)} - Falling back to OpenAI")
     
-    try:
-        news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
-        movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
-        
-        prompt = f"""
-        Analyze current market conditions based on:
+    if openai_client:
+        try:
+            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+            
+            prompt = f"""
+            Analyze current market conditions based on:
 
-        Top News Headlines:
-        {news_context}
+            Top News Headlines:
+            {news_context}
 
-        Top Market Movers:
-        {movers_context}
+            Top Market Movers:
+            {movers_context}
 
-        Provide a brief market analysis covering:
-        1. Overall market sentiment
-        2. Key themes driving movement
-        3. Sectors to watch
-        4. Trading opportunities
+            Provide a brief market analysis covering:
+            1. Overall market sentiment
+            2. Key themes driving movement
+            3. Sectors to watch
+            4. Trading opportunities
 
-        Keep it under 200 words and actionable.
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI Analysis Error: {str(e)}"
+            Keep it under 200 words and actionable.
+            """
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            st.warning(f"OpenAI Market Error: {str(e)} - Falling back to rule-based")
+    else:
+        st.warning("No AI API configured - Using rule-based market summary")
+    
+    # Rule-based fallback
+    avg_change = np.mean([m['change_pct'] for m in movers[:5]]) if movers else 0
+    sentiment = "Bullish" if avg_change > 0 else "Bearish"
+    return f"""
+    **Rule-Based Market Analysis**
+    
+    1. Overall market sentiment: {sentiment} (Avg change: {avg_change:+.2f}% from top movers)
+    2. Key themes: Focus on high-volume movers like {', '.join([m['ticker'] for m in movers[:3]])}
+    3. Sectors to watch: Tech (NDX/SPX movers), Energy (XLE if in movers)
+    4. Trading opportunities: Buy dips in bullish sectors, short overextended movers.
+    
+    Configure Gemini/OpenAI for detailed AI analysis.
+    """
 
 def ai_auto_generate_plays(tz: str):
     """
@@ -331,73 +448,8 @@ def ai_auto_generate_plays(tz: str):
             if news:
                 catalyst = news[0].get('headline', '')[:100] + "..."
             
-            # Generate AI analysis if OpenAI is available
-            if openai_client:
-                try:
-                    play_prompt = f"""
-                    Generate a concise trading play for {ticker}:
-                    
-                    Current Price: ${quote['last']:.2f}
-                    Change: {quote['change_percent']:+.2f}%
-                    Premarket: {quote['premarket_change']:+.2f}%
-                    Intraday: {quote['intraday_change']:+.2f}%
-                    After Hours: {quote['postmarket_change']:+.2f}%
-                    Volume: {quote['volume']:,}
-                    Catalyst: {catalyst if catalyst else "Market movement"}
-                    
-                    Provide:
-                    1. Play type (Scalp/Day/Swing)
-                    2. Entry strategy and levels
-                    3. Target and stop levels
-                    4. Risk/reward ratio
-                    5. Confidence (1-10)
-                    
-                    Keep under 200 words, be specific and actionable.
-                    """
-                    
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": play_prompt}],
-                        temperature=0.3,
-                        max_tokens=300
-                    )
-                    
-                    play_analysis = response.choices[0].message.content
-                    
-                except Exception as ai_error:
-                    play_analysis = f"""
-                    **{ticker} Trading Opportunity**
-                    
-                    **Movement:** {quote['change_percent']:+.2f}% change with {quote['volume']:,} volume
-                    
-                    **Session Breakdown:**
-                    • Premarket: {quote['premarket_change']:+.2f}%
-                    • Intraday: {quote['intraday_change']:+.2f}%
-                    • After Hours: {quote['postmarket_change']:+.2f}%
-                    
-                    **Quick Setup:** Watch for continuation or reversal around current levels
-                    
-                    *AI analysis unavailable: {str(ai_error)[:50]}...*
-                    """
-            else:
-                # Fallback analysis without AI
-                direction = "bullish" if quote['change_percent'] > 0 else "bearish"
-                play_analysis = f"""
-                **{ticker} Trading Setup**
-                
-                **Movement:** {quote['change_percent']:+.2f}% change showing {direction} momentum
-                
-                **Session Analysis:**
-                • Premarket: {quote['premarket_change']:+.2f}%
-                • Intraday: {quote['intraday_change']:+.2f}%
-                • After Hours: {quote['postmarket_change']:+.2f}%
-                
-                **Volume:** {quote['volume']:,} shares
-                
-                **Setup:** Monitor for continuation or reversal. Consider risk management around current price levels.
-                
-                *Configure OpenAI API for detailed AI analysis*
-                """
+            # Generate AI analysis (now uses enhanced ai_playbook with Gemini fallback)
+            play_analysis = ai_playbook(ticker, quote['change_percent'], catalyst)
             
             # Create play dictionary
             play = {
@@ -422,6 +474,46 @@ def ai_auto_generate_plays(tz: str):
     except Exception as e:
         st.error(f"Error generating auto plays: {str(e)}")
         return []
+
+def get_sector_etf_data(tz: str = "ET") -> pd.DataFrame:
+    """
+    Fetch live data for sector ETFs and indices (including SPX and NDX).
+    """
+    data = []
+    tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
+    sector_map = {
+        "SPY": "Broad Market (S&P 500 ETF)",
+        "QQQ": "Technology (Nasdaq-100 ETF)",
+        "XLF": "Financials",
+        "XLE": "Energy",
+        "XLK": "Technology",
+        "XLV": "Healthcare",
+        "XLY": "Consumer Discretionary",
+        "XLI": "Industrials",
+        "XLP": "Consumer Staples",
+        "XLU": "Utilities",
+        "XLB": "Materials",
+        "XLC": "Communication Services",
+        "SPX": "Broad Market (S&P 500 Index)",
+        "NDX": "Technology (Nasdaq-100 Index)"
+    }
+    
+    for ticker in ETF_TICKERS:
+        quote = get_live_quote(ticker, tz)
+        if not quote["error"]:
+            data.append({
+                "ETF/Index": ticker,
+                "Sector": sector_map.get(ticker, "Unknown"),
+                "Price": quote["last"],
+                "Change %": quote["change_percent"],
+                "Volume": quote.get("volume", 0),
+                "Last Updated": quote["last_updated"]
+            })
+    
+    df = pd.DataFrame(data)
+    # Sort by Change % descending for better visualization
+    df = df.sort_values("Change %", ascending=False)
+    return df
 
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
@@ -456,8 +548,8 @@ with col4:
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time} {tz_label}")
 
-# Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks"])
+# Create tabs (added new tab for Sector/ETF Tracker)
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "📊 Sector/ETF Tracker"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -991,6 +1083,53 @@ with tabs[4]:
         **Note:** These are AI-generated suggestions for educational purposes. Always do your own research and risk management.
         """)
 
+# TAB 6: Sector/ETF Tracker (New Tab)
+with tabs[5]:
+    st.subheader("📊 Sector/ETF Tracker")
+    
+    # Refresh button for ETF data
+    if st.button("🔄 Refresh ETF Data", type="primary"):
+        with st.spinner("Fetching ETF data..."):
+            df = get_sector_etf_data(tz_label)
+            if not df.empty:
+                st.success(f"Updated {len(df)} ETFs/Indices")
+                st.dataframe(df.style.format({
+                    "Price": "${:.2f}",
+                    "Change %": "{:+.2f}%",
+                    "Volume": "{:,.0f}"
+                }), use_container_width=True)
+                
+                # Sector summary
+                sector_summary = df.groupby("Sector").agg({
+                    "Change %": "mean",
+                    "Volume": "sum"
+                }).round(2).reset_index()
+                sector_summary = sector_summary.sort_values("Change %", ascending=False)
+                
+                st.markdown("### 📈 Sector Performance Summary")
+                st.dataframe(sector_summary.style.format({
+                    "Change %": "{:+.2f}%",
+                    "Volume": "{:,.0f}"
+                }), use_container_width=True)
+                
+                # Highlight top/bottom performer
+                top_sector = sector_summary.iloc[0]["Sector"]
+                bottom_sector = sector_summary.iloc[-1]["Sector"]
+                st.info(f"**Top Sector:** {top_sector} ({sector_summary.iloc[0]['Change %']:+.2f}%)")
+                st.warning(f"**Lagging Sector:** {bottom_sector} ({sector_summary.iloc[-1]['Change %']:+.2f}%)")
+            else:
+                st.error("No ETF data available. Check API keys and internet connection.")
+    
+    # Instructions
+    with st.expander("ℹ️ About Sector/ETF Tracker"):
+        st.markdown("""
+        This tab tracks major sector ETFs and indices (including SPX and NDX) for quick market overview.
+        - **ETFs**: SPY (S&P 500), QQQ (Nasdaq-100), XLF (Financials), etc.
+        - **Indices**: SPX (S&P 500), NDX (Nasdaq-100).
+        - Data sourced from yfinance (free, live during market hours).
+        - Refresh to update. Add ETFs to your watchlist for detailed analysis.
+        """)
+
 # Auto refresh
 if st.session_state.auto_refresh:
     time.sleep(0.1)
@@ -1001,7 +1140,7 @@ if st.session_state.auto_refresh:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "🔥 AI Radar Pro | Live data: yfinance | News: Finnhub/Polygon | AI: OpenAI"
+    "🔥 AI Radar Pro | Live data: yfinance | News: Finnhub/Polygon | AI: OpenAI/Gemini (Free Tier)"
     "</div>",
     unsafe_allow_html=True
 )
