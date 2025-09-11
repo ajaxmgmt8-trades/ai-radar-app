@@ -20,3 +20,5 @@ tzdata>=2023.3
 
 # Optional: for JSON + config handling
 python-dateutil>=2.8.2
+google-generativeai==0.7.2
+
