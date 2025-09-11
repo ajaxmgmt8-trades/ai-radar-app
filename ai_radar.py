@@ -10,7 +10,6 @@ import numpy as np
 import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
-from ta.trend import SMAIndicator  # For rule-based fallback
 import google.generativeai as genai  # For free Gemini integration
 
 # Configure page
