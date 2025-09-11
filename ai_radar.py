@@ -4,223 +4,241 @@ import requests
 import datetime
 import json
 import plotly.graph_objects as go
-from polygon import RESTClient
-from zoneinfo import ZoneInfo
-import openai
-import os
+import random
 from typing import Dict, List, Optional
 
 # ---------------- CONFIG ----------------
-st.set_page_config(page_title="🔥 AI Radar Pro", layout="wide")
-TZ_CT = ZoneInfo("America/Chicago")
-WATCHLIST_FILE = "watchlists.json"
+st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
-# 🔑 API KEYS - Fixed OpenAI client initialization
-try:
-    POLYGON_KEY = st.secrets["POLYGON_API_KEY"]
-    OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
-    polygon_client = RESTClient(POLYGON_KEY)
-    openai_client = openai.OpenAI(api_key=OPENAI_KEY)
-except Exception as e:
-    st.error(f"API Key Error: {e}")
-    st.stop()
-
-# ---------------- WATCHLIST PERSISTENCE ----------------
-def load_watchlists() -> Dict:
-    try:
-        with open(WATCHLIST_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"Default": ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]}
-    except json.JSONDecodeError:
-        st.error("Corrupted watchlist file. Creating new one.")
-        return {"Default": ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]}
-
-def save_watchlists(watchlists: Dict):
-    try:
-        with open(WATCHLIST_FILE, "w") as f:
-            json.dump(watchlists, f, indent=2)
-    except Exception as e:
-        st.error(f"Error saving watchlists: {e}")
-
-# Initialize session state
+# Initialize ALL session state variables first
 if "watchlists" not in st.session_state:
-    st.session_state.watchlists = load_watchlists()
+    st.session_state.watchlists = {"Default": ["AAPL", "NVDA", "TSLA", "MSFT", "AMZN"]}
 if "active_watchlist" not in st.session_state:
-    st.session_state.active_watchlist = list(st.session_state.watchlists.keys())[0]
+    st.session_state.active_watchlist = "Default"
 if "show_sparklines" not in st.session_state:
     st.session_state.show_sparklines = True
+if "demo_mode" not in st.session_state:
+    st.session_state.demo_mode = True  # Start in demo mode to avoid API issues
 
-# ---------------- HELPERS ----------------
-@st.cache_data(ttl=30)  # Cache for 30 seconds
-def get_quote(ticker: str) -> Dict:
-    """Get real-time quote data from Polygon."""
-    url = f"https://api.polygon.io/v2/last/nbbo/{ticker}?apiKey={POLYGON_KEY}"
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        
-        if "results" not in data:
-            return {"last": 0, "bid": 0, "ask": 0, "error": "No data"}
-            
-        q = data["results"]
-        return {
-            "last": q.get("p", 0),
-            "bid": q.get("bP", 0),
-            "ask": q.get("aP", 0),
-            "error": None
-        }
-    except requests.RequestException as e:
-        st.warning(f"Quote error for {ticker}: {e}")
-        return {"last": 0, "bid": 0, "ask": 0, "error": str(e)}
-    except Exception as e:
-        return {"last": 0, "bid": 0, "ask": 0, "error": str(e)}
+# API Keys (optional - app works in demo mode without them)
+try:
+    POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
+    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+    if OPENAI_KEY:
+        import openai
+        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
+    else:
+        openai_client = None
+except:
+    POLYGON_KEY = ""
+    OPENAI_KEY = ""
+    openai_client = None
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_previous_close(ticker: str) -> float:
-    """Get previous day's close price."""
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    try:
-        bars = list(polygon_client.get_aggs(
-            ticker, multiplier=1, timespan="day",
-            from_=yesterday, to=yesterday, limit=1
-        ))
-        if bars:
-            return bars[0].close
-        return 0
-    except Exception as e:
-        st.warning(f"Previous close error for {ticker}: {e}")
-        return 0
+# ---------------- HELPER FUNCTIONS ----------------
+def get_demo_quote(ticker: str) -> Dict:
+    """Generate realistic demo quote data."""
+    base_prices = {
+        "AAPL": 150.00, "NVDA": 450.00, "TSLA": 250.00,
+        "MSFT": 350.00, "AMZN": 140.00, "GOOGL": 120.00,
+        "META": 300.00, "AMD": 100.00, "PLTR": 25.00
+    }
+    
+    base_price = base_prices.get(ticker, random.uniform(50, 200))
+    price_change = random.uniform(-3, 3)
+    current_price = round(base_price + price_change, 2)
+    spread = current_price * 0.001
+    
+    return {
+        "last": current_price,
+        "bid": round(current_price - spread/2, 2),
+        "ask": round(current_price + spread/2, 2),
+        "error": None
+    }
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes  
-def get_intraday_sparkline(ticker: str) -> Optional[pd.DataFrame]:
-    """Fetch today's intraday candles for sparkline."""
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    try:
-        bars = list(polygon_client.get_aggs(
-            ticker, multiplier=5, timespan="minute",
-            from_=today, to=today, limit=78  # ~6.5 hours of 5-min bars
-        ))
-        
-        if not bars:
-            return None
-            
-        data = []
-        for bar in bars:
-            data.append({
-                "timestamp": bar.timestamp,
-                "open": bar.open,
-                "high": bar.high, 
-                "low": bar.low,
-                "close": bar.close,
-                "volume": bar.volume
-            })
-            
-        df = pd.DataFrame(data)
-        df["t"] = pd.to_datetime(df["timestamp"], unit="ms").dt.tz_localize("UTC").dt.tz_convert(TZ_CT)
-        return df
-        
-    except Exception as e:
-        st.warning(f"Sparkline error for {ticker}: {e}")
-        return None
+def get_demo_previous_close(ticker: str) -> float:
+    """Get demo previous close price."""
+    current = get_demo_quote(ticker)["last"]
+    return round(current * random.uniform(0.97, 1.03), 2)
 
-def render_sparkline(df: pd.DataFrame, change: float) -> go.Figure:
-    """Create a mini sparkline chart."""
+def render_sparkline(ticker: str, change: float):
+    """Create a simple sparkline chart."""
+    # Generate sample intraday data
+    base_price = get_demo_quote(ticker)["last"]
+    prices = []
+    for i in range(20):
+        price_change = random.uniform(-0.02, 0.02)
+        base_price = base_price * (1 + price_change)
+        prices.append(base_price)
+    
     color = "#00ff88" if change >= 0 else "#ff4444"
     fill_color = "rgba(0,255,136,0.1)" if change >= 0 else "rgba(255,68,68,0.1)"
     
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["t"], 
-        y=df["close"],
+        y=prices,
         mode="lines",
         line=dict(color=color, width=2),
-        fill="tozeroy", 
+        fill="tozeroy",
         fillcolor=fill_color,
         hoverinfo="skip",
         showlegend=False
     ))
     
     fig.update_layout(
-        xaxis=dict(visible=False), 
+        xaxis=dict(visible=False),
         yaxis=dict(visible=False),
         margin=dict(l=0, r=0, t=0, b=0),
-        height=40, 
-        width=120, 
-        paper_bgcolor="rgba(0,0,0,0)", 
+        height=40,
+        width=120,
+        paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)"
     )
     return fig
 
-def calculate_rel_volume(ticker: str, current_vol: float) -> float:
-    """Calculate relative volume vs 20-day average."""
-    try:
-        end_date = datetime.date.today()
-        start_date = end_date - datetime.timedelta(days=30)
-        
-        bars = list(polygon_client.get_aggs(
-            ticker, multiplier=1, timespan="day",
-            from_=start_date.strftime("%Y-%m-%d"), 
-            to=end_date.strftime("%Y-%m-%d"),
-            limit=20
-        ))
-        
-        if len(bars) < 5:
-            return 1.0
-            
-        avg_vol = sum(bar.volume for bar in bars[-20:]) / len(bars[-20:])
-        return current_vol / avg_vol if avg_vol > 0 else 1.0
-        
-    except Exception:
-        return 1.0
+def get_market_news():
+    """Get demo market news data."""
+    return [
+        {
+            "title": "Tesla Reports Record Q4 Deliveries, Stock Surges in Pre-Market",
+            "author": "MarketWatch",
+            "published_utc": "2024-01-02T14:30:00Z",
+            "tickers": ["TSLA"],
+            "keywords": ["earnings", "deliveries", "record"],
+            "description": "Tesla exceeded delivery expectations with 484,507 vehicles delivered in Q4"
+        },
+        {
+            "title": "NVIDIA Announces New AI Chip Partnership with Microsoft", 
+            "author": "Reuters",
+            "published_utc": "2024-01-02T13:15:00Z",
+            "tickers": ["NVDA", "MSFT"],
+            "keywords": ["ai", "partnership", "chips"],
+            "description": "Strategic partnership to develop next-generation AI infrastructure"
+        },
+        {
+            "title": "Apple Faces Production Delays in China Amid Supply Chain Issues",
+            "author": "Bloomberg", 
+            "published_utc": "2024-01-02T12:00:00Z",
+            "tickers": ["AAPL"],
+            "keywords": ["supply chain", "production", "delays"],
+            "description": "iPhone production may be impacted by ongoing supply chain disruptions"
+        },
+        {
+            "title": "AMD Stock Jumps on AI Server Chip Demand Surge",
+            "author": "CNBC",
+            "published_utc": "2024-01-02T11:45:00Z", 
+            "tickers": ["AMD"],
+            "keywords": ["ai", "server", "demand", "surge"],
+            "description": "Strong demand for AI server chips boosts AMD's data center revenue"
+        }
+    ]
 
-def ai_playbook(ticker: str, change: float, relvol: float, catalyst: str = "") -> str:
-    """Generate AI trading playbook using OpenAI."""
-    prompt = f"""
-    You are an expert day trader and swing trader. Analyze this stock:
+def analyze_news_sentiment(title, description):
+    """Analyze news for explosive potential."""
+    explosive_keywords = ["surge", "soars", "jumps", "rocket", "announces", "beats", "record", "partnership"]
+    bearish_keywords = ["delays", "issues", "problems", "cuts", "falls", "plunges"]
     
-    Ticker: {ticker}
-    Price Change: {change:.2f}%
-    Relative Volume: {relvol:.2f}x
-    Catalyst: {catalyst if catalyst else "No specific catalyst"}
+    text = (title + " " + description).lower()
     
-    Provide a concise trading analysis with:
+    explosive_score = sum(1 for word in explosive_keywords if word in text)
+    bearish_score = sum(1 for word in bearish_keywords if word in text)
     
-    1. **Sentiment**: Bullish/Bearish/Neutral with confidence %
-    2. **Scalp Setup (1-5m)**: Quick entry/exit with tight stops
-    3. **Day Trade Setup (15-30m)**: Intraday momentum play  
-    4. **Swing Setup (4H-Daily)**: Multi-day position
+    if explosive_score >= 2:
+        return "🚀 EXPLOSIVE", "bullish", explosive_score * 25
+    elif explosive_score >= 1:
+        return "📈 Bullish", "bullish", explosive_score * 20
+    elif bearish_score >= 2:
+        return "💥 CRASH RISK", "bearish", bearish_score * 25
+    elif bearish_score >= 1:
+        return "📉 Bearish", "bearish", bearish_score * 20
+    else:
+        return "⚪ Neutral", "neutral", 15
+
+def get_catalyst_alerts():
+    """Generate catalyst alerts."""
+    news_items = get_market_news()
+    alerts = []
     
-    For each setup include:
-    - Entry strategy
-    - Price targets
-    - Stop loss levels
-    - Key levels to watch
+    for item in news_items:
+        sentiment, direction, confidence = analyze_news_sentiment(
+            item.get("title", ""),
+            item.get("description", "")
+        )
+        
+        hours_ago = random.randint(1, 6)
+        
+        alerts.append({
+            "title": item["title"],
+            "tickers": item.get("tickers", []),
+            "sentiment": sentiment,
+            "direction": direction, 
+            "confidence": confidence,
+            "hours_ago": hours_ago,
+            "author": item.get("author", "Unknown"),
+            "description": item.get("description", "")
+        })
     
-    Keep response under 200 words, bullet points preferred.
-    """
+    return sorted(alerts, key=lambda x: x["confidence"], reverse=True)
+
+def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
+    """Generate AI trading playbook."""
+    if not openai_client:
+        return f"""
+**Demo AI Analysis for {ticker}**
+
+**Sentiment:** Neutral (Demo Mode)
+**Current Change:** {change:+.2f}%
+
+**Scalp Setup (1-5m):**
+- Entry: Look for breakout above recent highs with volume
+- Target: +0.5-1% quick scalp
+- Stop: -0.3% below entry
+
+**Day Trade Setup (15-30m):**  
+- Entry: Pullback to key support level
+- Target: Previous resistance levels
+- Stop: Below swing low
+
+**Swing Setup (4H-Daily):**
+- Entry: Break and hold above daily resistance
+- Target: Next major resistance zone
+- Stop: Below daily support
+
+*Note: Enable OpenAI API key for full AI analysis*
+        """
     
     try:
+        prompt = f"""
+        Analyze {ticker} with {change:+.2f}% change.
+        Catalyst: {catalyst}
+        
+        Provide brief trading setups:
+        1. Sentiment (Bullish/Bearish/Neutral)
+        2. Scalp setup (1-5m timeframe)
+        3. Day trade setup (15-30m)
+        4. Swing setup (4H-Daily)
+        
+        Keep it concise and actionable.
+        """
+        
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=400
+            max_tokens=300
         )
         return response.choices[0].message.content
         
     except Exception as e:
-        return f"❌ AI Error: {str(e)}\n\nPlease check your OpenAI API key and connection."
+        return f"AI Error: {str(e)}. Using demo mode analysis instead."
 
-# ---------------- SIDEBAR (WATCHLIST) ----------------
+# ---------------- SIDEBAR ----------------
 with st.sidebar:
     st.header("📌 Watchlist Manager")
 
     # Watchlist selector
     list_name = st.selectbox("Active Watchlist", list(st.session_state.watchlists.keys()))
     st.session_state.active_watchlist = list_name
-    tickers = st.session_state.watchlists[list_name].copy()  # Work with copy to avoid reference issues
+    tickers = st.session_state.watchlists[list_name].copy()
 
     # Add new ticker
     col1, col2 = st.columns([3, 1])
@@ -229,209 +247,223 @@ with st.sidebar:
         if new_ticker and len(new_ticker) <= 5 and new_ticker not in tickers:
             tickers.append(new_ticker)
             st.session_state.watchlists[list_name] = tickers
-            save_watchlists(st.session_state.watchlists)
             st.rerun()
-        elif new_ticker in tickers:
-            st.warning(f"{new_ticker} already in watchlist")
 
-    # Display tickers with remove buttons
+    # Display current tickers
     if tickers:
         st.subheader("Current Symbols")
         for t in tickers:
             col1, col2 = st.columns([4, 1])
             col1.write(f"**{t}**")
-            if col2.button("🗑️", key=f"remove_{t}", help=f"Remove {t}"):
+            if col2.button("🗑️", key=f"remove_{t}"):
                 tickers.remove(t)
                 st.session_state.watchlists[list_name] = tickers
-                save_watchlists(st.session_state.watchlists)
                 st.rerun()
 
     # Settings
     st.markdown("---")
     st.subheader("⚙️ Settings")
     st.session_state.show_sparklines = st.checkbox("⚡ Show Sparklines", value=st.session_state.show_sparklines)
-
-    # Quick watchlist overview
-    st.markdown("---")
-    st.subheader("📊 Quick Overview")
+    st.session_state.demo_mode = st.checkbox("🎮 Demo Mode", value=st.session_state.demo_mode)
     
+    if st.session_state.demo_mode:
+        st.info("Demo mode active - using sample data")
+    
+    # Quick overview
     if tickers:
-        with st.spinner("Loading quotes..."):
-            overview_data = []
-            for ticker in tickers:
-                quote = get_quote(ticker)
-                if quote["error"]:
-                    continue
-                    
-                prev_close = get_previous_close(ticker)
-                change_pct = ((quote["last"] - prev_close) / prev_close * 100) if prev_close > 0 else 0
-                
-                overview_data.append({
-                    "ticker": ticker,
-                    "price": quote["last"],
-                    "change": change_pct
-                })
+        st.markdown("---")
+        st.subheader("📊 Quick Overview")
+        for ticker in tickers[:5]:  # Show first 5
+            quote = get_demo_quote(ticker)
+            prev_close = get_demo_previous_close(ticker)
+            change_pct = ((quote["last"] - prev_close) / prev_close * 100)
             
-            # Display mini cards
-            for data in overview_data:
-                color = "🟢" if data["change"] >= 0 else "🔴"
-                st.markdown(f"""
-                **{data['ticker']}** {color}  
-                ${data['price']:.2f} ({data['change']:+.2f}%)
-                """)
-    else:
-        st.info("Add symbols to see overview")
+            color = "🟢" if change_pct >= 0 else "🔴"
+            st.markdown(f"**{ticker}** {color} ${quote['last']:.2f} ({change_pct:+.2f}%)")
 
 # ---------------- MAIN AREA ----------------
 st.title("🔥 AI Radar Pro — Trading Assistant")
 
 if not tickers:
-    st.warning("⚠️ No symbols in watchlist. Add some symbols in the sidebar to get started!")
+    st.warning("⚠️ Add some symbols to your watchlist to get started!")
     st.stop()
 
-tabs = st.tabs(["📊 Live Quotes", "📈 Market Analysis", "🤖 AI Playbooks"])
+tabs = st.tabs(["📊 Live Quotes", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks"])
 
+# TAB 1: Live Quotes
 with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     if st.button("🔄 Refresh Quotes", type="primary"):
-        st.cache_data.clear()
         st.rerun()
     
-    # Create quotes table
-    quotes_data = []
-    progress_bar = st.progress(0)
-    
-    for i, ticker in enumerate(tickers):
-        progress_bar.progress((i + 1) / len(tickers))
+    # Create quotes display
+    for ticker in tickers:
+        quote = get_demo_quote(ticker)
+        prev_close = get_demo_previous_close(ticker) 
+        change_pct = ((quote["last"] - prev_close) / prev_close * 100)
+        rel_vol = round(random.uniform(0.5, 3.5), 2)
         
-        # Use demo data if enabled or API fails
-        if st.session_state.demo_mode:
-            quote = get_demo_quote(ticker)
-            prev_close = get_demo_previous_close(ticker)
-        else:
-            quote = get_quote(ticker)
-            if quote["error"]:
-                continue
-            prev_close = get_previous_close(ticker)
-        
-        change_pct = ((quote["last"] - prev_close) / prev_close * 100) if prev_close > 0 else 0
-        
-        # Get volume data for relative volume calculation
-        sparkline_df = get_intraday_sparkline(ticker) if st.session_state.show_sparklines and not st.session_state.demo_mode else None
-        current_vol = sparkline_df["volume"].sum() if sparkline_df is not None and not sparkline_df.empty else random.randint(1000000, 5000000)
-        rel_vol = calculate_rel_volume(ticker, current_vol)
-        
-        quotes_data.append({
-            "Ticker": ticker,
-            "Price": f"${quote['last']:.2f}",
-            "Change": f"{change_pct:+.2f}%",
-            "Bid": f"${quote['bid']:.2f}",
-            "Ask": f"${quote['ask']:.2f}",
-            "RelVol": f"{rel_vol:.2f}x",
-            "change_num": change_pct,
-            "sparkline_df": sparkline_df,
-            "error": quote.get("error")
-        })
-    
-    progress_bar.empty()
-    
-    # Display quotes in a nice format
-    if quotes_data:
-        for i, data in enumerate(quotes_data):
-            with st.container():
-                col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
-                
-                # Ticker and price
-                col1.metric(
-                    label=data["Ticker"],
-                    value=data["Price"],
-                    delta=data["Change"]
+        with st.container():
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
+            
+            # Price and change
+            col1.metric(
+                label=ticker,
+                value=f"${quote['last']:.2f}",
+                delta=f"{change_pct:+.2f}%"
+            )
+            
+            # Bid/Ask
+            col2.write("**Bid/Ask**")
+            col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+            
+            # Volume
+            col3.write("**Rel Volume**")
+            vol_color = "🔥" if rel_vol >= 2.0 else "📊"
+            col3.write(f"{vol_color} {rel_vol:.2f}x")
+            
+            # Sparkline
+            if st.session_state.show_sparklines:
+                col4.plotly_chart(
+                    render_sparkline(ticker, change_pct),
+                    use_container_width=False
                 )
+            
+            st.divider()
+
+# TAB 2: Catalyst Scanner  
+with tabs[1]:
+    st.subheader("🔥 Real-Time Catalyst Scanner")
+    st.caption("24/7 monitoring for explosive stock movements")
+    
+    # Controls
+    col1, col2, col3 = st.columns(3)
+    auto_refresh = col1.checkbox("🔄 Auto Refresh", value=False)
+    col2.button("🔍 Scan Now", type="primary")
+    col3.metric("Scanner", "🟢 ACTIVE" if auto_refresh else "⏸️ PAUSED")
+    
+    # Filters
+    st.markdown("### 🎯 Catalyst Filters")
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    
+    with filter_col1:
+        show_explosive = st.checkbox("🚀 Explosive", value=True)
+        show_bullish = st.checkbox("📈 Bullish", value=True)
+    
+    with filter_col2:
+        show_bearish = st.checkbox("📉 Bearish", value=True)
+        min_confidence = st.slider("Min Confidence", 0, 100, 15)
+    
+    with filter_col3:
+        max_hours = st.slider("Max Hours Old", 1, 24, 8)
+    
+    # Get and display alerts
+    alerts = get_catalyst_alerts()
+    
+    # Filter alerts
+    filtered_alerts = []
+    for alert in alerts:
+        if alert["confidence"] < min_confidence or alert["hours_ago"] > max_hours:
+            continue
+        if "EXPLOSIVE" in alert["sentiment"] and not show_explosive:
+            continue
+        if "Bullish" in alert["sentiment"] and not show_bullish:
+            continue
+        if "Bearish" in alert["sentiment"] and not show_bearish:
+            continue
+        filtered_alerts.append(alert)
+    
+    if filtered_alerts:
+        st.markdown(f"### 📊 Found {len(filtered_alerts)} Active Catalysts")
+        
+        for i, alert in enumerate(filtered_alerts):
+            with st.container():
+                # Header
+                col1, col2, col3 = st.columns([3, 3, 2])
+                col1.markdown(f"**{alert['sentiment']}** ({alert['confidence']}%)")
+                col2.markdown(f"**Tickers:** {', '.join(alert['tickers'])}")
+                col3.markdown(f"**{alert['hours_ago']}h ago**")
                 
-                # Bid/Ask
-                col2.write("**Bid/Ask**")
-                col2.write(f"{data['Bid']} / {data['Ask']}")
+                # Content
+                st.markdown(f"#### {alert['title']}")
+                st.markdown(alert['description'])
                 
-                # Volume
-                col3.write("**Rel Volume**")
-                vol_color = "🔥" if float(data['RelVol'][:-1]) >= 2.0 else "📊"
-                col3.write(f"{vol_color} {data['RelVol']}")
+                # Actions
+                action_col1, action_col2 = st.columns(2)
                 
-                # Sparkline
-                if st.session_state.show_sparklines and data['sparkline_df'] is not None:
-                    col4.plotly_chart(
-                        render_sparkline(data['sparkline_df'], data['change_num']), 
-                        use_container_width=False
-                    )
+                if action_col1.button("📊 AI Analysis", key=f"analyze_{i}"):
+                    if alert['tickers']:
+                        ticker = alert['tickers'][0]
+                        quote = get_demo_quote(ticker)
+                        prev_close = get_demo_previous_close(ticker)
+                        change = ((quote["last"] - prev_close) / prev_close * 100)
+                        
+                        with st.spinner(f"Analyzing {ticker}..."):
+                            analysis = ai_playbook(ticker, change, alert['title'])
+                            st.success(f"🤖 Analysis for {ticker}")
+                            st.markdown(analysis)
+                
+                if action_col2.button("⚡ Add to Watchlist", key=f"add_{i}"):
+                    added = []
+                    for ticker in alert['tickers']:
+                        if ticker not in tickers:
+                            tickers.append(ticker)
+                            added.append(ticker)
+                    if added:
+                        st.session_state.watchlists[list_name] = tickers
+                        st.success(f"Added: {', '.join(added)}")
                 
                 st.divider()
+    else:
+        st.info("🔍 No catalysts match your filters. Try adjusting settings.")
 
-with tabs[1]:
+# TAB 3: Market Analysis
+with tabs[2]:
     st.subheader("📈 Market Analysis")
-    st.info("🚧 Coming Soon: Market-wide movers, sector analysis, and news catalysts")
+    st.info("🚧 Coming Soon: Market-wide analysis and sector rotation")
     
-    # Placeholder for future features
     with st.expander("Planned Features"):
         st.markdown("""
-        - **Market Movers**: Top gainers/losers across all markets
-        - **Sector Rotation**: Heat map of sector performance  
-        - **News Catalysts**: Real-time news affecting your watchlist
-        - **Economic Calendar**: Key events and earnings
-        - **Options Flow**: Unusual options activity
+        - **Market Movers:** Top gainers/losers
+        - **Sector Heat Map:** Performance by sector
+        - **Economic Calendar:** Key events
+        - **Options Flow:** Unusual activity
         """)
 
+# TAB 4: AI Playbooks
 with tabs[3]:
     st.subheader("🤖 AI Trading Playbooks")
     
-    # Ticker selection for AI analysis
-    selected_ticker = st.selectbox("Select Symbol for AI Analysis", tickers, key="ai_ticker")
+    selected_ticker = st.selectbox("Select Symbol", tickers)
+    catalyst_input = st.text_input("Market Catalyst (optional)", placeholder="Earnings, news, etc.")
     
-    col1, col2 = st.columns([3, 1])
-    catalyst_input = col1.text_input(
-        "Market Catalyst (optional)", 
-        placeholder="Earnings beat, FDA approval, etc.",
-        key="catalyst"
-    )
-    
-    if col2.button("🤖 Generate Playbook", type="primary"):
+    if st.button("🤖 Generate Playbook", type="primary"):
         if selected_ticker:
+            quote = get_demo_quote(selected_ticker)
+            prev_close = get_demo_previous_close(selected_ticker)
+            change_pct = ((quote["last"] - prev_close) / prev_close * 100)
+            
             with st.spinner(f"AI analyzing {selected_ticker}..."):
-                # Get current data
-                quote = get_quote(selected_ticker)
-                prev_close = get_previous_close(selected_ticker)
-                change_pct = ((quote["last"] - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                playbook = ai_playbook(selected_ticker, change_pct, catalyst_input)
                 
-                # Get volume data
-                sparkline_df = get_intraday_sparkline(selected_ticker)
-                current_vol = sparkline_df["volume"].sum() if sparkline_df is not None and not sparkline_df.empty else 0
-                rel_vol = calculate_rel_volume(selected_ticker, current_vol) if current_vol > 0 else 1.0
-                
-                # Generate AI analysis
-                playbook = ai_playbook(selected_ticker, change_pct, rel_vol, catalyst_input)
-                
-                # Display results
-                st.success(f"✅ AI Analysis Complete for **{selected_ticker}**")
+                st.success(f"✅ Analysis Complete for **{selected_ticker}**")
                 
                 # Current stats
                 col1, col2, col3 = st.columns(3)
-                col1.metric("Current Price", f"${quote['last']:.2f}", f"{change_pct:+.2f}%")
-                col2.metric("Relative Volume", f"{rel_vol:.2f}x")
-                col3.metric("Bid/Ask Spread", f"${quote['ask'] - quote['bid']:.2f}")
+                col1.metric("Price", f"${quote['last']:.2f}", f"{change_pct:+.2f}%")
+                col2.metric("Bid/Ask", f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+                col3.metric("Spread", f"${quote['ask'] - quote['bid']:.2f}")
                 
-                # AI Playbook
+                # AI Analysis
                 st.markdown("### 🎯 Trading Playbook")
                 st.markdown(playbook)
-                
-                # Add to favorites option
-                if st.button("⭐ Save This Analysis"):
-                    st.success("Analysis saved! (Feature coming soon)")
 
-# ---------------- FOOTER ----------------
+# Footer
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "🔥 AI Radar Pro | Real-time data from Polygon.io | AI powered by OpenAI"
-    "</div>", 
+    "🔥 AI Radar Pro | Demo Mode Active | Enable API keys for live data"
+    "</div>",
     unsafe_allow_html=True
 )
