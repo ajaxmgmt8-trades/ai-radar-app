@@ -1,43 +1,29 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
 from openai import OpenAI
 
-# ---------------- CONFIG ----------------
-st.set_page_config(page_title="🔥 AI Radar Pro", layout="wide")
-REFRESH_INTERVAL = 5000  # ms (5s live refresh)
+# =====================
+# CONFIG
+# =====================
+st.set_page_config(page_title="🔥 AI Radar Pro — Live Trading Assistant", layout="wide")
+REFRESH_INTERVAL = 5000  # ms (5 seconds)
 
-CORE_TICKERS = [
-    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
-    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
-    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
-    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
-    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
-    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
-    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
-    "CELH","PDD"
-]
-
-# ---------------- API KEYS ----------------
+# Safe auto-refresh (handles old/new Streamlit)
 try:
-    OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
-    openai_client = OpenAI(api_key=OPENAI_KEY)
-except Exception:
-    openai_client = None
+    st_autorefresh = st.autorefresh(interval=REFRESH_INTERVAL, key="refresh")
+except AttributeError:
+    try:
+        st_autorefresh = st.experimental_autorefresh(interval=REFRESH_INTERVAL, key="refresh")
+    except Exception:
+        st.warning("⚠️ Auto-refresh not available in this Streamlit version. Please upgrade.")
 
-if "playbook_output" not in st.session_state:
-    st.session_state.playbook_output = ""
+# =====================
+# HELPERS
+# =====================
+CORE_TICKERS = ["AAPL","MSFT","NVDA","TSLA","AMZN"]
 
-# ---------------- HELPERS ----------------
-@st.cache_data(ttl=300, show_spinner=False)
-def avg_volume(ticker, lookback=20):
-    hist = yf.download(ticker, period=f"{lookback}d", interval="1d", progress=False)
-    if hist.empty or "Volume" not in hist:
-        return None
-    return float(hist["Volume"].mean())
-
-def scan_ticker(ticker):
+def get_quote(ticker):
     try:
         data = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
         if data.empty:
@@ -45,105 +31,98 @@ def scan_ticker(ticker):
         last = float(data["Close"].iloc[-1])
         prev = float(data["Close"].iloc[0])
         change = (last - prev) / prev * 100 if prev > 0 else 0
-        rel_vol = data["Volume"].sum() / (avg_volume(ticker) or 1)
-        return float(last), float(change or 0), float(rel_vol or 1.0)
+        vol = data["Volume"].sum()
+        avg_vol = data["Volume"].mean()
+        relvol = vol / avg_vol if avg_vol > 0 else 1
+        return {"last": last, "prev": prev, "change": change, "relvol": relvol}
     except Exception:
         return None
 
-def ai_playbook(ticker: str, change: float, relvol: float, catalyst: str = ""):
-    if not openai_client:
-        return "⚠️ OpenAI key missing."
-    prompt = f"""
-    You are an expert trader. Analyze {ticker}:
-    - Change: {change:+.2f}%
-    - Relative Volume: {relvol:.2f}x
-    - Catalyst: {catalyst if catalyst else "None"}
+def get_top_movers():
+    movers = []
+    for t in CORE_TICKERS:  # can expand universe
+        q = get_quote(t)
+        if not q:
+            continue
+        movers.append({
+            "Ticker": t,
+            "Price": q["last"],
+            "Change %": q["change"],
+            "RelVol": q["relvol"]
+        })
+    if not movers:
+        return pd.DataFrame(columns=["Ticker","Price","Change %","RelVol"])
+    df = pd.DataFrame(movers)
+    df = df.sort_values("Change %", ascending=False).head(10).reset_index(drop=True)
+    # Format
+    df["Price"] = df["Price"].map(lambda x: f"${x:.2f}")
+    df["Change %"] = df["Change %"].map(lambda x: f"{x:+.2f}%")
+    df["RelVol"] = df["RelVol"].map(lambda x: f"{x:.2f}x")
+    return df
 
-    Provide:
-    1. Sentiment + confidence
-    2. Scalp setup (1-5m)
-    3. Day trade setup (15-30m)
-    4. Swing setup (4H-Daily)
-    """
+def ai_playbook(ticker, change, catalyst=""):
     try:
-        resp = openai_client.chat.completions.create(
+        client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+        prompt = f"""
+        Ticker: {ticker}
+        Change: {change:+.2f}%
+        Catalyst: {catalyst}
+
+        Generate setups:
+        1) Sentiment
+        2) Scalp plan (1-5m)
+        3) Day trade plan (15-30m)
+        4) Swing plan (4H-Daily)
+        """
+        resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role":"user","content":prompt}],
-            max_tokens=400,
-            temperature=0.3
+            temperature=0.3,
+            max_tokens=300
         )
         return resp.choices[0].message.content
     except Exception as e:
-        return f"AI Error: {e}"
+        return f"⚠️ AI Playbook unavailable: {e}"
 
-def render_session(tab, session_name, tickers):
-    with tab:
-        st.subheader(f"{session_name} Movers")
-
-        rows = []
-        for t in tickers:
-            result = scan_ticker(t)
-            if not result:
-                continue
-            last, change, relvol = result
-            rows.append({
-                "Ticker": t,
-                "Price": f"${last:.2f}",
-                "Change %": f"{change:+.2f}%",
-                "RelVol": f"{relvol:.2f}x"
-            })
-        df = pd.DataFrame(rows)
-
-        if df.empty:
-            st.info("No data available.")
-        else:
-            st.dataframe(df, use_container_width=True, height=500)
-
-            # Playbook buttons
-            for t in df["Ticker"]:
-                if st.button(f"📊 Playbook {t}", key=f"{session_name}_{t}"):
-                    result = scan_ticker(t)
-                    if result:
-                        last, change, relvol = result
-                        st.session_state.playbook_output = ai_playbook(t, change, relvol)
-
-        # Show playbook output panel
-        if st.session_state.playbook_output:
-            st.markdown("### 🎯 AI Playbook Result")
-            st.markdown(st.session_state.playbook_output)
-
-# ---------------- MAIN ----------------
+# =====================
+# MAIN LAYOUT
+# =====================
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# 🔄 Auto refresh every REFRESH_INTERVAL ms
-st_autorefresh = st.autorefresh(interval=REFRESH_INTERVAL, key="refresh")
+tabs = st.tabs(["📊 Premarket", "📈 Intraday", "🌙 Postmarket", "🤖 AI Playbooks"])
 
-tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket", "📌 Watchlist", "🤖 AI Playbooks"])
+# -------- Session Tabs --------
+for i, session in enumerate(["Premarket","Intraday","Postmarket"]):
+    with tabs[i]:
+        st.subheader(f"{session} Movers")
+        st.markdown("### 🔥 Top 10 Market Movers")
+        st.dataframe(get_top_movers(), use_container_width=True)
 
-# Session Tabs
-render_session(tabs[0], "Premarket", CORE_TICKERS[:20])
-render_session(tabs[1], "Intraday", CORE_TICKERS[20:40])
-render_session(tabs[2], "Postmarket", CORE_TICKERS[40:60])
+        st.markdown("### 📌 Your Watchlist")
+        wl_data = []
+        for t in CORE_TICKERS:
+            q = get_quote(t)
+            if not q: continue
+            wl_data.append({
+                "Ticker": t,
+                "Price": f"${q['last']:.2f}",
+                "Change %": f"{q['change']:+.2f}%",
+                "RelVol": f"{q['relvol']:.2f}x"
+            })
+        if wl_data:
+            st.dataframe(pd.DataFrame(wl_data), use_container_width=True)
 
-# Watchlist Tab
+# -------- Playbook Tab --------
 with tabs[3]:
-    st.subheader("📌 Your Watchlist Movers")
-    render_session(st, "Watchlist", CORE_TICKERS)
-
-# AI Playbooks Tab
-with tabs[4]:
-    st.subheader("🤖 Generate Custom AI Playbook")
-    search_ticker = st.text_input("Enter ticker symbol").upper().strip()
+    st.subheader("🤖 AI Playbooks")
+    ticker = st.text_input("Enter Ticker", value="AAPL").upper()
     catalyst = st.text_input("Catalyst (optional)")
-    if st.button("Generate Playbook"):
-        result = scan_ticker(search_ticker)
-        if result:
-            last, change, relvol = result
-            st.session_state.playbook_output = ai_playbook(search_ticker, change, relvol, catalyst)
-    if st.session_state.playbook_output:
-        st.markdown("### 🎯 AI Playbook Result")
-        st.markdown(st.session_state.playbook_output)
+    if st.button("Generate AI Playbook"):
+        q = get_quote(ticker)
+        change = q["change"] if q else 0
+        pb = ai_playbook(ticker, change, catalyst)
+        st.markdown(pb)
 
-# ---------------- FOOTER ----------------
+# Footer
 st.markdown("---")
-st.caption("🔥 Powered by Yahoo Finance & OpenAI")
+st.caption("🔥 Live data via yfinance | AI via OpenAI | Built with Streamlit")
