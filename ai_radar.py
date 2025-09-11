@@ -8,6 +8,7 @@ import yfinance as yf
 from typing import Dict, List, Optional
 import numpy as np
 import time
+import concurrent.futures
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
 import google.generativeai as genai
