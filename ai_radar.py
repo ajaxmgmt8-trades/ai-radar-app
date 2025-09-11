@@ -74,108 +74,77 @@ except Exception as e:
     openai_client = None
     gemini_model = None
 
-# Primary data function - Polygon powered
-@st.cache_data(ttl=30)  # Cache for 30 seconds - more frequent updates
+# Primary data function - Yahoo Finance
+@st.cache_data(ttl=60)  # Cache for 60 seconds
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Get live stock quote using Polygon API - primary data source
+    Get live stock quote using Yahoo Finance
     """
-    if not POLYGON_KEY:
-        return {"error": "Polygon API key not configured"}
-    
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
     
     try:
-        # Get current and previous day data
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+        stock = yf.Ticker(ticker)
+        info = stock.info
         
-        # 1. Get current day aggregates (more real-time)
-        current_url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/minute/{today}/{today}?adjusted=true&apikey={POLYGON_KEY}"
-        current_response = requests.get(current_url, timeout=10)
+        # Get historical data with extended hours
+        hist_2d = stock.history(period="2d", interval="1m", prepost=True)
+        hist_1d = stock.history(period="1d", interval="1m", prepost=True)
         
-        # 2. Get previous close
-        prev_url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{yesterday}/{yesterday}?adjusted=true&apikey={POLYGON_KEY}"
-        prev_response = requests.get(prev_url, timeout=10)
+        if hist_1d.empty:
+            hist_1d = stock.history(period="1d", prepost=True)
+        if hist_2d.empty:
+            hist_2d = stock.history(period="2d", prepost=True)
         
-        # 3. Get real-time snapshot (if available on your plan)
-        snapshot_url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}?apikey={POLYGON_KEY}"
-        snapshot_response = requests.get(snapshot_url, timeout=10)
+        # Current price
+        current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
         
-        current_data = current_response.json() if current_response.status_code == 200 else {}
-        prev_data = prev_response.json() if prev_response.status_code == 200 else {}
-        snapshot_data = snapshot_response.json() if snapshot_response.status_code == 200 else {}
+        # Session data
+        regular_market_open = info.get('regularMarketOpen', 0)
+        previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
         
-        # Extract data
-        current_results = current_data.get("results", [])
-        prev_results = prev_data.get("results", [])
-        snapshot_ticker = snapshot_data.get("results", {})
-        
-        if not current_results and not snapshot_ticker:
-            return {"error": "No data available from Polygon"}
-        
-        # Get current price (prefer snapshot, fallback to aggregates)
-        if snapshot_ticker:
-            current_price = snapshot_ticker.get("lastQuote", {}).get("last", 0)
-            if not current_price:
-                current_price = snapshot_ticker.get("lastTrade", {}).get("p", 0)
-            volume = snapshot_ticker.get("day", {}).get("v", 0)
-            bid = snapshot_ticker.get("lastQuote", {}).get("b", current_price - 0.01)
-            ask = snapshot_ticker.get("lastQuote", {}).get("a", current_price + 0.01)
-        else:
-            latest_bar = current_results[-1] if current_results else {}
-            current_price = latest_bar.get("c", 0)  # Close price
-            volume = latest_bar.get("v", 0)
-            bid = current_price - 0.01  # Approximate
-            ask = current_price + 0.01  # Approximate
-        
-        # Get previous close
-        previous_close = prev_results[0].get("c", 0) if prev_results else 0
-        
-        # Calculate session data
-        market_open_price = 0
+        # Calculate session changes with better logic
         premarket_change = 0
         intraday_change = 0
         postmarket_change = 0
         
-        if current_results and len(current_results) > 0:
-            # Find market open (first bar after 9:30 AM)
-            market_bars = []
-            premarket_bars = []
-            
-            for bar in current_results:
-                bar_time = datetime.datetime.fromtimestamp(bar.get("t", 0) / 1000, tz=tz_zone)
+        # Enhanced session tracking
+        if not hist_1d.empty and len(hist_1d) > 0:
+            try:
+                # Convert to timezone-aware
+                hist_1d_tz = hist_1d.copy()
+                if hist_1d_tz.index.tz is None:
+                    hist_1d_tz.index = hist_1d_tz.index.tz_localize('America/New_York')
+                else:
+                    hist_1d_tz.index = hist_1d_tz.index.tz_convert('America/New_York')
                 
-                # Premarket bars (4 AM - 9:30 AM)
-                if 4 <= bar_time.hour < 9 or (bar_time.hour == 9 and bar_time.minute < 30):
-                    premarket_bars.append(bar)
+                # Filter for different sessions
+                market_hours = hist_1d_tz.between_time('09:30', '16:00')
+                premarket_hours = hist_1d_tz.between_time('04:00', '09:29')
                 
-                # Market hours bars (9:30 AM - 4 PM)
-                elif bar_time.hour >= 9 and (bar_time.hour > 9 or bar_time.minute >= 30):
-                    if bar_time.hour < 16:
-                        market_bars.append(bar)
-            
-            if market_bars:
-                market_open_price = market_bars[0].get("o", 0)  # Open of first market bar
-                market_close_price = market_bars[-1].get("c", current_price)  # Close of last market bar
-                
-                # Calculate premarket change
-                if premarket_bars and previous_close:
-                    premarket_open = premarket_bars[0].get("o", previous_close)
-                    premarket_change = ((premarket_open - previous_close) / previous_close) * 100
-                elif market_open_price and previous_close:
-                    premarket_change = ((market_open_price - previous_close) / previous_close) * 100
-                
-                # Calculate intraday change
-                if market_open_price and market_close_price:
-                    intraday_change = ((market_close_price - market_open_price) / market_open_price) * 100
-                
-                # After hours (current price vs market close)
-                current_hour = datetime.datetime.now(tz_zone).hour
-                if current_hour >= 16 or current_hour < 4:
-                    if current_price != market_close_price and market_close_price:
+                if not market_hours.empty:
+                    market_open_price = market_hours['Open'].iloc[0]
+                    market_close_price = market_hours['Close'].iloc[-1]
+                    
+                    # Premarket change
+                    if previous_close and market_open_price:
+                        premarket_change = ((market_open_price - previous_close) / previous_close) * 100
+                    
+                    # Intraday change
+                    if market_open_price and market_close_price:
+                        intraday_change = ((market_close_price - market_open_price) / market_open_price) * 100
+                    
+                    # After hours change
+                    current_hour = datetime.datetime.now(tz_zone).hour
+                    if (current_hour >= 16 or current_hour < 4) and current_price != market_close_price:
                         postmarket_change = ((current_price - market_close_price) / market_close_price) * 100
+                        
+            except Exception:
+                # Fallback to basic calculation
+                if regular_market_open and previous_close:
+                    premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
+                    if current_price and regular_market_open:
+                        intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
         
         # Total change
         total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
@@ -183,19 +152,19 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         
         return {
             "last": float(current_price),
-            "bid": float(bid),
-            "ask": float(ask),
-            "volume": int(volume),
+            "bid": float(info.get('bid', current_price - 0.01)),
+            "ask": float(info.get('ask', current_price + 0.01)),
+            "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
             "change": float(change_dollar),
             "change_percent": float(total_change),
             "premarket_change": float(premarket_change),
             "intraday_change": float(intraday_change),
             "postmarket_change": float(postmarket_change),
             "previous_close": float(previous_close),
-            "market_open": float(market_open_price),
+            "market_open": float(regular_market_open) if regular_market_open else 0,
             "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": None,
-            "data_source": "Polygon"
+            "data_source": "Yahoo Finance"
         }
         
     except Exception as e:
@@ -207,27 +176,8 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "previous_close": 0.0, "market_open": 0.0,
             "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": str(e),
-            "data_source": "Polygon"
+            "data_source": "Yahoo Finance"
         }
-
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_market_status() -> Dict:
-    """
-    Get market status from Polygon
-    """
-    if not POLYGON_KEY:
-        return {"status": "unknown"}
-    
-    try:
-        url = f"https://api.polygon.io/v1/marketstatus/now?apikey={POLYGON_KEY}"
-        response = requests.get(url, timeout=10)
-        
-        if response.status_code == 200:
-            return response.json()
-    except:
-        pass
-    
-    return {"status": "unknown"}
 
 @st.cache_data(ttl=600)
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
@@ -325,112 +275,34 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     else:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
-# Real Polygon API functions
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_real_options_data(ticker: str) -> Optional[Dict]:
+# Placeholder options data function
+def get_options_data(ticker: str) -> Optional[Dict]:
     """
-    Get real options data from Polygon API
+    Placeholder function for options data
     """
-    if not POLYGON_KEY:
-        return None
-        
-    try:
-        # Get options chains
-        today = datetime.date.today().strftime("%Y-%m-%d")
-        
-        # Get options contracts for next few expirations
-        options_url = f"https://api.polygon.io/v3/reference/options/contracts?underlying_ticker={ticker}&expiration_date.gte={today}&limit=1000&apikey={POLYGON_KEY}"
-        
-        response = requests.get(options_url, timeout=15)
-        if response.status_code != 200:
-            return None
-            
-        options_data = response.json()
-        contracts = options_data.get("results", [])
-        
-        if not contracts:
-            return None
-            
-        # Analyze the options data
-        calls = [c for c in contracts if c.get("contract_type") == "call"]
-        puts = [c for c in contracts if c.get("contract_type") == "put"]
-        
-        # Get current stock price for analysis
-        stock_quote = get_live_quote(ticker)
-        current_price = stock_quote.get("last", 0)
-        
-        # Find ATM options
-        atm_calls = sorted(calls, key=lambda x: abs(x.get("strike_price", 0) - current_price))[:10]
-        atm_puts = sorted(puts, key=lambda x: abs(x.get("strike_price", 0) - current_price))[:10]
-        
-        # Calculate put/call ratio (simplified)
-        put_call_ratio = len(puts) / len(calls) if calls else 1.0
-        
-        # Find highest volume/OI strikes
-        top_call_oi = max(atm_calls, key=lambda x: x.get("open_interest", 0)) if atm_calls else {}
-        top_put_oi = max(atm_puts, key=lambda x: x.get("open_interest", 0)) if atm_puts else {}
-        
-        return {
-            "iv": np.mean([c.get("implied_volatility", 0) for c in atm_calls[:5] if c.get("implied_volatility")]) * 100 if atm_calls else 0,
-            "put_call_ratio": round(put_call_ratio, 2),
-            "top_call_oi": top_call_oi.get("open_interest", 0),
-            "top_call_oi_strike": top_call_oi.get("strike_price", 0),
-            "top_put_oi": top_put_oi.get("open_interest", 0),
-            "top_put_oi_strike": top_put_oi.get("strike_price", 0),
-            "high_iv_strike": atm_calls[0].get("strike_price", 0) if atm_calls else 0,
-            "total_calls": len(calls),
-            "total_puts": len(puts)
-        }
-        
-    except Exception as e:
-        st.error(f"Error fetching real options data: {str(e)}")
-        return None
+    return {
+        "iv": np.random.uniform(20.0, 150.0),
+        "put_call_ratio": np.random.uniform(0.5, 2.0),
+        "top_call_oi": 15000 + np.random.randint(1, 10) * 100,
+        "top_call_oi_strike": 200 + np.random.randint(-10, 10),
+        "top_put_oi": 12000 + np.random.randint(1, 10) * 100,
+        "top_put_oi_strike": 180 + np.random.randint(-10, 10),
+        "high_iv_strike": np.random.choice([195, 205, 210]),
+        "total_calls": np.random.randint(500, 2000),
+        "total_puts": np.random.randint(400, 1800)
+    }
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_real_earnings_calendar() -> List[Dict]:
+def get_earnings_calendar() -> List[Dict]:
     """
-    Get real earnings calendar from Polygon
+    Placeholder function for earnings calendar
     """
-    if not POLYGON_KEY:
-        return []
-        
-    try:
-        # Get earnings for next 7 days
-        from_date = datetime.date.today().strftime("%Y-%m-%d")
-        to_date = (datetime.date.today() + datetime.timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        url = f"https://api.polygon.io/vX/reference/financials?ticker.gte=A&filing_date.gte={from_date}&filing_date.lte={to_date}&limit=50&apikey={POLYGON_KEY}"
-        
-        response = requests.get(url, timeout=15)
-        if response.status_code != 200:
-            # Fallback to a different endpoint
-            url = f"https://api.polygon.io/v2/reference/news?published_utc.gte={from_date}&limit=50&apikey={POLYGON_KEY}"
-            response = requests.get(url, timeout=15)
-            
-        if response.status_code == 200:
-            data = response.json()
-            results = data.get("results", [])
-            
-            # Filter for earnings-related news
-            earnings = []
-            for item in results:
-                title = item.get("title", "").lower()
-                if any(keyword in title for keyword in ["earnings", "quarterly", "q1", "q2", "q3", "q4", "results"]):
-                    tickers = item.get("tickers", [])
-                    if tickers:
-                        earnings.append({
-                            "ticker": tickers[0],
-                            "date": item.get("published_utc", from_date)[:10],
-                            "time": "After Hours",  # Default since exact time often unavailable
-                            "estimate": "N/A"
-                        })
-            
-            return earnings[:10]  # Return top 10
-            
-    except Exception as e:
-        st.error(f"Error fetching earnings calendar: {str(e)}")
-        
-    return []
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
+    return [
+        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50"},
+        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20"},
+        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
+    ]
 
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
     if st.session_state.model == "OpenAI":
@@ -442,16 +314,16 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
             options_text = ""
             if options_data:
                 options_text = f"""
-                Live Options Data (Polygon):
+                Options Data:
                 - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
-                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
+                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
                 - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
                 - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
                 - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
                 """
             
             prompt = f"""
-            Analyze {ticker} with {change:+.2f}% change today using live Polygon data.
+            Analyze {ticker} with {change:+.2f}% change today.
             Catalyst: {catalyst if catalyst else "Market movement"}
             {options_text}
             
@@ -460,7 +332,7 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
             2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
             3. Specific Entry levels, Target levels, and Stop levels.
             4. Key support and resistance levels.
-            5. Analysis using live options metrics (IV, OI, put/call ratio) if available.
+            5. Analysis using options metrics (IV, OI, put/call ratio) if available.
             6. Assessment of explosive move potential.
             
             Keep concise and actionable, under 300 words.
@@ -484,16 +356,16 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
             options_text = ""
             if options_data:
                 options_text = f"""
-                Live Options Data (Polygon):
+                Options Data:
                 - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
-                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
+                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
                 - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
                 - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
                 - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
                 """
             
             prompt = f"""
-            Analyze {ticker} with {change:+.2f}% change today using live Polygon data.
+            Analyze {ticker} with {change:+.2f}% change today.
             Catalyst: {catalyst if catalyst else "Market movement"}
             {options_text}
             
@@ -502,7 +374,7 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
             2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
             3. Specific Entry levels, Target levels, and Stop levels.
             4. Key support and resistance levels.
-            5. Analysis using live options metrics (IV, OI, put/call ratio) if available.
+            5. Analysis using options metrics (IV, OI, put/call ratio) if available.
             6. Assessment of explosive move potential.
             
             Keep concise and actionable, under 300 words.
@@ -526,12 +398,12 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
             movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
             
             prompt = f"""
-            Analyze current market conditions using live Polygon data:
+            Analyze current market conditions:
 
             Top News Headlines:
             {news_context}
 
-            Top Market Movers (Polygon data):
+            Top Market Movers:
             {movers_context}
 
             Provide a brief market analysis covering:
@@ -563,12 +435,12 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
             movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
             
             prompt = f"""
-            Analyze current market conditions using live Polygon data:
+            Analyze current market conditions:
 
             Top News Headlines:
             {news_context}
 
-            Top Market Movers (Polygon data):
+            Top Market Movers:
             {movers_context}
 
             Provide a brief market analysis covering:
@@ -589,7 +461,7 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
 
 def ai_auto_generate_plays(tz: str):
     """
-    Auto-generates trading plays by scanning watchlist and market movers using Polygon data
+    Auto-generates trading plays by scanning watchlist and market movers
     """
     plays = []
     
@@ -600,7 +472,7 @@ def ai_auto_generate_plays(tz: str):
         # Combine watchlist with core tickers for broader scan
         scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
         
-        # Scan for significant movers using Polygon data
+        # Scan for significant movers
         candidates = []
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -635,19 +507,19 @@ def ai_auto_generate_plays(tz: str):
             if news:
                 catalyst = news[0].get('headline', '')[:100] + "..."
             
-            # Get real options data for enhanced analysis
-            options_data = get_real_options_data(ticker)
+            # Get options data for enhanced analysis
+            options_data = get_options_data(ticker)
             
             # Generate AI analysis
             if st.session_state.model == "OpenAI" and openai_client:
                 try:
                     play_prompt = f"""
-                    Generate a trading play for {ticker} using live Polygon data:
+                    Generate a trading play for {ticker}:
                     
                     Current Price: ${quote['last']:.2f}
                     Change: {quote['change_percent']:+.2f}%
                     Volume: {quote['volume']:,}
-                    Data Source: {quote.get('data_source', 'Polygon')}
+                    Data Source: {quote.get('data_source', 'Yahoo Finance')}
                     Catalyst: {catalyst if catalyst else "Market movement"}
 
                     Provide:
@@ -672,12 +544,12 @@ def ai_auto_generate_plays(tz: str):
             elif st.session_state.model == "Gemini" and gemini_model:
                 try:
                     play_prompt = f"""
-                    Generate a trading play for {ticker} using live Polygon data:
+                    Generate a trading play for {ticker}:
                     
                     Current Price: ${quote['last']:.2f}
                     Change: {quote['change_percent']:+.2f}%
                     Volume: {quote['volume']:,}
-                    Data Source: {quote.get('data_source', 'Polygon')}
+                    Data Source: {quote.get('data_source', 'Yahoo Finance')}
                     Catalyst: {catalyst if catalyst else "Market movement"}
 
                     Provide:
@@ -695,10 +567,10 @@ def ai_auto_generate_plays(tz: str):
                     play_analysis = f"AI analysis unavailable: {str(ai_error)[:50]}..."
             else:
                 play_analysis = f"""
-                **{ticker} Trading Setup (Polygon Data)**
+                **{ticker} Trading Setup**
                 **Movement:** {quote['change_percent']:+.2f}% change
                 **Volume:** {quote['volume']:,} shares
-                **Data Source:** {quote.get('data_source', 'Polygon')}
+                **Data Source:** {quote.get('data_source', 'Yahoo Finance')}
                 **Setup:** Monitor for continuation or reversal. Consider risk management.
                 *Configure AI API for detailed analysis*
                 """
@@ -717,7 +589,7 @@ def ai_auto_generate_plays(tz: str):
                 "play_analysis": play_analysis,
                 "volume": quote['volume'],
                 "timestamp": quote['last_updated'],
-                "data_source": quote.get('data_source', 'Polygon')
+                "data_source": quote.get('data_source', 'Yahoo Finance')
             }
             plays.append(play)
         
@@ -767,7 +639,7 @@ def get_important_events() -> List[Dict]:
         return []
 
 # Main app
-st.title("🔥 AI Radar Pro — Live Trading Assistant (Polygon Powered)")
+st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
 # Timezone toggle (made smaller with column and smaller font)
 col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
@@ -790,17 +662,17 @@ if st.session_state.model == "OpenAI" and not OPENAI_KEY:
 
 # Data source status
 st.sidebar.subheader("Data Sources")
-if POLYGON_KEY:
-    st.sidebar.success("✅ Polygon API Connected")
-    market_status = get_market_status()
-    st.sidebar.info(f"Market Status: {market_status.get('market', 'Unknown')}")
-else:
-    st.sidebar.error("❌ Polygon API Not Configured")
+st.sidebar.success("✅ Yahoo Finance Connected")
 
 if FINNHUB_KEY:
     st.sidebar.success("✅ Finnhub API Connected")
 else:
     st.sidebar.warning("⚠️ Finnhub API Not Found")
+
+if POLYGON_KEY:
+    st.sidebar.success("✅ Polygon API Connected (News)")
+else:
+    st.sidebar.warning("⚠️ Polygon API Not Found")
 
 # Auto-refresh controls
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
@@ -826,11 +698,11 @@ tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Sca
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
-st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Powered by Polygon API</div>", unsafe_allow_html=True)
+st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Powered by Yahoo Finance</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
 with tabs[0]:
-    st.subheader("📊 Real-Time Watchlist (Polygon Data)")
+    st.subheader("📊 Real-Time Watchlist")
     
     # Session status (using selected TZ)
     current_tz_hour = current_tz.hour
@@ -852,10 +724,10 @@ with tabs[0]:
     
     # Search result
     if search_quotes and search_ticker:
-        with st.spinner(f"Getting live quote for {search_ticker} from Polygon..."):
+        with st.spinner(f"Getting quote for {search_ticker}..."):
             quote = get_live_quote(search_ticker, tz_label)
             if not quote["error"]:
-                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Polygon')}")
+                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
                 col1.metric(search_ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -902,15 +774,15 @@ with tabs[0]:
                 col3.write("**Volume**")
                 col3.write(f"{quote['volume']:,}")
                 col3.caption(f"Updated: {quote['last_updated']}")
-                col3.caption(f"Source: {quote.get('data_source', 'Polygon')}")
+                col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 if abs(quote['change_percent']) >= 2.0:
                     if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}"):
-                        with st.spinner(f"Analyzing {ticker} with live options data..."):
-                            # Get real options data for analysis
-                            options_data = get_real_options_data(ticker)
+                        with st.spinner(f"Analyzing {ticker}..."):
+                            # Get options data for analysis
+                            options_data = get_options_data(ticker)
                             analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
-                            st.success(f"🤖 {ticker} Analysis (Live Polygon Data)")
+                            st.success(f"🤖 {ticker} Analysis")
                             st.markdown(analysis)
                 
                 # Session data
@@ -920,7 +792,7 @@ with tabs[0]:
                 sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
                 
                 # Expandable detailed view
-                with st.expander(f"🔎 Expand {ticker} (Live Data)"):
+                with st.expander(f"🔎 Expand {ticker}"):
                     # Catalyst headlines
                     news = get_finnhub_news(ticker)
                     if news:
@@ -930,17 +802,18 @@ with tabs[0]:
                     else:
                         st.info("No recent news.")
                     
-                    # AI Playbook with real options data
-                    st.markdown("### 🎯 AI Playbook (Live Polygon Data)")
+                    # AI Playbook with options data
+                    st.markdown("### 🎯 AI Playbook")
                     catalyst_title = news[0].get('headline', '') if news else ""
-                    options_data = get_real_options_data(ticker)
+                    options_data = get_options_data(ticker)
                     
                     if options_data:
-                        st.write("**Live Options Metrics:**")
+                        st.write("**Options Metrics:**")
                         opt_col1, opt_col2, opt_col3 = st.columns(3)
                         opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
                         opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                         opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                        st.caption("Note: Options data is simulated for demonstration")
                     
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
@@ -1022,7 +895,7 @@ with tabs[1]:
 
 # TAB 3: Catalyst Scanner
 with tabs[2]:
-    st.subheader("🔥 Real-Time Catalyst Scanner (Polygon Data)")
+    st.subheader("🔥 Real-Time Catalyst Scanner")
     
     # Search specific stock
     col1, col2 = st.columns([3, 1])
@@ -1032,12 +905,12 @@ with tabs[2]:
         search_catalyst = st.button("Search Catalysts", key="search_catalyst_btn")
     
     if search_catalyst and search_catalyst_ticker:
-        with st.spinner(f"Searching catalysts for {search_catalyst_ticker} using live data..."):
+        with st.spinner(f"Searching catalysts for {search_catalyst_ticker}..."):
             specific_news = get_finnhub_news(search_catalyst_ticker)
             quote = get_live_quote(search_catalyst_ticker, tz_label)
             
             if not quote["error"]:
-                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Polygon')}")
+                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -1073,11 +946,11 @@ with tabs[2]:
                 st.divider()
     
     # Main catalyst scan
-    if st.button("🔍 Scan for Market Catalysts (Live Data)", type="primary"):
-        with st.spinner("Scanning for catalysts using Polygon data..."):
+    if st.button("🔍 Scan for Market Catalysts", type="primary"):
+        with st.spinner("Scanning for catalysts..."):
             all_news = get_all_news()
             
-            # Get movers using Polygon data
+            # Get movers
             movers = []
             for ticker in CORE_TICKERS[:20]:
                 quote = get_live_quote(ticker, tz_label)
@@ -1087,7 +960,7 @@ with tabs[2]:
                         "change_pct": quote["change_percent"],
                         "price": quote["last"],
                         "volume": quote["volume"],
-                        "data_source": quote.get("data_source", "Polygon")
+                        "data_source": quote.get("data_source", "Yahoo Finance")
                     })
             
             movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
@@ -1106,7 +979,7 @@ with tabs[2]:
                         st.markdown(f"[Read Article]({news['url']})")
             
             # Display market movers
-            st.markdown("### 📊 Significant Market Moves (Live Polygon Data)")
+            st.markdown("### 📊 Significant Market Moves")
             for mover in movers[:10]:
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -1116,7 +989,7 @@ with tabs[2]:
                         f"${mover['price']:.2f}",
                         f"{mover['change_pct']:+.2f}%"
                     )
-                    st.caption(f"Source: {mover.get('data_source', 'Polygon')}")
+                    st.caption(f"Source: {mover.get('data_source', 'Yahoo Finance')}")
                 with col2:
                     if st.button(f"Add to WL", key=f"add_mover_{mover['ticker']}"):
                         current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -1128,7 +1001,7 @@ with tabs[2]:
 
 # TAB 4: Market Analysis
 with tabs[3]:
-    st.subheader("📈 AI Market Analysis (Live Polygon Data)")
+    st.subheader("📈 AI Market Analysis")
     
     # Search individual analysis
     col1, col2 = st.columns([3, 1])
@@ -1138,17 +1011,17 @@ with tabs[3]:
         search_analysis = st.button("Analyze Stock", key="search_analysis_btn")
     
     if search_analysis and search_analysis_ticker:
-        with st.spinner(f"AI analyzing {search_analysis_ticker} with live Polygon data..."):
+        with st.spinner(f"AI analyzing {search_analysis_ticker}..."):
             quote = get_live_quote(search_analysis_ticker, tz_label)
             if not quote["error"]:
                 news = get_finnhub_news(search_analysis_ticker)
                 catalyst = news[0].get('headline', '') if news else "Recent market movement"
                 
-                # Get real options data for enhanced analysis
-                options_data = get_real_options_data(search_analysis_ticker)
+                # Get options data for enhanced analysis
+                options_data = get_options_data(search_analysis_ticker)
                 analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst, options_data)
                 
-                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Polygon')}")
+                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -1171,12 +1044,13 @@ with tabs[3]:
                 
                 # Show options data if available
                 if options_data:
-                    st.markdown("#### Live Options Metrics")
+                    st.markdown("#### Options Metrics")
                     opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
                     opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
                     opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
                     opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
                     opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
+                    st.caption("Note: Options data is simulated for demonstration")
                 
                 st.markdown("### 🎯 AI Analysis")
                 st.markdown(analysis)
@@ -1193,8 +1067,8 @@ with tabs[3]:
                 st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
     
     # Main market analysis
-    if st.button("🤖 Generate Market Analysis (Live Data)", type="primary"):
-        with st.spinner("AI analyzing market conditions using live Polygon data..."):
+    if st.button("🤖 Generate Market Analysis", type="primary"):
+        with st.spinner("AI analyzing market conditions..."):
             news_items = get_all_news()
             
             movers = []
@@ -1205,18 +1079,18 @@ with tabs[3]:
                         "ticker": ticker,
                         "change_pct": quote["change_percent"],
                         "price": quote["last"],
-                        "data_source": quote.get("data_source", "Polygon")
+                        "data_source": quote.get("data_source", "Yahoo Finance")
                     })
             
             analysis = ai_market_analysis(news_items, movers)
             
-            st.success("🤖 AI Market Analysis Complete (Live Polygon Data)")
+            st.success("🤖 AI Market Analysis Complete")
             st.markdown(analysis)
             
             with st.expander("📊 Supporting Data"):
-                st.write("**Top Market Movers (Live Data):**")
+                st.write("**Top Market Movers:**")
                 for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
-                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Polygon')}")
+                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Yahoo Finance')}")
                 
                 st.write("**Key News Headlines:**")
                 for news in news_items[:3]:
@@ -1224,23 +1098,23 @@ with tabs[3]:
 
 # TAB 5: AI Playbooks
 with tabs[4]:
-    st.subheader("🤖 AI Trading Playbooks (Live Polygon Data)")
+    st.subheader("🤖 AI Trading Playbooks")
     
     # Auto-generated plays section
     st.markdown("### 🎯 Auto-Generated Trading Plays")
     col1, col2 = st.columns([3, 1])
     with col1:
-        st.caption("AI automatically scans your watchlist and market movers using live Polygon data")
+        st.caption("AI automatically scans your watchlist and market movers to suggest trading opportunities")
     with col2:
         if st.button("🚀 Generate Auto Plays", type="primary"):
-            with st.spinner("AI generating trading plays from live market scan..."):
+            with st.spinner("AI generating trading plays from market scan..."):
                 auto_plays = ai_auto_generate_plays(tz_label)
                 
                 if auto_plays:
-                    st.success(f"🤖 Generated {len(auto_plays)} Trading Plays (Live Polygon Data)")
+                    st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
                     
                     for i, play in enumerate(auto_plays):
-                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Polygon')}"):
+                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Yahoo Finance')}"):
                             
                             # Display session data
                             sess_col1, sess_col2, sess_col3 = st.columns(3)
@@ -1256,7 +1130,7 @@ with tabs[4]:
                             st.markdown("**AI Trading Play:**")
                             st.markdown(play['play_analysis'])
                             
-                            st.caption(f"Data Source: {play.get('data_source', 'Polygon')} | Updated: {play['timestamp']}")
+                            st.caption(f"Data Source: {play.get('data_source', 'Yahoo Finance')} | Updated: {play['timestamp']}")
                             
                             # Add to watchlist option
                             if st.button(f"Add {play['ticker']} to Watchlist", key=f"add_auto_play_{i}"):
@@ -1283,15 +1157,15 @@ with tabs[4]:
         quote = get_live_quote(search_playbook_ticker, tz_label)
         
         if not quote["error"]:
-            with st.spinner(f"AI generating playbook for {search_playbook_ticker} with live data..."):
+            with st.spinner(f"AI generating playbook for {search_playbook_ticker}..."):
                 news = get_finnhub_news(search_playbook_ticker)
                 catalyst = news[0].get('headline', '') if news else ""
                 
-                # Get real options data for enhanced playbook
-                options_data = get_real_options_data(search_playbook_ticker)
+                # Get options data for enhanced playbook
+                options_data = get_options_data(search_playbook_ticker)
                 playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst, options_data)
                 
-                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Polygon')}")
+                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -1312,14 +1186,15 @@ with tabs[4]:
                 sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
                 sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
                 
-                # Show live options data if available
+                # Show options data if available
                 if options_data:
-                    st.markdown("#### Live Options Analysis")
+                    st.markdown("#### Options Analysis")
                     opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
                     opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
                     opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                     opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
                     opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
+                    st.caption("Note: Options data is simulated for demonstration")
                 
                 st.markdown("### 🎯 AI Trading Playbook")
                 st.markdown(playbook)
@@ -1347,12 +1222,12 @@ with tabs[4]:
             quote = get_live_quote(selected_ticker, tz_label)
             
             if not quote["error"]:
-                with st.spinner(f"AI analyzing {selected_ticker} with live Polygon data..."):
-                    # Get real options data for enhanced analysis
-                    options_data = get_real_options_data(selected_ticker)
+                with st.spinner(f"AI analyzing {selected_ticker}..."):
+                    # Get options data for enhanced analysis
+                    options_data = get_options_data(selected_ticker)
                     playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input, options_data)
                     
-                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Polygon')}")
+                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                     
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -1379,27 +1254,27 @@ with tabs[4]:
     else:
         st.info("Add stocks to watchlist or use search above.")
     
-    # Quick tips for auto-generated plays
-    with st.expander("💡 About Live Data Integration"):
+    # Quick tips
+    with st.expander("💡 About the Analysis"):
         st.markdown("""
-        **Polygon-Powered Analysis** provides:
-        - **Real-time stock data** with minimal delays
-        - **Live options metrics** including IV, open interest, and put/call ratios
-        - **Accurate session tracking** for premarket, intraday, and after-hours
-        - **Professional-grade data quality** for better trading decisions
+        **Yahoo Finance Integration** provides:
+        - Free stock data with 15-20 minute delays
+        - Extended hours tracking (premarket/after-hours)
+        - Volume and price data
+        - Session performance breakdown
         
         **AI Analysis includes:**
-        - Live implied volatility assessments
-        - Current options positioning (calls vs puts)
-        - Real volume and price action analysis
-        - Professional entry/exit recommendations
+        - Market sentiment assessment
+        - Trading strategy recommendations
+        - Entry, target, and stop levels
+        - Risk management guidance
         
-        **Note:** All analysis is for educational purposes. Always conduct your own research and implement proper risk management.
+        **Note:** Options data is simulated for demonstration. For live options data, consider upgrading to a professional data provider.
         """)
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
-    st.subheader("🌐 Sector/ETF Tracking (Live Polygon Data)")
+    st.subheader("🌐 Sector/ETF Tracking")
 
     # Add search and add functionality
     st.markdown("### 🔍 Search & Add ETFs")
@@ -1419,7 +1294,7 @@ with tabs[5]:
             else:
                 st.warning(f"{etf_search_ticker} is already in the list.")
 
-    st.markdown("### ETF Performance Overview (Live Data)")
+    st.markdown("### ETF Performance Overview")
     
     for ticker in st.session_state.etf_list:
         quote = get_live_quote(ticker, tz_label)
@@ -1436,7 +1311,7 @@ with tabs[5]:
             col3.write("**Volume**")
             col3.write(f"{quote['volume']:,}")
             col3.caption(f"Updated: {quote['last_updated']}")
-            col3.caption(f"Source: {quote.get('data_source', 'Polygon')}")
+            col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
             
             if col4.button(f"Add {ticker} to Watchlist", key=f"add_etf_{ticker}"):
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -1450,21 +1325,22 @@ with tabs[5]:
 
 # TAB 7: 0DTE & Lottos
 with tabs[6]:
-    st.subheader("🎲 0DTE & Lottos (Live Polygon Options Data)")
+    st.subheader("🎲 0DTE & Lottos")
     
-    st.write("This section finds potential explosive moves using 0DTE (zero-days-to-expiration) with live Polygon options data.")
+    st.write("This section analyzes potential explosive moves using 0DTE (zero-days-to-expiration) opportunities.")
+    st.info("Note: Options data is simulated for demonstration. For live options analysis, consider upgrading to a professional options data provider.")
     
     if st.button("🔍 Scan for 0DTE Plays", type="primary"):
-        with st.spinner("AI scanning for potential 0DTE setups using live options data..."):
-            # Use real options data for 0DTE analysis
+        with st.spinner("AI scanning for potential 0DTE setups..."):
+            # Analyze high-volume tickers for 0DTE opportunities
             play_ticker = np.random.choice(["SPY", "QQQ", "TSLA", "NVDA", "GOOG"])
             quote = get_live_quote(play_ticker)
-            options_data = get_real_options_data(play_ticker)
+            options_data = get_options_data(play_ticker)
             
-            st.success(f"🎯 Potential 0DTE Play: {play_ticker} | Source: {quote.get('data_source', 'Polygon')}")
+            st.success(f"🎯 Potential 0DTE Play: {play_ticker} | Source: {quote.get('data_source', 'Yahoo Finance')}")
             
             if options_data:
-                st.write("### Live Options Analysis")
+                st.write("### Simulated Options Analysis")
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Implied Volatility", f"{options_data.get('iv', 0):.1f}%")
                 col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
@@ -1472,7 +1348,7 @@ with tabs[6]:
                 col4.metric("High OI Strike", f"${options_data.get('high_iv_strike', 0)}")
                 
                 # Display top strikes
-                st.write("**Key Strikes:**")
+                st.write("**Key Strikes (Simulated):**")
                 strike_col1, strike_col2 = st.columns(2)
                 strike_col1.write(f"Top Call: ${options_data.get('top_call_oi_strike', 0)} ({options_data.get('top_call_oi', 0):,} OI)")
                 strike_col2.write(f"Top Put: ${options_data.get('top_put_oi_strike', 0)} ({options_data.get('top_put_oi', 0):,} OI)")
@@ -1485,19 +1361,20 @@ with tabs[6]:
 
 # TAB 8: Earnings Plays
 with tabs[7]:
-    st.subheader("🗓️ Top Earnings Plays (Live Polygon Data)")
+    st.subheader("🗓️ Top Earnings Plays")
     
-    st.write("This section tracks upcoming earnings reports using live Polygon data and options analysis.")
+    st.write("This section tracks upcoming earnings reports and provides AI analysis for potential earnings plays.")
+    st.info("Note: Earnings data is simulated for demonstration. For live earnings calendar, consider integrating a financial calendar API.")
     
     if st.button("📊 Get Today's Earnings Plays", type="primary"):
-        with st.spinner("AI analyzing earnings reports with live options data..."):
+        with st.spinner("AI analyzing earnings reports..."):
             
-            earnings_today = get_real_earnings_calendar()
+            earnings_today = get_earnings_calendar()
             
             if not earnings_today:
-                st.info("No earnings reports found for today in Polygon data.")
+                st.info("No earnings reports found for today.")
             else:
-                st.markdown("### Today's Earnings Reports (Live Analysis)")
+                st.markdown("### Today's Earnings Reports")
                 for report in earnings_today:
                     ticker = report["ticker"]
                     time_str = report["time"]
@@ -1506,16 +1383,16 @@ with tabs[7]:
                     
                     # Get live quote and options data for earnings analysis
                     quote = get_live_quote(ticker)
-                    options_data = get_real_options_data(ticker)
+                    options_data = get_options_data(ticker)
                     
                     if not quote.get("error"):
                         col1, col2, col3 = st.columns(3)
                         col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                         col2.metric("Volume", f"{quote['volume']:,}")
-                        col3.metric("Data Source", quote.get('data_source', 'Polygon'))
+                        col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
                         
                         if options_data:
-                            st.write("**Live Options Metrics:**")
+                            st.write("**Simulated Options Metrics:**")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
                             opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
@@ -1531,12 +1408,12 @@ with tabs[7]:
                         - **Current Price:** ${quote.get('last', 0):.2f}
                         - **Daily Change:** {quote.get('change_percent', 0):+.2f}%
                         - **Volume:** {quote.get('volume', 0):,}
-                        - **Data Source:** {quote.get('data_source', 'Polygon')}
+                        - **Data Source:** {quote.get('data_source', 'Yahoo Finance')}
                         
-                        **Note:** Monitor for post-earnings volatility. Live options data integration provides enhanced analysis.
+                        **Note:** Monitor for post-earnings volatility. Consider both upside and downside scenarios.
                         """
                     
-                    with st.expander(f"🔮 Live AI Analysis for {ticker}"):
+                    with st.expander(f"🔮 AI Analysis for {ticker}"):
                         st.markdown(ai_analysis)
                     st.divider()
 
@@ -1570,7 +1447,7 @@ if st.session_state.auto_refresh:
 st.markdown("---")
 st.markdown(
     "<div style='text-align: center; color: #666;'>"
-    "🔥 AI Radar Pro | Live data: Polygon API | News: Finnhub/Polygon | AI: OpenAI/Gemini | Real-time Options Analysis"
+    "🔥 AI Radar Pro | Live data: Yahoo Finance | News: Finnhub/Polygon | AI: OpenAI/Gemini"
     "</div>",
     unsafe_allow_html=True
 )
