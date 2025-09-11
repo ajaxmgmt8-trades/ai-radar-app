@@ -10,7 +10,13 @@ import numpy as np
 import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
-import google.generativeai as genai  # For free Gemini integration
+
+# Optional Gemini integration (wrapped to avoid import error)
+try:
+    import google.generativeai as genai  # For free Gemini integration
+except ModuleNotFoundError:
+    genai = None
+    st.warning("google-generativeai not installed. Using rule-based fallback for AI plays.")
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -47,7 +53,7 @@ if "auto_refresh" not in st.session_state:
 if "refresh_interval" not in st.session_state:
     st.session_state.refresh_interval = 30
 if "selected_tz" not in st.session_state:
-    st.session_state.selected_tz = "CT"  # Default to CT based on current time
+    st.session_state.selected_tz = "ET"  # Default to ET
 
 # API Keys
 try:
@@ -60,7 +66,7 @@ try:
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
     else:
         openai_client = None
-    if GEMINI_API_KEY:
+    if GEMINI_API_KEY and genai:
         genai.configure(api_key=GEMINI_API_KEY)
         gemini_model = genai.GenerativeModel("gemini-1.5-flash")  # Free tier model
     else:
@@ -72,78 +78,72 @@ except:
     gemini_model = None
 
 # Data functions
-@st.cache_data(ttl=60)  # Increased TTL for better performance
-def get_live_quote(ticker: str, tz: str = "CT", retries: int = 3) -> Dict:
-    tz_zone = ZoneInfo('US/Central') if tz == "CT" else ZoneInfo('US/Eastern')
-    for attempt in range(retries):
-        try:
-            stock = yf.Ticker(ticker)
-            info = stock.info
-            
-            # Get historical data
-            hist_2d = stock.history(period="2d", interval="1m")
-            hist_1d = stock.history(period="1d", interval="1m")
-            
-            if hist_1d.empty:
-                hist_1d = stock.history(period="1d")
-            if hist_2d.empty:
-                hist_2d = stock.history(period="2d")
-            
-            # Current price
-            current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
-            
-            # Session data
-            regular_market_open = info.get('regularMarketOpen', 0)
-            previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
-            
-            # Calculate session changes
-            premarket_change = 0
-            intraday_change = 0
-            postmarket_change = 0
-            
-            if regular_market_open and previous_close:
-                premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
-                if current_price and regular_market_open:
-                    intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
-            
-            # After hours (using selected TZ)
-            current_hour = datetime.datetime.now(tz_zone).hour
-            if current_hour >= 16 or current_hour < 4:
-                regular_close = info.get('regularMarketPrice', current_price)
-                if current_price != regular_close and regular_close:
-                    postmarket_change = ((current_price - regular_close) / regular_close) * 100
-            
-            total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
-            
-            tz_label = "CT" if tz == "CT" else "ET"
-            return {
-                "last": float(current_price),
-                "bid": float(info.get('bid', current_price - 0.01)),
-                "ask": float(info.get('ask', current_price + 0.01)),
-                "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
-                "change": float(info.get('regularMarketChange', current_price - previous_close if previous_close else 0)),
-                "change_percent": float(total_change),
-                "premarket_change": float(premarket_change),
-                "intraday_change": float(intraday_change),
-                "postmarket_change": float(postmarket_change),
-                "previous_close": float(previous_close),
-                "market_open": float(regular_market_open) if regular_market_open else 0,
-                "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-                "error": None
-            }
-        except Exception as e:
-            if attempt < retries - 1:
-                time.sleep(1)  # Brief pause before retry
-                continue
-            tz_label = "CT" if tz == "CT" else "ET"
-            return {
-                "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
-                "change": 0.0, "change_percent": 0.0,
-                "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
-                "previous_close": 0.0, "market_open": 0.0,
-                "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-                "error": str(e)
-            }
+@st.cache_data(ttl=10)
+def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
+    tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Get historical data
+        hist_2d = stock.history(period="2d", interval="1m")
+        hist_1d = stock.history(period="1d", interval="1m")
+        
+        if hist_1d.empty:
+            hist_1d = stock.history(period="1d")
+        if hist_2d.empty:
+            hist_2d = stock.history(period="2d")
+        
+        # Current price
+        current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
+        
+        # Session data
+        regular_market_open = info.get('regularMarketOpen', 0)
+        previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
+        
+        # Calculate session changes
+        premarket_change = 0
+        intraday_change = 0
+        postmarket_change = 0
+        
+        if regular_market_open and previous_close:
+            premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
+            if current_price and regular_market_open:
+                intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
+        
+        # After hours
+        current_hour = datetime.datetime.now(tz_zone).hour
+        if current_hour >= 16 or current_hour < 4:
+            regular_close = info.get('regularMarketPrice', current_price)
+            if current_price != regular_close and regular_close:
+                postmarket_change = ((current_price - regular_close) / regular_close) * 100
+        
+        total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+        
+        return {
+            "last": float(current_price),
+            "bid": float(info.get('bid', current_price - 0.01)),
+            "ask": float(info.get('ask', current_price + 0.01)),
+            "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
+            "change": float(info.get('regularMarketChange', current_price - previous_close if previous_close else 0)),
+            "change_percent": float(total_change),
+            "premarket_change": float(premarket_change),
+            "intraday_change": float(intraday_change),
+            "postmarket_change": float(postmarket_change),
+            "previous_close": float(previous_close),
+            "market_open": float(regular_market_open) if regular_market_open else 0,
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz}",
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
+            "change": 0.0, "change_percent": 0.0,
+            "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
+            "previous_close": 0.0, "market_open": 0.0,
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz}",
+            "error": str(e)
+        }
 
 @st.cache_data(ttl=600)
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
@@ -392,7 +392,7 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
         st.warning("No AI API configured - Using rule-based market summary")
     
     # Rule-based fallback
-    avg_change = np.mean([m['change_pct'] for m in movers[:5]]) if movers else 0
+    avg_change = np.mean([m['change_pct'] for m in movers[:5]) if movers else 0
     sentiment = "Bullish" if avg_change > 0 else "Bearish"
     return f"""
     **Rule-Based Market Analysis**
@@ -525,7 +525,7 @@ with col_tz:
 
 # Get current time in selected TZ
 tz_zone = ZoneInfo('US/Central') if st.session_state.selected_tz == "CT" else ZoneInfo('US/Eastern')
-current_tz = datetime.datetime.now(tz_zone).replace(year=2025, month=9, day=11, hour=2, minute=8, second=0)  # Set to 02:08 AM CDT
+current_tz = datetime.datetime.now(tz_zone).replace(year=2025, month=9, day=11, hour=2, minute=13, second=0)  # Set to 02:13 AM CDT
 tz_label = st.session_state.selected_tz
 
 # Auto-refresh controls
