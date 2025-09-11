@@ -525,7 +525,7 @@ with col_tz:
 
 # Get current time in selected TZ
 tz_zone = ZoneInfo('US/Central') if st.session_state.selected_tz == "CT" else ZoneInfo('US/Eastern')
-current_tz = datetime.datetime.now(tz_zone).replace(hour=1, minute=58, second=0)  # Set to 01:58 AM CDT
+current_tz = datetime.datetime.now(tz_zone).replace(year=2025, month=9, day=11, hour=2, minute=8, second=0)  # Set to 02:08 AM CDT
 tz_label = st.session_state.selected_tz
 
 # Auto-refresh controls
