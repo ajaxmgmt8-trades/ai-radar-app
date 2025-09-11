@@ -578,6 +578,7 @@ with tabs[0]:
                 
                 st.divider()
 
+
 # TAB 2: Watchlist Manager
 with tabs[1]:
     st.subheader("📋 Watchlist Manager")
@@ -1040,14 +1041,34 @@ with tabs[5]:
             col3.write(f"{quote['volume']:,}")
             col3.caption(f"Updated: {quote['last_updated']}")
             
-            if col4.button(f"Add {ticker} to Watchlist", key=f"add_etf_{ticker}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if ticker not in current_list:
-                    current_list.append(ticker)
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {ticker} to watchlist!")
-                    st.rerun()
+            if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}_etf"):
+                with st.spinner(f"Analyzing {ticker}..."):
+                    analysis = ai_playbook(ticker, quote['change_percent'])
+                    st.success(f"🤖 {ticker} Analysis")
+                    st.markdown(analysis)
 
+            # Session data
+            sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
+            sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
+            sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
+            sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
+
+            # Expandable detailed view
+            with st.expander(f"🔎 Expand {ticker}"):
+                # Catalyst headlines
+                news = get_finnhub_news(ticker)
+                if news:
+                    st.write("### 📰 Catalysts (last 24h)")
+                    for n in news:
+                        st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
+                else:
+                    st.info("No recent news.")
+                
+                # AI Playbook
+                st.markdown("### 🎯 AI Playbook")
+                catalyst_title = news[0].get('headline', '') if news else ""
+                st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title))
+            
             st.divider()
 
 # Auto refresh
