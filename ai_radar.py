@@ -10,6 +10,8 @@ import numpy as np
 import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
+from vertexai.preview.generative_models import GenerativeModel # NEW: For Gemini API
+import google.generativeai as genai # NEW: For Gemini API
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -47,22 +49,34 @@ if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
-
+if "ai_model" not in st.session_state: # NEW: AI model toggle
+    st.session_state.ai_model = "OpenAI"
 
 # API Keys
 try:
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "") # NEW: Gemini Key
+    
     if OPENAI_KEY:
         import openai
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
     else:
         openai_client = None
-except:
+    
+    if GEMINI_API_KEY: # NEW: Gemini setup
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_client = genai.GenerativeModel('gemini-1.5-flash')
+    else:
+        gemini_client = None
+
+except Exception as e:
     FINNHUB_KEY = ""
     POLYGON_KEY = ""
     openai_client = None
+    gemini_client = None
+    st.warning(f"Failed to load AI clients: {e}")
 
 # Data functions
 @st.cache_data(ttl=60)  # Optimized with caching
@@ -231,53 +245,55 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     else:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
-def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
-    if not openai_client:
+
+# MODIFIED: Combined playbook function to handle both models
+def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
+    ai_model = st.session_state.ai_model
+    
+    if ai_model == "OpenAI" and not openai_client:
         return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
+    elif ai_model == "Gemini" and not gemini_client:
+        return f"**{ticker} Analysis** (Gemini API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Gemini API key for detailed AI analysis."
+
+    prompt = f"""
+    Analyze {ticker} with {change:+.2f}% change today.
+    Catalyst: {catalyst if catalyst else "Market movement"}
+    
+    Provide trading analysis with:
+    1. Sentiment (Bullish/Bearish/Neutral) with confidence
+    2. Scalp setup (1-5 min timeframe)
+    3. Day trade setup (15-30 min)
+    4. Swing setup (4H-Daily)
+    5. Key levels to watch
+    
+    Keep concise and actionable, under 250 words.
+    """
     
     try:
-        # Construct the prompt with additional details from options data if available
-        options_text = ""
-        if options_data:
-            options_text = f"""
-            Options Data:
-            - Implied Volatility (IV): {options_data.get('iv', 'N/A')}%
-            - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
-            - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A')} OI
-            - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A')} OI
-            - High IV Strike: {options_data.get('high_iv_strike', 'N/A')}
-            """
+        if ai_model == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            return response.choices[0].message.content
         
-        prompt = f"""
-        Analyze {ticker} with {change:+.2f}% change today.
-        Catalyst: {catalyst if catalyst else "Market movement"}
-        {options_text}
-        
-        Provide an expert trading analysis focusing on:
-        1. Overall Sentiment (Bullish/Bearish/Neutral) and an estimated confidence rating (out of 100).
-        2. A concise trading strategy (e.g., Scalp, Day Trade, Swing, LEAP).
-        3. Specific Entry levels, Target levels, and Stop levels.
-        4. Key support and resistance levels.
-        5. Justify your analysis by mentioning key metrics like volume, implied volatility, and open interest if available.
-        6. A conclusion on the potential for an explosive move.
-        
-        Keep concise and actionable, under 300 words.
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=400
-        )
-        
-        return response.choices[0].message.content
+        elif ai_model == "Gemini":
+            response = gemini_client.generate_content(prompt)
+            return response.text
+            
     except Exception as e:
-        return f"AI Error: {str(e)}"
+        return f"AI Error ({ai_model}): {str(e)}"
 
+# MODIFIED: Combined market analysis function to handle both models
 def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    if not openai_client:
+    ai_model = st.session_state.ai_model
+    
+    if ai_model == "OpenAI" and not openai_client:
         return "OpenAI API not configured for AI analysis."
+    elif ai_model == "Gemini" and not gemini_client:
+        return "Gemini API not configured for AI analysis."
     
     try:
         news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
@@ -301,16 +317,21 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
         Keep it under 200 words and actionable.
         """
         
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300
-        )
-        
-        return response.choices[0].message.content
+        if ai_model == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            return response.choices[0].message.content
+            
+        elif ai_model == "Gemini":
+            response = gemini_client.generate_content(prompt)
+            return response.text
+            
     except Exception as e:
-        return f"AI Analysis Error: {str(e)}"
+        return f"AI Analysis Error ({ai_model}): {str(e)}"
 
 def ai_auto_generate_plays(tz: str):
     """
@@ -354,12 +375,12 @@ def ai_auto_generate_plays(tz: str):
             if news:
                 catalyst = news[0].get('headline', '')[:100] + "..."
             
-            # Generate AI analysis if OpenAI is available
-            if openai_client:
+            # Generate AI analysis if selected model is available
+            ai_model = st.session_state.ai_model
+            ai_client_available = (ai_model == "OpenAI" and openai_client) or (ai_model == "Gemini" and gemini_client)
+            
+            if ai_client_available:
                 try:
-                    # Get placeholder options data
-                    options_data = get_options_data(ticker)
-                    
                     play_prompt = f"""
                     Generate a concise trading play for {ticker}:
                     
@@ -370,8 +391,7 @@ def ai_auto_generate_plays(tz: str):
                     After Hours: {quote['postmarket_change']:+.2f}%
                     Volume: {quote['volume']:,}
                     Catalyst: {catalyst if catalyst else "Market movement"}
-                    {options_data}
-
+                    
                     Provide:
                     1. Play type (Scalp/Day/Swing)
                     2. Entry strategy and levels
@@ -382,14 +402,17 @@ def ai_auto_generate_plays(tz: str):
                     Keep under 200 words, be specific and actionable.
                     """
                     
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": play_prompt}],
-                        temperature=0.3,
-                        max_tokens=300
-                    )
-                    
-                    play_analysis = response.choices[0].message.content
+                    if ai_model == "OpenAI":
+                        response = openai_client.chat.completions.create(
+                            model="gpt-4o-mini",
+                            messages=[{"role": "user", "content": play_prompt}],
+                            temperature=0.3,
+                            max_tokens=300
+                        )
+                        play_analysis = response.choices[0].message.content
+                    elif ai_model == "Gemini":
+                        response = gemini_client.generate_content(play_prompt)
+                        play_analysis = response.text
                     
                 except Exception as ai_error:
                     play_analysis = f"""
@@ -404,7 +427,7 @@ def ai_auto_generate_plays(tz: str):
                     
                     **Quick Setup:** Watch for continuation or reversal around current levels
                     
-                    *AI analysis unavailable: {str(ai_error)[:50]}...*
+                    *AI analysis unavailable ({ai_model}): {str(ai_error)[:50]}...*
                     """
             else:
                 # Fallback analysis without AI
@@ -423,7 +446,7 @@ def ai_auto_generate_plays(tz: str):
                 
                 **Setup:** Monitor for continuation or reversal. Consider risk management around current price levels.
                 
-                *Configure OpenAI API for detailed AI analysis*
+                *Configure {ai_model} API for detailed AI analysis*
                 """
             
             # Create play dictionary
@@ -450,46 +473,37 @@ def ai_auto_generate_plays(tz: str):
         st.error(f"Error generating auto plays: {str(e)}")
         return []
 
-# Placeholder functions for advanced data
-def get_options_data(ticker: str) -> Optional[Dict]:
+# New function for important events (placeholder)
+def get_important_events() -> List[Dict]:
     """
-    Placeholder function to simulate getting options data.
-    A real implementation would use a service like Polygon, CBOE, etc.
+    Placeholder function for an important news/economic calendar.
+    A real implementation would use a service like Finnhub, Trading Economics, or a similar API.
     """
-    st.info(f"Disclaimer: Options data for {ticker} is a placeholder and not live.")
-    return {
-        "iv": np.random.uniform(20.0, 150.0),
-        "put_call_ratio": np.random.uniform(0.5, 2.0),
-        "top_call_oi": 15000 + np.random.randint(1, 10) * 100,
-        "top_call_oi_strike": 200 + np.random.randint(-10, 10),
-        "top_put_oi": 12000 + np.random.randint(1, 10) * 100,
-        "top_put_oi_strike": 180 + np.random.randint(-10, 10),
-        "high_iv_strike": np.random.choice([195, 205, 210])
-    }
-
-def get_earnings_calendar() -> List[Dict]:
-    """
-    Placeholder function for an earnings calendar.
-    A real implementation would use a service like Finnhub, Polygon, or an dedicated earnings calendar API.
-    """
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    st.info("Disclaimer: Earnings data is a placeholder and not live.")
+    st.info("Disclaimer: Important news data is a placeholder and not live. You would need a dedicated API to get this data.")
+    
+    # Simulate data for the upcoming week
+    today = datetime.date.today()
     
     return [
-        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50"},
-        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20"},
-        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
+        {"event": "Federal Open Market Committee (FOMC) Meeting", "date": (today + datetime.timedelta(days=2)).strftime("%B %d, %Y"), "time": "2:00 PM ET", "impact": "High"},
+        {"event": "Consumer Price Index (CPI) Report", "date": (today + datetime.timedelta(days=3)).strftime("%B %d, %Y"), "time": "8:30 AM ET", "impact": "High"},
+        {"event": "Non-Farm Payrolls (NFP)", "date": (today + datetime.timedelta(days=5)).strftime("%B %d, %Y"), "time": "8:30 AM ET", "impact": "High"},
+        {"event": "Retail Sales", "date": (today + datetime.timedelta(days=4)).strftime("%B %d, %Y"), "time": "8:30 AM ET", "impact": "Medium"},
+        {"event": "Unemployment Claims", "date": (today + datetime.timedelta(days=4)).strftime("%B %d, %Y"), "time": "8:30 AM ET", "impact": "Medium"},
     ]
 
 
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# Timezone toggle (made smaller with column and smaller font)
-col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
+# Timezone and AI Model toggle (NEW: AI model added)
+col_tz, col_ai_model, _ = st.columns([1, 2, 8])
 with col_tz:
     st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
                                                 label_visibility="collapsed", help="Select Timezone (ET/CT)")
+with col_ai_model:
+    st.session_state.ai_model = st.selectbox("AI Model:", ["OpenAI", "Gemini"], index=0 if st.session_state.ai_model == "OpenAI" else 1, 
+                                                label_visibility="collapsed", help="Select AI Model (OpenAI/Gemini)")
 
 # Get current time in selected TZ
 tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
@@ -516,7 +530,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "📰 Important News"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -627,7 +641,6 @@ with tabs[0]:
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title))
                 
                 st.divider()
-
 
 # TAB 2: Watchlist Manager
 with tabs[1]:
@@ -1050,17 +1063,6 @@ with tabs[4]:
         
         **Note:** These are AI-generated suggestions for educational purposes. Always do your own research and risk management.
         """)
-        
-    # LEAP section
-    st.markdown("### 📈 Long-Term Equity Anticipation Securities (LEAPS)")
-    with st.expander("Explore LEAPS"):
-        st.write("This section would provide analysis for solid LEAPs, including:")
-        st.markdown("""
-        - **Data Needed:** Long-term options chains (1-2 years out), Implied Volatility (IV), historical IV, delta/gamma/theta data.
-        - **Analysis Focus:** Companies with strong fundamentals, low IV, and high probability for long-term growth.
-        - **AI will provide:** Suggested strike prices, entry/target levels, and a comprehensive thesis.
-        - **API Required:** A robust options data API to get the necessary information.
-        """)
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
@@ -1111,71 +1113,25 @@ with tabs[5]:
                     st.rerun()
 
             st.divider()
-
-# TAB 7: 0DTE & Lottos
+            
+# TAB 7: Important News
 with tabs[6]:
-    st.subheader("🎲 0DTE & Lottos")
+    st.subheader("📰 Important News & Economic Calendar")
     
-    st.write("This section is designed to find potential explosive moves using 0DTE (zero-days-to-expiration) and high-risk 'lotto' options.")
-    st.info("Disclaimer: This section requires a robust options data API and sophisticated AI models to function effectively. The analysis provided here is conceptual. The AI's confidence rating is an estimate based on limited data and is not a guarantee.")
-    
-    if st.button("🔍 Scan for 0DTE Plays", type="primary"):
-        with st.spinner("AI scanning for potential 0DTE setups..."):
-            # Placeholder for AI logic that scans for 0DTE plays
-            # This would require an options data API (e.g., to get options chains, volume, open interest)
-            # The AI would analyze this data combined with real-time stock data and news.
+    if st.button("📊 Get This Week's Events", type="primary"):
+        with st.spinner("Fetching important events..."):
+            important_events = get_important_events()
             
-            # Simulated play
-            play_ticker = np.random.choice(["SPY", "QQQ", "TSLA", "NVDA", "GOOG"])
-            quote = get_live_quote(play_ticker)
-            options_data = get_options_data(play_ticker)
-            
-            st.success(f"🎯 Potential 0DTE Play: {play_ticker} ")
-            
-            playbook_analysis = ai_playbook(play_ticker, quote["change_percent"], "High volume and implied volatility spike", options_data)
-            
-            st.markdown(playbook_analysis)
-            st.divider()
-
-# TAB 8: Earnings Plays
-with tabs[7]:
-    st.subheader("🗓️ Top Earnings Plays")
-    
-    st.write("This section tracks upcoming earnings reports and uses AI to identify the highest-probability trading setups.")
-    st.info("Disclaimer: This section requires an earnings calendar API to be fully functional. The data shown is a placeholder and not live. AI's contract selection is conceptual.")
-    
-    if st.button("📊 Get Today's Earnings Plays", type="primary"):
-        with st.spinner("AI analyzing earnings reports..."):
-            
-            earnings_today = get_earnings_calendar()
-            
-            if not earnings_today:
-                st.info("No earnings reports found for today.")
+            if not important_events:
+                st.info("No major economic events scheduled for this week.")
             else:
-                st.markdown("### Today's Earnings Reports")
-                for report in earnings_today:
-                    ticker = report["ticker"]
-                    time_str = report["time"]
-                    
-                    st.markdown(f"**{ticker}** - Earnings **{time_str}**")
-                    
-                    # Placeholder for AI analysis of the earnings play
-                    ai_analysis_text = f"""
-                    **AI Analysis for {ticker} Earnings:**
-                    - **Date:** {report["date"]}
-                    - **Time:** {time_str}
-                    - **AI Probability of a Move:** High (based on historical data and current market conditions)
-                    - **AI Suggested Contract:** Placeholder (e.g., {ticker} {datetime.date.today()} Call/Put option)
-                    - **Entry Level:** Placeholder (e.g., above $150.00 for a call)
-                    - **Target Level:** Placeholder (e.g., $160.00)
-                    - **Stop Loss:** Placeholder (e.g., below $145.00)
-                    - **AI Confidence:** 85%
-                    
-                    **AI Thesis:** The market is anticipating a strong/weak report. High volume and IV are supporting a potential explosive move post-earnings. The AI has identified a solid risk/reward setup based on a potential gap up/down.
-                    """
-                    
-                    with st.expander(f"🔮 AI Predicts Play for {ticker}"):
-                        st.markdown(ai_analysis_text)
+                st.markdown("### Major Market-Moving Events")
+                
+                for event in sorted(important_events, key=lambda x: x['date']):
+                    st.markdown(f"**{event['event']}**")
+                    st.write(f"**Date:** {event['date']}")
+                    st.write(f"**Time:** {event['time']}")
+                    st.write(f"**Impact:** {event['impact']}")
                     st.divider()
 
 # Auto refresh
