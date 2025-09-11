@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import time
 import threading
-from zoneinfo import ZoneInfo  # Added for timezone support
+from zoneinfo import ZoneInfo  # For timezone support
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -37,6 +37,8 @@ if "auto_refresh" not in st.session_state:
     st.session_state.auto_refresh = False
 if "refresh_interval" not in st.session_state:
     st.session_state.refresh_interval = 30
+if "selected_tz" not in st.session_state:
+    st.session_state.selected_tz = "ET"  # Default to ET
 
 # API Keys
 try:
@@ -55,7 +57,8 @@ except:
 
 # Data functions
 @st.cache_data(ttl=10)
-def get_live_quote(ticker: str) -> Dict:
+def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
+    tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -86,8 +89,8 @@ def get_live_quote(ticker: str) -> Dict:
             if current_price and regular_market_open:
                 intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
         
-        # After hours
-        current_hour = datetime.datetime.now(ZoneInfo('US/Eastern')).hour  # Fixed: Use ET time
+        # After hours (using selected TZ)
+        current_hour = datetime.datetime.now(tz_zone).hour
         if current_hour >= 16 or current_hour < 4:
             regular_close = info.get('regularMarketPrice', current_price)
             if current_price != regular_close and regular_close:
@@ -95,6 +98,7 @@ def get_live_quote(ticker: str) -> Dict:
         
         total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
         
+        tz_label = "ET" if tz == "ET" else "CT"
         return {
             "last": float(current_price),
             "bid": float(info.get('bid', current_price - 0.01)),
@@ -107,16 +111,18 @@ def get_live_quote(ticker: str) -> Dict:
             "postmarket_change": float(postmarket_change),
             "previous_close": float(previous_close),
             "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now(ZoneInfo('US/Eastern')).strftime("%Y-%m-%d %H:%M:%S ET"),  # Fixed: Use ET time
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": None
         }
     except Exception as e:
+        tz_label = "ET" if tz == "ET" else "CT"
+        tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
         return {
             "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
             "change": 0.0, "change_percent": 0.0,
             "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
             "previous_close": 0.0, "market_open": 0.0,
-            "last_updated": datetime.datetime.now(ZoneInfo('US/Eastern')).strftime("%Y-%m-%d %H:%M:%S ET"),  # Fixed: Use ET time
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": str(e)
         }
 
@@ -283,7 +289,7 @@ def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
     except Exception as e:
         return f"AI Analysis Error: {str(e)}"
 
-def ai_auto_generate_plays():
+def ai_auto_generate_plays(tz: str):
     """
     Auto-generates trading plays by scanning watchlist and market movers
     """
@@ -300,7 +306,7 @@ def ai_auto_generate_plays():
         candidates = []
         
         for ticker in scan_tickers:
-            quote = get_live_quote(ticker)
+            quote = get_live_quote(ticker, tz)
             if not quote["error"]:
                 # Look for significant moves (>1.5% change)
                 if abs(quote["change_percent"]) >= 1.5:
@@ -420,6 +426,14 @@ def ai_auto_generate_plays():
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
+# Timezone toggle (placed here for global access)
+st.session_state.selected_tz = st.selectbox("🌍 Timezone", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1)
+
+# Get current time in selected TZ
+tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
+current_tz = datetime.datetime.now(tz_zone)
+tz_label = st.session_state.selected_tz
+
 # Auto-refresh controls
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
 with col1:
@@ -434,33 +448,32 @@ with col3:
         st.rerun()
 
 with col4:
-    current_et = datetime.datetime.now(ZoneInfo('US/Eastern'))  # Fixed: Use ET time
-    current_time = current_et.strftime("%I:%M:%S %p ET")
-    market_open = 9 <= current_et.hour < 16  # Fixed: Use ET hour
+    current_time = current_tz.strftime("%I:%M:%S %p")
+    market_open = 9 <= current_tz.hour < 16
     status = "🟢 Open" if market_open else "🔴 Closed"
-    st.write(f"**{status}** | {current_time}")
+    st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
 tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks"])
 
 # Global timestamp
-data_timestamp = current_et.strftime("%B %d, %Y at %I:%M:%S %p ET")  # Fixed: Use ET time
+data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
 st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp}</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
 with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
-    # Session status
-    current_et_hour = current_et.hour  # Fixed: Use ET hour
-    if 4 <= current_et_hour < 9:
+    # Session status (using selected TZ)
+    current_tz_hour = current_tz.hour
+    if 4 <= current_tz_hour < 9:
         session_status = "🌅 Premarket"
-    elif 9 <= current_et_hour < 16:
+    elif 9 <= current_tz_hour < 16:
         session_status = "🟢 Market Open"
     else:
         session_status = "🌆 After Hours"
     
-    st.markdown(f"**Trading Session:** {session_status}")
+    st.markdown(f"**Trading Session ({tz_label}):** {session_status}")
     
     # Search bar
     col1, col2 = st.columns([3, 1])
@@ -472,7 +485,7 @@ with tabs[0]:
     # Search result
     if search_quotes and search_ticker:
         with st.spinner(f"Getting quote for {search_ticker}..."):
-            quote = get_live_quote(search_ticker)
+            quote = get_live_quote(search_ticker, tz_label)
             if not quote["error"]:
                 st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']}")
                 
@@ -507,7 +520,7 @@ with tabs[0]:
     else:
         st.markdown("### Your Watchlist")
         for ticker in tickers:
-            quote = get_live_quote(ticker)
+            quote = get_live_quote(ticker, tz_label)
             if quote["error"]:
                 st.error(f"{ticker}: {quote['error']}")
                 continue
@@ -564,7 +577,7 @@ with tabs[1]:
         search_add_ticker = st.text_input("Search stock to add", placeholder="Enter ticker", key="search_add").upper().strip()
     with col2:
         if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
-            quote = get_live_quote(search_add_ticker)
+            quote = get_live_quote(search_add_ticker, tz_label)
             if not quote["error"]:
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
                 if search_add_ticker not in current_list:
@@ -641,7 +654,7 @@ with tabs[2]:
     if search_catalyst and search_catalyst_ticker:
         with st.spinner(f"Searching catalysts for {search_catalyst_ticker}..."):
             specific_news = get_finnhub_news(search_catalyst_ticker)
-            quote = get_live_quote(search_catalyst_ticker)
+            quote = get_live_quote(search_catalyst_ticker, tz_label)
             
             if not quote["error"]:
                 st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']}")
@@ -687,7 +700,7 @@ with tabs[2]:
             # Get movers
             movers = []
             for ticker in CORE_TICKERS[:20]:
-                quote = get_live_quote(ticker)
+                quote = get_live_quote(ticker, tz_label)
                 if not quote["error"] and abs(quote["change_percent"]) >= 1.5:
                     movers.append({
                         "ticker": ticker,
@@ -744,7 +757,7 @@ with tabs[3]:
     
     if search_analysis and search_analysis_ticker:
         with st.spinner(f"AI analyzing {search_analysis_ticker}..."):
-            quote = get_live_quote(search_analysis_ticker)
+            quote = get_live_quote(search_analysis_ticker, tz_label)
             if not quote["error"]:
                 news = get_finnhub_news(search_analysis_ticker)
                 catalyst = news[0].get('headline', '') if news else "Recent market movement"
@@ -793,7 +806,7 @@ with tabs[3]:
             
             movers = []
             for ticker in CORE_TICKERS[:15]:
-                quote = get_live_quote(ticker)
+                quote = get_live_quote(ticker, tz_label)
                 if not quote["error"]:
                     movers.append({
                         "ticker": ticker,
@@ -827,7 +840,7 @@ with tabs[4]:
     with col2:
         if st.button("🚀 Generate Auto Plays", type="primary"):
             with st.spinner("AI generating trading plays from market scan..."):
-                auto_plays = ai_auto_generate_plays()
+                auto_plays = ai_auto_generate_plays(tz_label)
                 
                 if auto_plays:
                     st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
@@ -871,7 +884,7 @@ with tabs[4]:
         search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
     
     if search_playbook and search_playbook_ticker:
-        quote = get_live_quote(search_playbook_ticker)
+        quote = get_live_quote(search_playbook_ticker, tz_label)
         
         if not quote["error"]:
             with st.spinner(f"AI generating playbook for {search_playbook_ticker}..."):
@@ -924,7 +937,7 @@ with tabs[4]:
         catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, etc.", key="catalyst_input")
         
         if st.button("🤖 Generate Watchlist Playbook", type="secondary"):
-            quote = get_live_quote(selected_ticker)
+            quote = get_live_quote(selected_ticker, tz_label)
             
             if not quote["error"]:
                 with st.spinner(f"AI analyzing {selected_ticker}..."):
