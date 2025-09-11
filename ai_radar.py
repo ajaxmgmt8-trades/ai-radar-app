@@ -116,7 +116,7 @@ def render_session(tab, session_name, tickers):
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
 # 🔄 Auto refresh every REFRESH_INTERVAL ms
-st_autorefresh = st.experimental_autorefresh(interval=REFRESH_INTERVAL, key="refresh")
+st_autorefresh = st.autorefresh(interval=REFRESH_INTERVAL, key="refresh")
 
 tabs = st.tabs(["📊 Premarket", "💥 Intraday", "🌙 Postmarket", "📌 Watchlist", "🤖 AI Playbooks"])
 
