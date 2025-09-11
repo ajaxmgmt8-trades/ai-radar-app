@@ -242,85 +242,159 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
-    if not openai_client:
-        return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
-    
-    try:
-        # Construct the prompt with additional details from options data if available
-        options_text = ""
-        if options_data:
-            options_text = f"""
-            Options Data:
-            - Implied Volatility (IV): {options_data.get('iv', 'N/A')}%
-            - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
-            - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A')} OI
-            - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A')} OI
-            - High IV Strike: {options_data.get('high_iv_strike', 'N/A')}
+    if st.session_state.model == "OpenAI":
+        if not openai_client:
+            return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
+        
+        try:
+            # Construct the prompt with additional details from options data if available
+            options_text = ""
+            if options_data:
+                options_text = f"""
+                Options Data:
+                - Implied Volatility (IV): {options_data.get('iv', 'N/A')}%
+                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
+                - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A')} OI
+                - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A')} OI
+                - High IV Strike: {options_data.get('high_iv_strike', 'N/A')}
+                """
+            
+            prompt = f"""
+            Analyze {ticker} with {change:+.2f}% change today.
+            Catalyst: {catalyst if catalyst else "Market movement"}
+            {options_text}
+            
+            Provide an expert trading analysis focusing on:
+            1. Overall Sentiment (Bullish/Bearish/Neutral) and an estimated confidence rating (out of 100).
+            2. A concise trading strategy (e.g., Scalp, Day Trade, Swing, LEAP).
+            3. Specific Entry levels, Target levels, and Stop levels.
+            4. Key support and resistance levels.
+            5. Justify your analysis by mentioning key metrics like volume, implied volatility, and open interest if available.
+            6. A conclusion on the potential for an explosive move.
+            
+            Keep concise and actionable, under 300 words.
             """
-        
-        prompt = f"""
-        Analyze {ticker} with {change:+.2f}% change today.
-        Catalyst: {catalyst if catalyst else "Market movement"}
-        {options_text}
-        
-        Provide an expert trading analysis focusing on:
-        1. Overall Sentiment (Bullish/Bearish/Neutral) and an estimated confidence rating (out of 100).
-        2. A concise trading strategy (e.g., Scalp, Day Trade, Swing, LEAP).
-        3. Specific Entry levels, Target levels, and Stop levels.
-        4. Key support and resistance levels.
-        5. Justify your analysis by mentioning key metrics like volume, implied volatility, and open interest if available.
-        6. A conclusion on the potential for an explosive move.
-        
-        Keep concise and actionable, under 300 words.
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=400
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI Error: {str(e)}"
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"AI Error: {str(e)}"
+    
+    elif st.session_state.model == "Gemini":
+        if not gemini_model:
+            return f"**{ticker} Analysis** (Gemini API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Gemini API key for detailed AI analysis."
+        try:
+            options_text = ""
+            if options_data:
+                options_text = f"""
+                Options Data:
+                - Implied Volatility (IV): {options_data.get('iv', 'N/A')}%
+                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
+                - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A')} OI
+                - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A')} OI
+                - High IV Strike: {options_data.get('high_iv_strike', 'N/A')}
+                """
+            
+            prompt = f"""
+            Analyze {ticker} with {change:+.2f}% change today.
+            Catalyst: {catalyst if catalyst else "Market movement"}
+            {options_text}
+            
+            Provide an expert trading analysis focusing on:
+            1. Overall Sentiment (Bullish/Bearish/Neutral) and an estimated confidence rating (out of 100).
+            2. A concise trading strategy (e.g., Scalp, Day Trade, Swing, LEAP).
+            3. Specific Entry levels, Target levels, and Stop levels.
+            4. Key support and resistance levels.
+            5. Justify your analysis by mentioning key metrics like volume, implied volatility, and open interest if available.
+            6. A conclusion on the potential for an explosive move.
+            
+            Keep concise and actionable, under 300 words.
+            """
+            
+            response = gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"AI Error: {str(e)}"
+    
+    else:
+        return "No AI model selected or configured."
 
 def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    if not openai_client:
-        return "OpenAI API not configured for AI analysis."
+    if st.session_state.model == "OpenAI":
+        if not openai_client:
+            return "OpenAI API not configured for AI analysis."
+        
+        try:
+            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+            
+            prompt = f"""
+            Analyze current market conditions based on:
+
+            Top News Headlines:
+            {news_context}
+
+            Top Market Movers:
+            {movers_context}
+
+            Provide a brief market analysis covering:
+            1. Overall market sentiment
+            2. Key themes driving movement
+            3. Sectors to watch
+            4. Trading opportunities
+
+            Keep it under 200 words and actionable.
+            """
+            
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"AI Analysis Error: {str(e)}"
     
-    try:
-        news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
-        movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+    elif st.session_state.model == "Gemini":
+        if not gemini_model:
+            return "Gemini API not configured for AI analysis."
         
-        prompt = f"""
-        Analyze current market conditions based on:
+        try:
+            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+            
+            prompt = f"""
+            Analyze current market conditions based on:
 
-        Top News Headlines:
-        {news_context}
+            Top News Headlines:
+            {news_context}
 
-        Top Market Movers:
-        {movers_context}
+            Top Market Movers:
+            {movers_context}
 
-        Provide a brief market analysis covering:
-        1. Overall market sentiment
-        2. Key themes driving movement
-        3. Sectors to watch
-        4. Trading opportunities
+            Provide a brief market analysis covering:
+            1. Overall market sentiment
+            2. Key themes driving movement
+            3. Sectors to watch
+            4. Trading opportunities
 
-        Keep it under 200 words and actionable.
-        """
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=300
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI Analysis Error: {str(e)}"
+            Keep it under 200 words and actionable.
+            """
+            
+            response = gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"AI Analysis Error: {str(e)}"
+    else:
+        return "No AI model selected or configured."
 
 def ai_auto_generate_plays(tz: str):
     """
@@ -338,16 +412,22 @@ def ai_auto_generate_plays(tz: str):
         # Scan for significant movers
         candidates = []
         
-        for ticker in scan_tickers:
-            quote = get_live_quote(ticker, tz)
-            if not quote["error"]:
-                # Look for significant moves (>1.5% change)
-                if abs(quote["change_percent"]) >= 1.5:
-                    candidates.append({
-                        "ticker": ticker,
-                        "quote": quote,
-                        "significance": abs(quote["change_percent"])
-                    })
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_ticker = {executor.submit(get_live_quote, ticker, tz): ticker for ticker in scan_tickers}
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    quote = future.result()
+                    if not quote["error"]:
+                        # Look for significant moves (>1.5% change)
+                        if abs(quote["change_percent"]) >= 1.5:
+                            candidates.append({
+                                "ticker": ticker,
+                                "quote": quote,
+                                "significance": abs(quote["change_percent"])
+                            })
+                except Exception as exc:
+                    st.error(f'{ticker} generated an exception: {exc}')
         
         # Sort by significance and take top candidates
         candidates.sort(key=lambda x: x["significance"], reverse=True)
@@ -364,23 +444,16 @@ def ai_auto_generate_plays(tz: str):
             if news:
                 catalyst = news[0].get('headline', '')[:100] + "..."
             
-            # Generate AI analysis if OpenAI is available
-            if openai_client:
+            # Generate AI analysis
+            if st.session_state.model == "OpenAI" and openai_client:
                 try:
-                    # Get placeholder options data
-                    options_data = get_options_data(ticker)
-                    
                     play_prompt = f"""
                     Generate a concise trading play for {ticker}:
                     
                     Current Price: ${quote['last']:.2f}
                     Change: {quote['change_percent']:+.2f}%
-                    Premarket: {quote['premarket_change']:+.2f}%
-                    Intraday: {quote['intraday_change']:+.2f}%
-                    After Hours: {quote['postmarket_change']:+.2f}%
                     Volume: {quote['volume']:,}
                     Catalyst: {catalyst if catalyst else "Market movement"}
-                    {options_data}
 
                     Provide:
                     1. Play type (Scalp/Day/Swing)
@@ -398,68 +471,57 @@ def ai_auto_generate_plays(tz: str):
                         temperature=0.3,
                         max_tokens=300
                     )
-                    
                     play_analysis = response.choices[0].message.content
-                    
                 except Exception as ai_error:
-                    play_analysis = f"""
-                    **{ticker} Trading Opportunity**
+                    play_analysis = f"AI analysis unavailable: {str(ai_error)[:50]}..."
+            elif st.session_state.model == "Gemini" and gemini_model:
+                try:
+                    play_prompt = f"""
+                    Generate a concise trading play for {ticker}:
                     
-                    **Movement:** {quote['change_percent']:+.2f}% change with {quote['volume']:,} volume
+                    Current Price: ${quote['last']:.2f}
+                    Change: {quote['change_percent']:+.2f}%
+                    Volume: {quote['volume']:,}
+                    Catalyst: {catalyst if catalyst else "Market movement"}
+
+                    Provide:
+                    1. Play type (Scalp/Day/Swing)
+                    2. Entry strategy and levels
+                    3. Target and stop levels
+                    4. Risk/reward ratio
+                    5. Confidence (1-10)
                     
-                    **Session Breakdown:**
-                    • Premarket: {quote['premarket_change']:+.2f}%
-                    • Intraday: {quote['intraday_change']:+.2f}%"
-                    • After Hours: {quote['postmarket_change']:+.2f}%
-                    
-                    **Quick Setup:** Watch for continuation or reversal around current levels
-                    
-                    *AI analysis unavailable: {str(ai_error)[:50]}...*
+                    Keep under 200 words, be specific and actionable.
                     """
+                    response = gemini_model.generate_content(play_prompt)
+                    play_analysis = response.text
+                except Exception as ai_error:
+                    play_analysis = f"AI analysis unavailable: {str(ai_error)[:50]}..."
             else:
-                # Fallback analysis without AI
-                direction = "bullish" if quote['change_percent'] > 0 else "bearish"
                 play_analysis = f"""
                 **{ticker} Trading Setup**
-                
-                **Movement:** {quote['change_percent']:+.2f}% change showing {direction} momentum
-                
-                **Session Analysis:**
-                • Premarket: {quote['premarket_change']:+.2f}%
-                • Intraday: {quote['intraday_change']:+.2f}%
-                • After Hours: {quote['postmarket_change']:+.2f}%
-                
+                **Movement:** {quote['change_percent']:+.2f}% change
                 **Volume:** {quote['volume']:,} shares
-                
-                **Setup:** Monitor for continuation or reversal. Consider risk management around current price levels.
-                
-                *Configure OpenAI API for detailed AI analysis*
+                **Setup:** Monitor for continuation or reversal. Consider risk management.
+                *Configure API for detailed AI analysis*
                 """
-            
+
             # Create play dictionary
             play = {
                 "ticker": ticker,
                 "current_price": quote['last'],
                 "change_percent": quote['change_percent'],
-                "session_data": {
-                    "premarket": quote['premarket_change'],
-                    "intraday": quote['intraday_change'],
-                    "afterhours": quote['postmarket_change']
-                },
                 "catalyst": catalyst if catalyst else f"Market movement: {quote['change_percent']:+.2f}%",
                 "play_analysis": play_analysis,
                 "volume": quote['volume'],
                 "timestamp": quote['last_updated']
             }
-            
             plays.append(play)
         
         return plays
-        
     except Exception as e:
         st.error(f"Error generating auto plays: {str(e)}")
         return []
-
 # Placeholder functions for advanced data
 def get_options_data(ticker: str) -> Optional[Dict]:
     """
