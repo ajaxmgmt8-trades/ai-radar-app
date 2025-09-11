@@ -11,19 +11,28 @@ import time
 import threading
 from zoneinfo import ZoneInfo  # For timezone support
 
+# Optional Gemini integration (wrapped to avoid import error)
+try:
+    import google.generativeai as genai  # For free Gemini integration
+except ModuleNotFoundError:
+    genai = None
+    st.warning("google-generativeai not installed. Using rule-based fallback for AI plays.")
+
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
-# Core tickers for selection
+# Core tickers for selection (added sector ETFs)
 CORE_TICKERS = [
-    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
-    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
-    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
-    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
-    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
-    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
-    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
-    "CELH","PDD"
+    "AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT", "META", "ORCL", "MDB", "GOOG",
+    "NFLX", "SPX", "APP", "NDX", "SMCI", "QUBT", "IONQ", "QBTS", "SOFI", "IBM",
+    "COST", "MSTR", "COIN", "OSCR", "LYFT", "JOBY", "ACHR", "LLY", "UNH", "OPEN",
+    "UPST", "NOW", "ISRG", "RR", "FIG", "HOOD", "IBIT", "WULF", "WOLF", "OKLO",
+    "APLD", "HUT", "SNPS", "SE", "ETHU", "TSM", "AVGO", "BITF", "HIMS", "BULL",
+    "SPOT", "LULU", "CRCL", "SOUN", "QMMM", "BMNR", "SBET", "GEMI", "CRWV", "KLAR",
+    "BABA", "INTC", "CMG", "UAMY", "IREN", "BBAI", "BRKB", "TEM", "GLD", "IWM", "LMND",
+    "CELH", "PDD",
+    # Sector ETFs
+    "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"
 ]
 
 # ETF list for sector tracking (including SPX and NDX)
@@ -51,18 +60,25 @@ try:
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
     if OPENAI_KEY:
         import openai
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
     else:
         openai_client = None
+    if GEMINI_API_KEY and genai:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel("gemini-1.5-flash")  # Free tier model
+    else:
+        gemini_model = None
 except:
     FINNHUB_KEY = ""
     POLYGON_KEY = ""
     openai_client = None
+    gemini_model = None
 
 # Data functions
-@st.cache_data(ttl=60)  # Optimized with caching
+@st.cache_data(ttl=10)
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     try:
@@ -95,7 +111,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             if current_price and regular_market_open:
                 intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
         
-        # After hours (using selected TZ)
+        # After hours
         current_hour = datetime.datetime.now(tz_zone).hour
         if current_hour >= 16 or current_hour < 4:
             regular_close = info.get('regularMarketPrice', current_price)
@@ -104,7 +120,6 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         
         total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
         
-        tz_label = "ET" if tz == "ET" else "CT"
         return {
             "last": float(current_price),
             "bid": float(info.get('bid', current_price - 0.01)),
@@ -117,18 +132,16 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "postmarket_change": float(postmarket_change),
             "previous_close": float(previous_close),
             "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz}",
             "error": None
         }
     except Exception as e:
-        tz_label = "ET" if tz == "ET" else "CT"
-        tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
         return {
             "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
             "change": 0.0, "change_percent": 0.0,
             "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
             "previous_close": 0.0, "market_open": 0.0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz}",
             "error": str(e)
         }
 
