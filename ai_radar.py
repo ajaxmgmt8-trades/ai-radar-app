@@ -305,17 +305,22 @@ with tabs[0]:
     for i, ticker in enumerate(tickers):
         progress_bar.progress((i + 1) / len(tickers))
         
-        quote = get_quote(ticker)
-        if quote["error"]:
-            continue
-            
-        prev_close = get_previous_close(ticker)
+        # Use demo data if enabled or API fails
+        if st.session_state.demo_mode:
+            quote = get_demo_quote(ticker)
+            prev_close = get_demo_previous_close(ticker)
+        else:
+            quote = get_quote(ticker)
+            if quote["error"]:
+                continue
+            prev_close = get_previous_close(ticker)
+        
         change_pct = ((quote["last"] - prev_close) / prev_close * 100) if prev_close > 0 else 0
         
         # Get volume data for relative volume calculation
-        sparkline_df = get_intraday_sparkline(ticker) if st.session_state.show_sparklines else None
-        current_vol = sparkline_df["volume"].sum() if sparkline_df is not None and not sparkline_df.empty else 0
-        rel_vol = calculate_rel_volume(ticker, current_vol) if current_vol > 0 else 1.0
+        sparkline_df = get_intraday_sparkline(ticker) if st.session_state.show_sparklines and not st.session_state.demo_mode else None
+        current_vol = sparkline_df["volume"].sum() if sparkline_df is not None and not sparkline_df.empty else random.randint(1000000, 5000000)
+        rel_vol = calculate_rel_volume(ticker, current_vol)
         
         quotes_data.append({
             "Ticker": ticker,
@@ -325,7 +330,8 @@ with tabs[0]:
             "Ask": f"${quote['ask']:.2f}",
             "RelVol": f"{rel_vol:.2f}x",
             "change_num": change_pct,
-            "sparkline_df": sparkline_df
+            "sparkline_df": sparkline_df,
+            "error": quote.get("error")
         })
     
     progress_bar.empty()
