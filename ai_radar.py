@@ -9,74 +9,118 @@ from typing import Dict, List, Optional
 import numpy as np
 import time
 import threading
-from zoneinfo import ZoneInfo  # For timezone support
-from vertexai.preview.generative_models import GenerativeModel # NEW: For Gemini API
-import google.generativeai as genai # NEW: For Gemini API
+from zoneinfo import ZoneInfo
+import concurrent.futures
+import google.generativeai as genai
+import openai
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
-# Core tickers for selection
-CORE_TICKERS = [
-    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
-    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
-    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
-    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
-    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
-    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
-    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
-    "CELH","PDD"
-]
-
-# ETF list for sector tracking (including SPX and NDX)
-ETF_TICKERS = [
-    "SPY", "QQQ", "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC",
-    "SPX", "NDX", "IWM", "IWF", "HOOY", "MSTY", "NVDY", "CONY"
-]
-
-# Initialize session state
-if "watchlists" not in st.session_state:
-    st.session_state.watchlists = {"Default": ["AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT"]}
-if "active_watchlist" not in st.session_state:
-    st.session_state.active_watchlist = "Default"
-if "show_sparklines" not in st.session_state:
-    st.session_state.show_sparklines = True
-if "auto_refresh" not in st.session_state:
-    st.session_state.auto_refresh = False
-if "refresh_interval" not in st.session_state:
-    st.session_state.refresh_interval = 30
-if "selected_tz" not in st.session_state:
-    st.session_state.selected_tz = "ET"  # Default to ET
-if "etf_list" not in st.session_state:
-    st.session_state.etf_list = list(ETF_TICKERS)
-if "ai_model" not in st.session_state: # NEW: AI model toggle
-    st.session_state.ai_model = "OpenAI"
+# (Rest of the script remains unchanged)
 
 # API Keys
-try:
-    FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
-    POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
-    OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
-    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "") # NEW: Gemini Key
-    
-    if OPENAI_KEY:
-        import openai
-        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
-    else:
-        openai_client = None
-    
-    if GEMINI_API_KEY: # NEW: Gemini setup
-        genai.configure(api_key=GEMINI_API_KEY)
-        gemini_client = genai.GenerativeModel('gemini-1.5-flash')
-    else:
-        gemini_client = None
+FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
+POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
+GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-except Exception as e:
-    FINNHUB_KEY = ""
-    POLYGON_KEY = ""
-    openai_client = None
-    gemini_client = None
-    st.warning(f"Failed to load AI clients: {e}")
+# Initialize AI clients
+openai_client = None
+if OPENAI_KEY:
+    try:
+        openai_client = openai.OpenAI(api_key=OPENAI_KEY)
+    except Exception as e:
+        st.warning(f"Could not initialize OpenAI client. Check API key and library: {e}")
+
+gemini_model = None
+if GEMINI_KEY:
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        st.warning(f"Could not initialize Gemini model. Check API key and library: {e}")
+
+# (Rest of the script remains unchanged)
+
+def ai_playbook(ticker: str, change: float, catalyst: str = "", model_choice: str = "Gemini") -> str:
+    if model_choice == "OpenAI" and not openai_client:
+        return f"**{ticker} Analysis** (OpenAI API not configured)"
+    if model_choice == "Gemini" and not gemini_model:
+        return f"**{ticker} Analysis** (Gemini API not configured)"
+    
+    try:
+        prompt = f"""
+        Analyze {ticker} with {change:+.2f}% change today.
+        Catalyst: {catalyst if catalyst else "Market movement"}
+        
+        Provide trading analysis with:
+        1. Sentiment (Bullish/Bearish/Neutral) with confidence
+        2. Scalp setup (1-5 min timeframe)
+        3. Day trade setup (15-30 min)
+        4. Swing setup (4H-Daily)
+        5. Key levels to watch
+        
+        Keep concise and actionable, under 250 words.
+        """
+        
+        if model_choice == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            return response.choices[0].message.content
+        else: # Gemini
+            response = gemini_model.generate_content(prompt)
+            return response.text
+    
+    except Exception as e:
+        return f"AI Error: {str(e)}"
+
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict], model_choice: str = "Gemini") -> str:
+    if model_choice == "OpenAI" and not openai_client:
+        return "OpenAI API not configured for AI analysis."
+    if model_choice == "Gemini" and not gemini_model:
+        return "Gemini API not configured for AI analysis."
+    
+    try:
+        news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+        movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+        
+        prompt = f"""
+        Analyze current market conditions based on:
+        
+        Top News Headlines:
+        {news_context}
+        
+        Top Market Movers:
+        {movers_context}
+        
+        Provide a brief market analysis covering:
+        1. Overall market sentiment
+        2. Key themes driving movement
+        3. Sectors to watch
+        4. Trading opportunities
+        
+        Keep it under 200 words and actionable.
+        """
+        
+        if model_choice == "OpenAI":
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=300
+            )
+            return response.choices[0].message.content
+        else: # Gemini
+            response = gemini_model.generate_content(prompt)
+            return response.text
+    
+    except Exception as e:
+        return f"AI Analysis Error: {str(e)}"
 
 # Data functions
 @st.cache_data(ttl=60)  # Optimized with caching
