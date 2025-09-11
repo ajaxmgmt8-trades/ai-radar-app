@@ -926,3 +926,220 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("🤖 AI Trading Playbooks")
     
+    # Auto-generated plays section
+    st.markdown("### 🎯 Auto-Generated Trading Plays")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption("AI automatically scans your watchlist and market movers to suggest trading opportunities")
+    with col2:
+        if st.button("🚀 Generate Auto Plays", type="primary"):
+            with st.spinner("AI generating trading plays from market scan..."):
+                auto_plays = ai_auto_generate_plays(tz_label)
+                
+                if auto_plays:
+                    st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
+                    
+                    for i, play in enumerate(auto_plays):
+                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%)"):
+                            
+                            # Display session data
+                            sess_col1, sess_col2, sess_col3 = st.columns(3)
+                            sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
+                            sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
+                            sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
+                            
+                            # Display catalyst
+                            if play['catalyst']:
+                                st.write(f"**Catalyst:** {play['catalyst']}")
+                            
+                            # Display AI play analysis
+                            st.markdown("**AI Trading Play:**")
+                            st.markdown(play['play_analysis'])
+                            
+                            # Add to watchlist option
+                            if st.button(f"Add {play['ticker']} to Watchlist", key=f"add_auto_play_{i}"):
+                                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                if play['ticker'] not in current_list:
+                                    current_list.append(play['ticker'])
+                                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                    st.success(f"Added {play['ticker']} to watchlist!")
+                                    st.rerun()
+                else:
+                    st.info("No significant trading opportunities detected at this time. Market conditions may be consolidating.")
+    
+    st.divider()
+    
+    # Search any stock
+    st.markdown("### 🔍 Custom Stock Analysis")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_playbook_ticker = st.text_input("🔍 Generate playbook for any stock", placeholder="Enter ticker", key="search_playbook").upper().strip()
+    with col2:
+        search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
+    
+    if search_playbook and search_playbook_ticker:
+        quote = get_live_quote(search_playbook_ticker, tz_label)
+        
+        if not quote["error"]:
+            with st.spinner(f"AI generating playbook for {search_playbook_ticker}..."):
+                news = get_finnhub_news(search_playbook_ticker)
+                catalyst = news[0].get('headline', '') if news else ""
+                
+                playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst)
+                
+                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']}")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                col3.metric("Volume", f"{quote['volume']:,}")
+                if col4.button(f"Add {search_playbook_ticker} to WL", key="add_playbook_search"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_playbook_ticker not in current_list:
+                        current_list.append(search_playbook_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_playbook_ticker}")
+                        st.rerun()
+                
+                # Session performance
+                st.markdown("#### Session Performance")
+                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                st.markdown("### 🎯 AI Trading Playbook")
+                st.markdown(playbook)
+                
+                if news:
+                    with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
+                        for item in news[:3]:
+                            st.write(f"**{item.get('headline', 'No title')}**")
+                            st.write(item.get('summary', 'No summary')[:200] + "...")
+                            st.write("---")
+                
+                st.divider()
+        else:
+            st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
+    
+    # Watchlist playbooks
+    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+    
+    if tickers:
+        st.markdown("### 📋 Watchlist Playbooks")
+        selected_ticker = st.selectbox("Select from watchlist", tickers, key="watchlist_playbook")
+        catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, etc.", key="catalyst_input")
+        
+        if st.button("🤖 Generate Watchlist Playbook", type="secondary"):
+            quote = get_live_quote(selected_ticker, tz_label)
+            
+            if not quote["error"]:
+                with st.spinner(f"AI analyzing {selected_ticker}..."):
+                    playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input)
+                    
+                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']}")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                    col3.metric("Volume", f"{quote['volume']:,}")
+                    
+                    # Session performance
+                    st.markdown("#### Session Breakdown")
+                    sess_col1, sess_col2, sess_col3 = st.columns(3)
+                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                    
+                    st.markdown("### 🎯 AI Analysis")
+                    st.markdown(playbook)
+                    
+                    news = get_finnhub_news(selected_ticker)
+                    if news:
+                        with st.expander(f"📰 Recent News for {selected_ticker}"):
+                            for item in news[:3]:
+                                st.write(f"**{item.get('headline', 'No title')}**")
+                                st.write(item.get('summary', 'No summary')[:200] + "...")
+                                st.write("---")
+    else:
+        st.info("Add stocks to watchlist or use search above.")
+    
+    # Quick tips for auto-generated plays
+    with st.expander("💡 About Auto-Generated Plays"):
+        st.markdown("""
+        **Auto-Generated Plays** scan your watchlist and top market movers to identify:
+        - Stocks with significant price movements (>1.5%)
+        - High relative volume situations
+        - Recent news catalysts
+        - Technical setups with good risk/reward ratios
+        
+        Each play includes:
+        - Specific entry, target, and stop levels
+        - Play type (scalp, day trade, swing)
+        - Risk/reward analysis
+        - AI confidence rating
+        
+        **Note:** These are AI-generated suggestions for educational purposes. Always do your own research and risk management.
+        """)
+
+# TAB 6: Sector/ETF Tracker (New Tab)
+with tabs[5]:
+    st.subheader("📊 Sector/ETF Tracker")
+    
+    # Refresh button for ETF data
+    if st.button("🔄 Refresh ETF Data", type="primary"):
+        with st.spinner("Fetching ETF data..."):
+            df = get_sector_etf_data(tz_label)
+            if not df.empty:
+                st.success(f"Updated {len(df)} ETFs/Indices")
+                st.dataframe(df.style.format({
+                    "Price": "${:.2f}",
+                    "Change %": "{:+.2f}%",
+                    "Volume": "{:,.0f}"
+                }), use_container_width=True)
+                
+                # Sector summary
+                sector_summary = df.groupby("Sector").agg({
+                    "Change %": "mean",
+                    "Volume": "sum"
+                }).round(2).reset_index()
+                sector_summary = sector_summary.sort_values("Change %", ascending=False)
+                
+                st.markdown("### 📈 Sector Performance Summary")
+                st.dataframe(sector_summary.style.format({
+                    "Change %": "{:+.2f}%",
+                    "Volume": "{:,.0f}"
+                }), use_container_width=True)
+                
+                # Highlight top/bottom performer
+                top_sector = sector_summary.iloc[0]["Sector"]
+                bottom_sector = sector_summary.iloc[-1]["Sector"]
+                st.info(f"**Top Sector:** {top_sector} ({sector_summary.iloc[0]['Change %']:+.2f}%)")
+                st.warning(f"**Lagging Sector:** {bottom_sector} ({sector_summary.iloc[-1]['Change %']:+.2f}%)")
+            else:
+                st.error("No ETF data available. Check API keys and internet connection.")
+    
+    # Instructions
+    with st.expander("ℹ️ About Sector/ETF Tracker"):
+        st.markdown("""
+        This tab tracks major sector ETFs and indices (including SPX and NDX) for quick market overview.
+        - **ETFs**: SPY (S&P 500), QQQ (Nasdaq-100), XLF (Financials), etc.
+        - **Indices**: SPX (S&P 500), NDX (Nasdaq-100).
+        - Data sourced from yfinance (free, live during market hours).
+        - Refresh to update. Add ETFs to your watchlist for detailed analysis.
+        """)
+
+# Auto refresh
+if st.session_state.auto_refresh:
+    time.sleep(0.1)
+    if st.session_state.refresh_interval == 10:
+        st.rerun()
+
+# Footer
+st.markdown("---")
+st.markdown(
+    "<div style='text-align: center; color: #666;'>"
+    "🔥 AI Radar Pro | Live data: yfinance | News: Finnhub/Polygon | AI: OpenAI/Gemini (Free Tier)"
+    "</div>",
+    unsafe_allow_html=True
+)
