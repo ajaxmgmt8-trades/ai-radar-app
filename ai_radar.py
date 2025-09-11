@@ -79,29 +79,41 @@ def get_previous_close(ticker: str):
 def get_top_movers():
     """Scan top movers from a fixed universe using yfinance"""
     movers = []
-    for t in CORE_TICKERS[:50]:  # limit for speed
+    for t in CORE_TICKERS[:50]:  # limit universe for speed
         try:
             data = yf.download(t, period="2d", interval="1m", prepost=True, progress=False)
             if data.empty:
                 continue
-            last = data["Close"].iloc[-1]
-            prev = data["Close"].iloc[0]
-            change = (last - prev) / prev * 100
-            movers.append({"Ticker": t, "Price": last, "Change %": change})
-        except:
+
+            last = float(data["Close"].iloc[-1])
+            prev = float(data["Close"].iloc[0])
+            change = (last - prev) / prev * 100 if prev > 0 else 0
+
+            movers.append({
+                "Ticker": t,
+                "Price": last,
+                "Change %": change
+            })
+        except Exception:
             continue
 
     if not movers:
-        return pd.DataFrame(columns=["Ticker","Price","Change %"])
+        return pd.DataFrame(columns=["Ticker", "Price", "Change %"])
 
     df = pd.DataFrame(movers)
-    df = df.sort_values("Change %", ascending=False).head(10)
 
-    # ✅ format only for display
+    # ✅ ensure Change % is numeric
+    df["Change %"] = pd.to_numeric(df["Change %"], errors="coerce")
+
+    # sort numerically
+    df = df.sort_values("Change %", ascending=False).head(10).reset_index(drop=True)
+
+    # format only for display
     df["Price"] = df["Price"].map(lambda x: f"${x:.2f}")
     df["Change %"] = df["Change %"].map(lambda x: f"{x:+.2f}%")
 
     return df
+
 
 
 def ai_playbook(ticker: str, change: float, catalyst: str = ""):
