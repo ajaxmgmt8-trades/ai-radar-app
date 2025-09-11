@@ -29,7 +29,7 @@ CORE_TICKERS = [
 # ETF list for sector tracking (including SPX and NDX)
 ETF_TICKERS = [
     "SPY", "QQQ", "XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC",
-    "SPX", "NDX"
+    "SPX", "NDX", "IWM", "IWF", "HOOY", "MSTY", "NVDY", "CONY"
 ]
 
 # Initialize session state
@@ -45,6 +45,9 @@ if "refresh_interval" not in st.session_state:
     st.session_state.refresh_interval = 30
 if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
+if "etf_list" not in st.session_state:
+    st.session_state.etf_list = list(ETF_TICKERS)
+
 
 # API Keys
 try:
@@ -917,7 +920,7 @@ with tabs[4]:
                         st.rerun()
                 
                 # Session performance
-                st.markdown("#### Session Performance")
+                st.markdown("#### Session Breakdown")
                 sess_col1, sess_col2, sess_col3 = st.columns(3)
                 sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
                 sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
@@ -1000,10 +1003,28 @@ with tabs[4]:
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
     st.subheader("🌐 Sector/ETF Tracking")
-    
+
+    # Add search and add functionality
+    st.markdown("### 🔍 Search & Add ETFs")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        etf_search_ticker = st.text_input("Search for an ETF to add", placeholder="Enter ticker (e.g., VOO)", key="etf_search_add").upper().strip()
+    with col2:
+        if st.button("Add ETF", key="add_etf_btn") and etf_search_ticker:
+            if etf_search_ticker not in st.session_state.etf_list:
+                quote = get_live_quote(etf_search_ticker)
+                if not quote["error"]:
+                    st.session_state.etf_list.append(etf_search_ticker)
+                    st.success(f"✅ Added {etf_search_ticker} to the list.")
+                    st.rerun()
+                else:
+                    st.error(f"Invalid ticker or ETF: {etf_search_ticker}")
+            else:
+                st.warning(f"{etf_search_ticker} is already in the list.")
+
     st.markdown("### ETF Performance Overview")
     
-    for ticker in ETF_TICKERS:
+    for ticker in st.session_state.etf_list:
         quote = get_live_quote(ticker, tz_label)
         if quote["error"]:
             st.error(f"{ticker}: {quote['error']}")
