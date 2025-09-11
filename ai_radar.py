@@ -1,170 +1,219 @@
-import yfinance as yf
-import pandas as pd
 import streamlit as st
+import pandas as pd
 import requests
+import datetime
+import json
+import plotly.graph_objects as go
+from zoneinfo import ZoneInfo
 from openai import OpenAI
-from datetime import datetime, timedelta
+import yfinance as yf   # ✅ using yfinance instead of Polygon
 
-# =========================
-# CONFIG
-# =========================
-st.set_page_config(
-    page_title="AI Radar Pro",
-    layout="wide",
-    page_icon="🔥"
-)
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="🔥 AI Radar Pro", layout="wide")
 
-OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
-NEWS_API_KEY = st.secrets.get("NEWS_API_KEY", "")  # Finnhub
-POLYGON_API_KEY = st.secrets.get("POLYGON_API_KEY", "")
+TZ_CT = ZoneInfo("America/Chicago")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+CORE_TICKERS = [
+    "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
+    "NFLX","SPX","APP","NDX","SMCI","QUBT","IONQ","QBTS","SOFI","IBM",
+    "COST","MSTR","COIN","OSCR","LYFT","JOBY","ACHR","LLY","UNH","OPEN",
+    "UPST","NOW","ISRG","RR","FIG","HOOD","IBIT","WULF","WOLF","OKLO",
+    "APLD","HUT","SNPS","SE","ETHU","TSM","AVGO","BITF","HIMS","BULL",
+    "SPOT","LULU","CRCL","SOUN","QMMM","BMNR","SBET","GEMI","CRWV","KLAR",
+    "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
+    "CELH","PDD"
+]
+WATCHLIST_FILE = "watchlists.json"
 
-# =========================
-# SAFE DATAFRAME HELPER
-# =========================
-def safe_dataframe(df):
-    if df is None or df.empty:
-        return st.write("No data available.")
+# ---------------- API KEYS ----------------
+try:
+    FINNHUB_KEY = st.secrets["FINNHUB_API_KEY"]
+    OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
+except KeyError as e:
+    st.error(f"Missing API key: {e}")
+    st.stop()
+
+openai_client = OpenAI(api_key=OPENAI_KEY)
+
+# ---------------- WATCHLIST ----------------
+def load_watchlists():
     try:
-        return st.dataframe(df.style.format({
-            "Change %": "{:+.2f}%",
-            "RelVol": "{:.2f}x"
-        }), use_container_width=True)
-    except:
-        return st.dataframe(df, use_container_width=True)
+        with open(WATCHLIST_FILE, "r") as f:
+            watchlists = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        watchlists = {"Default": CORE_TICKERS.copy()}
+    if "Default" not in watchlists:
+        watchlists["Default"] = CORE_TICKERS.copy()
+    return watchlists
 
-# =========================
-# HELPERS
-# =========================
-@st.cache_data(ttl=300)
-def avg_volume(ticker, lookback=20):
-    hist = yf.download(ticker, period=f"{lookback}d", interval="1d", progress=False, prepost=True)
-    if hist.empty or "Volume" not in hist:
+def save_watchlists(watchlists):
+    with open(WATCHLIST_FILE, "w") as f:
+        json.dump(watchlists, f, indent=2)
+
+if "watchlists" not in st.session_state:
+    st.session_state.watchlists = load_watchlists()
+if "active_watchlist" not in st.session_state:
+    st.session_state.active_watchlist = "Default"
+
+# ---------------- HELPERS ----------------
+def get_quote(ticker: str):
+    """Get live last price using yfinance"""
+    try:
+        data = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
+        if data.empty:
+            return None
+        last_price = float(data["Close"].iloc[-1])
+        return {"last": last_price}
+    except Exception:
         return None
-    return float(hist["Volume"].mean())
 
-def scan_24h(ticker):
-    data = yf.download(ticker, period="2d", interval="5m", prepost=True, progress=False)
-    if data.empty:
+def get_previous_close(ticker: str):
+    try:
+        data = yf.download(ticker, period="5d", interval="1d", progress=False)
+        if data.empty:
+            return None
+        return float(data["Close"].iloc[-2])  # previous close
+    except Exception:
         return None
-    last_price = data["Close"].iloc[-1]
-    prev_close = data["Close"].iloc[0]
-    pct_change = (last_price - prev_close) / prev_close * 100
-    rel_vol = data["Volume"].sum() / (avg_volume(ticker) or 1)
-    return pct_change, rel_vol, last_price
 
-# =========================
-# NEWS SOURCES
-# =========================
-def get_finnhub_news(ticker: str):
-    try:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        start = (datetime.utcnow() - timedelta(days=3)).strftime("%Y-%m-%d")
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start}&to={today}&token={NEWS_API_KEY}"
-        r = requests.get(url, timeout=10).json()
-        if isinstance(r, list) and r:
-            return r[0].get("headline") or r[0].get("title")
-        return "No major Finnhub news"
-    except:
-        return "Finnhub error"
+def get_top_movers():
+    """Scan top movers from a fixed universe using yfinance"""
+    movers = []
+    for t in CORE_TICKERS[:50]:  # limit for speed
+        try:
+            data = yf.download(t, period="2d", interval="1m", prepost=True, progress=False)
+            if data.empty: continue
+            last = data["Close"].iloc[-1]
+            prev = data["Close"].iloc[0]
+            change = (last - prev) / prev * 100
+            movers.append({"Ticker": t, "Price": last, "Change %": change})
+        except:
+            continue
+    df = pd.DataFrame(movers).sort_values("Change %", ascending=False).head(10)
+    df["Price"] = df["Price"].map(lambda x: f"${x:.2f}")
+    df["Change %"] = df["Change %"].map(lambda x: f"{x:+.2f}%")
+    return df
 
-def get_polygon_news(ticker: str):
-    try:
-        url = f"https://api.polygon.io/v2/reference/news?ticker={ticker}&apiKey={POLYGON_API_KEY}"
-        r = requests.get(url, timeout=10).json()
-        if "results" in r and r["results"]:
-            latest = r["results"][0]
-            return f"{latest.get('publisher', {}).get('name','News')}: {latest.get('title')}"
-        return "No major Polygon/Benzinga news"
-    except:
-        return "Polygon news error"
-
-# =========================
-# AI PLAYBOOK
-# =========================
-def ai_playbook(ticker, price, change, relvol, catalyst):
-    if not OPENAI_API_KEY:
-        return "⚠️ Add OPENAI_API_KEY in Secrets."
+def ai_playbook(ticker: str, change: float, catalyst: str = ""):
     prompt = f"""
-    Ticker: {ticker}
-    Price: {price:.2f}
-    24h Change: {change:.2f}%
-    RelVol: {relvol:.2f}x
-    Catalyst: {catalyst}
-
-    Generate a trading playbook:
-    1) Bias (Bullish/Bearish/Neutral).
-    2) Entry & exit strategy for scalp (1-5m), day trade (15-30m), swing (4H-Daily).
-    3) Risks to watch (IV crush, macro events, pullback).
-    Keep concise and actionable.
+    You are an expert trader. Analyze {ticker}:
+    - Change: {change:+.2f}%
+    - Catalyst: {catalyst if catalyst else "None"}
+    
+    Provide:
+    1. Sentiment + confidence
+    2. Scalp setup (1-5m)
+    3. Day trade setup (15-30m)
+    4. Swing setup (4H-Daily)
     """
     try:
-        resp = client.chat.completions.create(
+        resp = openai_client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=350
+            messages=[{"role":"user","content":prompt}],
+            max_tokens=400,
+            temperature=0.3
         )
         return resp.choices[0].message.content
     except Exception as e:
-        return f"AI error: {e}"
+        return f"AI Error: {e}"
 
-# =========================
-# SCANNERS
-# =========================
-def scan_list(tickers, use_polygon=True, use_finnhub=True):
-    rows = []
+def get_news_finnhub():
+    url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_KEY}"
+    r = requests.get(url, timeout=10).json()
+    return r[:10] if isinstance(r, list) else []
+
+# ---------------- SIDEBAR ----------------
+with st.sidebar:
+    st.header("📌 Watchlist Manager")
+    list_name = st.selectbox("Active Watchlist", list(st.session_state.watchlists.keys()))
+    st.session_state.active_watchlist = list_name
+    tickers = st.session_state.watchlists[list_name].copy()
+
+    # Add symbol
+    new_ticker = st.text_input("Add Symbol", "").upper().strip()
+    if st.button("➕ Add"):
+        if new_ticker and new_ticker not in tickers:
+            tickers.append(new_ticker)
+            st.session_state.watchlists[list_name] = tickers
+            save_watchlists(st.session_state.watchlists)
+            st.rerun()
+
+    # Remove
     for t in tickers:
-        scan = scan_24h(t)
-        if not scan:
-            continue
-        change, relvol, price = scan
-        catalyst = ""
-        if use_polygon:
-            catalyst = get_polygon_news(t)
-        elif use_finnhub:
-            catalyst = get_finnhub_news(t)
-        playbook = ai_playbook(t, price, change, relvol, catalyst)
-        rows.append([t, f"${price:.2f}", round(change,2), round(relvol,2), catalyst, playbook])
-    return pd.DataFrame(rows, columns=["Ticker","Price","Change %","RelVol","Catalyst","AI Playbook"])
+        col1, col2 = st.columns([4,1])
+        col1.write(t)
+        if col2.button("🗑️", key=f"rm_{t}"):
+            tickers.remove(t)
+            st.session_state.watchlists[list_name] = tickers
+            save_watchlists(st.session_state.watchlists)
+            st.rerun()
 
-# =========================
-# STREAMLIT UI
-# =========================
-st.title("🔥 AI Radar Pro — Live Market Scanner")
+# ---------------- MAIN ----------------
+st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
-# Sidebar settings
-st.sidebar.header("⚙️ News Sources")
-use_polygon = st.sidebar.checkbox("Use Polygon (Benzinga)", value=True)
-use_finnhub = st.sidebar.checkbox("Use Finnhub", value=True)
+tabs = st.tabs(["📊 Premarket", "📈 Intraday", "🌙 Postmarket", "🔥 Catalyst Scanner", "🤖 AI Playbooks"])
 
-# Search ticker
-search_ticker = st.text_input("🔍 Search a ticker (e.g. TSLA, NVDA, SPY)")
-if search_ticker:
-    df = scan_list([search_ticker.upper()], use_polygon, use_finnhub)
-    safe_dataframe(df)
+# TAB 1-3: Sessions
+for i, session in enumerate(["Premarket","Intraday","Postmarket"]):
+    with tabs[i]:
+        st.subheader(f"{session} Movers")
+        auto = st.checkbox(f"🔄 Auto-refresh {session}", key=f"auto_{session}")
+        interval = st.selectbox("Refresh interval", [30,60,120], key=f"int_{session}")
+        if st.button(f"Refresh {session}"):
+            st.rerun()
 
-# Tabs
-tabs = st.tabs(["📊 Premarket","💥 Intraday","🌙 Postmarket","📰 Catalysts"])
-watchlist = ["AAPL","NVDA","TSLA","MSFT","AMZN","META","AMD","GOOG"]
+        # Top movers
+        st.markdown("### 🔥 Top 10 Market Movers")
+        st.dataframe(get_top_movers(), use_container_width=True)
 
-with tabs[0]:
-    st.subheader("Premarket Movers")
-    df = scan_list(watchlist, use_polygon, use_finnhub)
-    safe_dataframe(df)
+        # Watchlist movers
+        st.markdown("### 📌 Your Watchlist Movers")
+        wl_data = []
+        for t in tickers:
+            q = get_quote(t)
+            prev = get_previous_close(t)
+            if not q or not prev: continue
+            change = ((q["last"]-prev)/prev)*100
+            wl_data.append({
+                "Ticker": t,
+                "Price": f"${q['last']:.2f}",
+                "Change %": f"{change:+.2f}%"
+            })
+        if wl_data:
+            st.dataframe(pd.DataFrame(wl_data), use_container_width=True)
 
-with tabs[1]:
-    st.subheader("Intraday Movers")
-    df = scan_list(watchlist, use_polygon, use_finnhub)
-    safe_dataframe(df)
-
-with tabs[2]:
-    st.subheader("Postmarket Movers")
-    df = scan_list(watchlist, use_polygon, use_finnhub)
-    safe_dataframe(df)
-
+# TAB 4: Catalyst Scanner
 with tabs[3]:
-    st.subheader("📰 Catalyst Feed")
-    df = pd.DataFrame([[t, get_polygon_news(t), get_finnhub_news(t)] for t in watchlist],
-                      columns=["Ticker","Polygon/Benzinga","Finnhub"])
-    safe_dataframe(df)
+    st.subheader("🔥 Catalyst Scanner (Finnhub)")
+    news = get_news_finnhub()
+    for item in news:
+        title = item.get("headline") or item.get("title")
+        summary = item.get("summary","")
+        st.markdown(f"**{title}**")
+        st.caption(summary)
+        if st.button(f"📊 AI Playbook {title}", key=f"ai_{title}"):
+            with st.spinner("Analyzing..."):
+                analysis = ai_playbook("SPY", 0, title)
+                st.markdown(analysis)
+        st.divider()
+
+# TAB 5: AI Playbooks
+with tabs[4]:
+    st.subheader("🤖 AI Playbooks")
+    sel = st.selectbox("Select Ticker", tickers+["Custom"])
+    if sel=="Custom":
+        sel = st.text_input("Enter ticker").upper()
+    catalyst = st.text_input("Catalyst (optional)")
+    if st.button("Generate AI Playbook"):
+        q = get_quote(sel)
+        prev = get_previous_close(sel)
+        if q and prev:
+            change = ((q["last"]-prev)/prev)*100
+        else:
+            change=0
+        pb = ai_playbook(sel, change, catalyst)
+        st.markdown(pb)
+
+# ---------------- FOOTER ----------------
+st.markdown("---")
+st.caption("🔥 Powered by yfinance, Finnhub, OpenAI")
