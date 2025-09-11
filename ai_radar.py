@@ -450,33 +450,13 @@ with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     # Session status
-    central = timezone(timedelta(hours=-6))  # Central Time
-    eastern = timezone(timedelta(hours=-5))  # Eastern Time
-    
-    if st.session_state.timezone_preference == "CT":
-        now_local = datetime.datetime.now(central)
-        current_hour = now_local.hour
-        current_minute = now_local.minute
-        
-        # CT session times
-        if 4 <= current_hour < 8 or (current_hour == 8 and current_minute < 30):
-            session_status = "🌅 Premarket"
-        elif (current_hour == 8 and current_minute >= 30) or (8 < current_hour < 15):
-            session_status = "🟢 Market Open"
-        else:
-            session_status = "🌆 After Hours"
+    current_hour = datetime.datetime.now().hour
+    if 4 <= current_hour < 9:
+        session_status = "🌅 Premarket"
+    elif 9 <= current_hour < 16:
+        session_status = "🟢 Market Open"
     else:
-        now_local = datetime.datetime.now(eastern)
-        current_hour = now_local.hour
-        current_minute = now_local.minute
-        
-        # ET session times
-        if 4 <= current_hour < 9 or (current_hour == 9 and current_minute < 30):
-            session_status = "🌅 Premarket"
-        elif (current_hour == 9 and current_minute >= 30) or (9 < current_hour < 16):
-            session_status = "🟢 Market Open"
-        else:
-            session_status = "🌆 After Hours"
+        session_status = "🌆 After Hours"
     
     st.markdown(f"**Trading Session:** {session_status}")
     
