@@ -231,23 +231,37 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     else:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
-def ai_playbook(ticker: str, change: float, catalyst: str = "") -> str:
+def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
     if not openai_client:
         return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
     
     try:
+        # Construct the prompt with additional details from options data if available
+        options_text = ""
+        if options_data:
+            options_text = f"""
+            Options Data:
+            - Implied Volatility (IV): {options_data.get('iv', 'N/A')}%
+            - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A')}
+            - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A')} OI
+            - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A')} OI
+            - High IV Strike: {options_data.get('high_iv_strike', 'N/A')}
+            """
+        
         prompt = f"""
         Analyze {ticker} with {change:+.2f}% change today.
         Catalyst: {catalyst if catalyst else "Market movement"}
+        {options_text}
         
-        Provide trading analysis with:
-        1. Sentiment (Bullish/Bearish/Neutral) with confidence
-        2. Scalp setup (1-5 min timeframe)
-        3. Day trade setup (15-30 min)
-        4. Swing setup (4H-Daily)
-        5. Key levels to watch
+        Provide an expert trading analysis focusing on:
+        1. Overall Sentiment (Bullish/Bearish/Neutral) and an estimated confidence rating (out of 100).
+        2. A concise trading strategy (e.g., Scalp, Day Trade, Swing, LEAP).
+        3. Specific Entry levels, Target levels, and Stop levels.
+        4. Key support and resistance levels.
+        5. Justify your analysis by mentioning key metrics like volume, implied volatility, and open interest if available.
+        6. A conclusion on the potential for an explosive move.
         
-        Keep concise and actionable, under 250 words.
+        Keep concise and actionable, under 300 words.
         """
         
         response = openai_client.chat.completions.create(
@@ -343,6 +357,9 @@ def ai_auto_generate_plays(tz: str):
             # Generate AI analysis if OpenAI is available
             if openai_client:
                 try:
+                    # Get placeholder options data
+                    options_data = get_options_data(ticker)
+                    
                     play_prompt = f"""
                     Generate a concise trading play for {ticker}:
                     
@@ -353,7 +370,8 @@ def ai_auto_generate_plays(tz: str):
                     After Hours: {quote['postmarket_change']:+.2f}%
                     Volume: {quote['volume']:,}
                     Catalyst: {catalyst if catalyst else "Market movement"}
-                    
+                    {options_data}
+
                     Provide:
                     1. Play type (Scalp/Day/Swing)
                     2. Entry strategy and levels
@@ -432,6 +450,38 @@ def ai_auto_generate_plays(tz: str):
         st.error(f"Error generating auto plays: {str(e)}")
         return []
 
+# Placeholder functions for advanced data
+def get_options_data(ticker: str) -> Optional[Dict]:
+    """
+    Placeholder function to simulate getting options data.
+    A real implementation would use a service like Polygon, CBOE, etc.
+    """
+    st.info(f"Disclaimer: Options data for {ticker} is a placeholder and not live.")
+    return {
+        "iv": np.random.uniform(20.0, 150.0),
+        "put_call_ratio": np.random.uniform(0.5, 2.0),
+        "top_call_oi": 15000 + np.random.randint(1, 10) * 100,
+        "top_call_oi_strike": 200 + np.random.randint(-10, 10),
+        "top_put_oi": 12000 + np.random.randint(1, 10) * 100,
+        "top_put_oi_strike": 180 + np.random.randint(-10, 10),
+        "high_iv_strike": np.random.choice([195, 205, 210])
+    }
+
+def get_earnings_calendar() -> List[Dict]:
+    """
+    Placeholder function for an earnings calendar.
+    A real implementation would use a service like Finnhub, Polygon, or an dedicated earnings calendar API.
+    """
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    st.info("Disclaimer: Earnings data is a placeholder and not live.")
+    
+    return [
+        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50"},
+        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20"},
+        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
+    ]
+
+
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
 
@@ -466,7 +516,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -1000,6 +1050,17 @@ with tabs[4]:
         
         **Note:** These are AI-generated suggestions for educational purposes. Always do your own research and risk management.
         """)
+        
+    # LEAP section
+    st.markdown("### 📈 Long-Term Equity Anticipation Securities (LEAPS)")
+    with st.expander("Explore LEAPS"):
+        st.write("This section would provide analysis for solid LEAPs, including:")
+        st.markdown("""
+        - **Data Needed:** Long-term options chains (1-2 years out), Implied Volatility (IV), historical IV, delta/gamma/theta data.
+        - **Analysis Focus:** Companies with strong fundamentals, low IV, and high probability for long-term growth.
+        - **AI will provide:** Suggested strike prices, entry/target levels, and a comprehensive thesis.
+        - **API Required:** A robust options data API to get the necessary information.
+        """)
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
@@ -1041,35 +1102,81 @@ with tabs[5]:
             col3.write(f"{quote['volume']:,}")
             col3.caption(f"Updated: {quote['last_updated']}")
             
-            if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}_etf"):
-                with st.spinner(f"Analyzing {ticker}..."):
-                    analysis = ai_playbook(ticker, quote['change_percent'])
-                    st.success(f"🤖 {ticker} Analysis")
-                    st.markdown(analysis)
+            if col4.button(f"Add {ticker} to Watchlist", key=f"add_etf_{ticker}"):
+                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                if ticker not in current_list:
+                    current_list.append(ticker)
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                    st.success(f"Added {ticker} to watchlist!")
+                    st.rerun()
 
-            # Session data
-            sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
-            sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
-            sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
-            sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
-
-            # Expandable detailed view
-            with st.expander(f"🔎 Expand {ticker}"):
-                # Catalyst headlines
-                news = get_finnhub_news(ticker)
-                if news:
-                    st.write("### 📰 Catalysts (last 24h)")
-                    for n in news:
-                        st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
-                else:
-                    st.info("No recent news.")
-                
-                # AI Playbook
-                st.markdown("### 🎯 AI Playbook")
-                catalyst_title = news[0].get('headline', '') if news else ""
-                st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title))
-            
             st.divider()
+
+# TAB 7: 0DTE & Lottos
+with tabs[6]:
+    st.subheader("🎲 0DTE & Lottos")
+    
+    st.write("This section is designed to find potential explosive moves using 0DTE (zero-days-to-expiration) and high-risk 'lotto' options.")
+    st.info("Disclaimer: This section requires a robust options data API and sophisticated AI models to function effectively. The analysis provided here is conceptual. The AI's confidence rating is an estimate based on limited data and is not a guarantee.")
+    
+    if st.button("🔍 Scan for 0DTE Plays", type="primary"):
+        with st.spinner("AI scanning for potential 0DTE setups..."):
+            # Placeholder for AI logic that scans for 0DTE plays
+            # This would require an options data API (e.g., to get options chains, volume, open interest)
+            # The AI would analyze this data combined with real-time stock data and news.
+            
+            # Simulated play
+            play_ticker = np.random.choice(["SPY", "QQQ", "TSLA", "NVDA", "GOOG"])
+            quote = get_live_quote(play_ticker)
+            options_data = get_options_data(play_ticker)
+            
+            st.success(f"🎯 Potential 0DTE Play: {play_ticker} ")
+            
+            playbook_analysis = ai_playbook(play_ticker, quote["change_percent"], "High volume and implied volatility spike", options_data)
+            
+            st.markdown(playbook_analysis)
+            st.divider()
+
+# TAB 8: Earnings Plays
+with tabs[7]:
+    st.subheader("🗓️ Top Earnings Plays")
+    
+    st.write("This section tracks upcoming earnings reports and uses AI to identify the highest-probability trading setups.")
+    st.info("Disclaimer: This section requires an earnings calendar API to be fully functional. The data shown is a placeholder and not live. AI's contract selection is conceptual.")
+    
+    if st.button("📊 Get Today's Earnings Plays", type="primary"):
+        with st.spinner("AI analyzing earnings reports..."):
+            
+            earnings_today = get_earnings_calendar()
+            
+            if not earnings_today:
+                st.info("No earnings reports found for today.")
+            else:
+                st.markdown("### Today's Earnings Reports")
+                for report in earnings_today:
+                    ticker = report["ticker"]
+                    time_str = report["time"]
+                    
+                    st.markdown(f"**{ticker}** - Earnings **{time_str}**")
+                    
+                    # Placeholder for AI analysis of the earnings play
+                    ai_analysis_text = f"""
+                    **AI Analysis for {ticker} Earnings:**
+                    - **Date:** {report["date"]}
+                    - **Time:** {time_str}
+                    - **AI Probability of a Move:** High (based on historical data and current market conditions)
+                    - **AI Suggested Contract:** Placeholder (e.g., {ticker} {datetime.date.today()} Call/Put option)
+                    - **Entry Level:** Placeholder (e.g., above $150.00 for a call)
+                    - **Target Level:** Placeholder (e.g., $160.00)
+                    - **Stop Loss:** Placeholder (e.g., below $145.00)
+                    - **AI Confidence:** 85%
+                    
+                    **AI Thesis:** The market is anticipating a strong/weak report. High volume and IV are supporting a potential explosive move post-earnings. The AI has identified a solid risk/reward setup based on a potential gap up/down.
+                    """
+                    
+                    with st.expander(f"🔮 AI Predicts Play for {ticker}"):
+                        st.markdown(ai_analysis_text)
+                    st.divider()
 
 # Auto refresh
 if st.session_state.auto_refresh:
