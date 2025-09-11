@@ -450,18 +450,33 @@ with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     # Session status
-    central_offset = timedelta(hours=-6)  # Central Time is UTC-6 (CST) or UTC-5 (CDT)
-    central_tz = timezone(central_offset)
-    now_central = datetime.datetime.now(central_tz)
-    current_hour = now_central.hour
-    current_minute = now_central.minute
+    central = timezone(timedelta(hours=-6))  # Central Time
+    eastern = timezone(timedelta(hours=-5))  # Eastern Time
     
-    if 4 <= current_hour < 8 or (current_hour == 8 and current_minute < 30):
-        session_status = "🌅 Premarket"
-    elif 8 <= current_hour < 15 or (current_hour == 15 and current_minute <= 0):
-        session_status = "🟢 Market Open"
+    if st.session_state.timezone_preference == "CT":
+        now_local = datetime.datetime.now(central)
+        current_hour = now_local.hour
+        current_minute = now_local.minute
+        
+        # CT session times
+        if 4 <= current_hour < 8 or (current_hour == 8 and current_minute < 30):
+            session_status = "🌅 Premarket"
+        elif (current_hour == 8 and current_minute >= 30) or (8 < current_hour < 15):
+            session_status = "🟢 Market Open"
+        else:
+            session_status = "🌆 After Hours"
     else:
-        session_status = "🌆 After Hours"
+        now_local = datetime.datetime.now(eastern)
+        current_hour = now_local.hour
+        current_minute = now_local.minute
+        
+        # ET session times
+        if 4 <= current_hour < 9 or (current_hour == 9 and current_minute < 30):
+            session_status = "🌅 Premarket"
+        elif (current_hour == 9 and current_minute >= 30) or (9 < current_hour < 16):
+            session_status = "🟢 Market Open"
+        else:
+            session_status = "🌆 After Hours"
     
     st.markdown(f"**Trading Session:** {session_status}")
     
