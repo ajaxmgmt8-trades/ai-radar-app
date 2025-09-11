@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import time
 import threading
+from zoneinfo import ZoneInfo  # Added for timezone support
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -86,7 +87,7 @@ def get_live_quote(ticker: str) -> Dict:
                 intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
         
         # After hours
-        current_hour = datetime.datetime.now().hour
+        current_hour = datetime.datetime.now(ZoneInfo('US/Eastern')).hour  # Fixed: Use ET time
         if current_hour >= 16 or current_hour < 4:
             regular_close = info.get('regularMarketPrice', current_price)
             if current_price != regular_close and regular_close:
@@ -106,7 +107,7 @@ def get_live_quote(ticker: str) -> Dict:
             "postmarket_change": float(postmarket_change),
             "previous_close": float(previous_close),
             "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S ET"),
+            "last_updated": datetime.datetime.now(ZoneInfo('US/Eastern')).strftime("%Y-%m-%d %H:%M:%S ET"),  # Fixed: Use ET time
             "error": None
         }
     except Exception as e:
@@ -115,7 +116,7 @@ def get_live_quote(ticker: str) -> Dict:
             "change": 0.0, "change_percent": 0.0,
             "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
             "previous_close": 0.0, "market_open": 0.0,
-            "last_updated": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S ET"),
+            "last_updated": datetime.datetime.now(ZoneInfo('US/Eastern')).strftime("%Y-%m-%d %H:%M:%S ET"),  # Fixed: Use ET time
             "error": str(e)
         }
 
@@ -433,8 +434,9 @@ with col3:
         st.rerun()
 
 with col4:
-    current_time = datetime.datetime.now().strftime("%I:%M:%S %p ET")
-    market_open = 9 <= datetime.datetime.now().hour < 16
+    current_et = datetime.datetime.now(ZoneInfo('US/Eastern'))  # Fixed: Use ET time
+    current_time = current_et.strftime("%I:%M:%S %p ET")
+    market_open = 9 <= current_et.hour < 16  # Fixed: Use ET hour
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time}")
 
@@ -442,7 +444,7 @@ with col4:
 tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks"])
 
 # Global timestamp
-data_timestamp = datetime.datetime.now().strftime("%B %d, %Y at %I:%M:%S %p ET")
+data_timestamp = current_et.strftime("%B %d, %Y at %I:%M:%S %p ET")  # Fixed: Use ET time
 st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp}</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
@@ -450,10 +452,10 @@ with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     # Session status
-    current_hour = datetime.datetime.now().hour
-    if 4 <= current_hour < 9:
+    current_et_hour = current_et.hour  # Fixed: Use ET hour
+    if 4 <= current_et_hour < 9:
         session_status = "🌅 Premarket"
-    elif 9 <= current_hour < 16:
+    elif 9 <= current_et_hour < 16:
         session_status = "🟢 Market Open"
     else:
         session_status = "🌆 After Hours"
