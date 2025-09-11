@@ -483,6 +483,55 @@ with tabs[2]:
 with tabs[3]:
     st.subheader("📈 AI Market Analysis")
     
+    # Search bar for individual stock analysis
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_analysis_ticker = st.text_input("🔍 Analyze specific stock", placeholder="Enter ticker for detailed analysis", key="search_analysis").upper().strip()
+    with col2:
+        search_analysis = st.button("Analyze Stock", key="search_analysis_btn")
+    
+    # Display individual stock analysis if requested
+    if search_analysis and search_analysis_ticker:
+        with st.spinner(f"AI analyzing {search_analysis_ticker}..."):
+            quote = get_live_quote(search_analysis_ticker)
+            if not quote["error"]:
+                # Get news for context
+                news = get_finnhub_news(search_analysis_ticker)
+                catalyst = news[0].get('headline', '') if news else "Recent market movement"
+                
+                analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst)
+                
+                st.success(f"🤖 AI Analysis: {search_analysis_ticker}")
+                
+                # Stock data
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Volume", f"{quote['volume']:,}")
+                col3.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                if col4.button(f"Add {search_analysis_ticker} to WL", key="add_analysis_search"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_analysis_ticker not in current_list:
+                        current_list.append(search_analysis_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_analysis_ticker}")
+                        st.rerun()
+                
+                st.markdown("### 🎯 AI Analysis")
+                st.markdown(analysis)
+                
+                # Recent news context
+                if news:
+                    with st.expander(f"📰 Recent News Context"):
+                        for item in news[:3]:
+                            st.write(f"**{item.get('headline', 'No title')}**")
+                            st.write(item.get('summary', 'No summary')[:200] + "...")
+                            st.write("---")
+                
+                st.divider()
+            else:
+                st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
+    
+    # Main market analysis
     if st.button("🤖 Generate Market Analysis", type="primary"):
         with st.spinner("AI analyzing current market conditions..."):
             news_items = get_all_news()
@@ -496,6 +545,115 @@ with tabs[3]:
                         "ticker": ticker,
                         "change_pct": quote["change_percent"],
                         "price": quote["last"]
+                    })
+            
+            # Generate AI analysis
+            analysis = ai_market_analysis(news_items, movers)
+            
+            st.success("🤖 AI Market Analysis Complete")
+            st.markdown(analysis)
+            
+            # Show supporting data
+            with st.expander("📊 Supporting Data"):
+                st.write("**Top Market Movers:**")
+                for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
+                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}%")
+                
+                st.write("**Key News Headlines:**")
+                for news in news_items[:3]:
+                    st.write(f"• {news['title']}")
+
+# TAB 5: AI Playbooks
+with tabs[4]:
+    st.subheader("🤖 AI Trading Playbooks")
+    
+    # Search bar for any stock playbook
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_playbook_ticker = st.text_input("🔍 Generate playbook for any stock", placeholder="Enter ticker for trading playbook", key="search_playbook").upper().strip()
+    with col2:
+        search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
+    
+    # Display search result playbook
+    if search_playbook and search_playbook_ticker:
+        quote = get_live_quote(search_playbook_ticker)
+        
+        if not quote["error"]:
+            with st.spinner(f"AI generating playbook for {search_playbook_ticker}..."):
+                # Get news for context
+                news = get_finnhub_news(search_playbook_ticker)
+                catalyst = news[0].get('headline', '') if news else ""
+                
+                playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst)
+                
+                st.success(f"✅ {search_playbook_ticker} Trading Playbook")
+                
+                # Current data
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                col3.metric("Volume", f"{quote['volume']:,}")
+                if col4.button(f"Add {search_playbook_ticker} to WL", key="add_playbook_search"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_playbook_ticker not in current_list:
+                        current_list.append(search_playbook_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_playbook_ticker}")
+                        st.rerun()
+                
+                # AI analysis
+                st.markdown("### 🎯 AI Trading Playbook")
+                st.markdown(playbook)
+                
+                # Recent news
+                if news:
+                    with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
+                        for item in news[:3]:
+                            st.write(f"**{item.get('headline', 'No title')}**")
+                            st.write(item.get('summary', 'No summary')[:200] + "...")
+                            st.write("---")
+                
+                st.divider()
+        else:
+            st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
+    
+    # Watchlist playbooks
+    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+    
+    if tickers:
+        st.markdown("### 📋 Watchlist Playbooks")
+        selected_ticker = st.selectbox("Select from your watchlist", tickers, key="watchlist_playbook")
+        catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, technical pattern, etc.", key="catalyst_input")
+        
+        if st.button("🤖 Generate Watchlist Playbook", type="primary"):
+            quote = get_live_quote(selected_ticker)
+            
+            if not quote["error"]:
+                with st.spinner(f"AI analyzing {selected_ticker}..."):
+                    playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input)
+                    
+                    st.success(f"✅ {selected_ticker} Trading Playbook")
+                    
+                    # Current data
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                    col3.metric("Volume", f"{quote['volume']:,}")
+                    
+                    # AI analysis
+                    st.markdown("### 🎯 AI Analysis")
+                    st.markdown(playbook)
+                    
+                    # Recent news
+                    news = get_finnhub_news(selected_ticker)
+                    if news:
+                        with st.expander(f"📰 Recent News for {selected_ticker}"):
+                            for item in news[:3]:
+                                st.write(f"**{item.get('headline', 'No title')}**")
+                                st.write(item.get('summary', 'No summary')[:200] + "...")
+                                st.write("---")
+    else:
+        st.info("Add stocks to your watchlist or use the search above to generate playbooks.")"price": quote["last"]
                     })
             
             # Generate AI analysis
