@@ -1,17 +1,15 @@
 import streamlit as st
 import pandas as pd
-import requests
-import datetime
-import json
-import plotly.graph_objects as go
-from zoneinfo import ZoneInfo
+import yfinance as yf
 from openai import OpenAI
-import yfinance as yf   # ✅ using yfinance instead of Polygon
+import datetime
 
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="🔥 AI Radar Pro", layout="wide")
+st_autorefresh = st.experimental_autorefresh(interval=5000, key="live_refresh")
 
-TZ_CT = ZoneInfo("America/Chicago")
+OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", "")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 CORE_TICKERS = [
     "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
@@ -23,219 +21,124 @@ CORE_TICKERS = [
     "BABA","INTC","CMG","UAMY","IREN","BBAI","BRKB","TEM","GLD","IWM","LMND",
     "CELH","PDD"
 ]
-WATCHLIST_FILE = "watchlists.json"
 
-# ---------------- API KEYS ----------------
-try:
-    FINNHUB_KEY = st.secrets["FINNHUB_API_KEY"]
-    OPENAI_KEY = st.secrets["OPENAI_API_KEY"]
-except KeyError as e:
-    st.error(f"Missing API key: {e}")
-    st.stop()
-
-openai_client = OpenAI(api_key=OPENAI_KEY)
-
-# ---------------- WATCHLIST ----------------
-def load_watchlists():
-    try:
-        with open(WATCHLIST_FILE, "r") as f:
-            watchlists = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        watchlists = {"Default": CORE_TICKERS.copy()}
-    if "Default" not in watchlists:
-        watchlists["Default"] = CORE_TICKERS.copy()
-    return watchlists
-
-def save_watchlists(watchlists):
-    with open(WATCHLIST_FILE, "w") as f:
-        json.dump(watchlists, f, indent=2)
-
-if "watchlists" not in st.session_state:
-    st.session_state.watchlists = load_watchlists()
-if "active_watchlist" not in st.session_state:
-    st.session_state.active_watchlist = "Default"
+if "watchlist" not in st.session_state:
+    st.session_state.watchlist = CORE_TICKERS[:15]  # default smaller set for speed
 
 # ---------------- HELPERS ----------------
-def get_quote(ticker: str):
-    """Get live last price using yfinance"""
+def get_quote_yf(ticker):
     try:
-        data = yf.download(ticker, period="2d", interval="1m", prepost=True, progress=False)
-        if data.empty:
-            return None
-        last_price = float(data["Close"].iloc[-1])
-        return {"last": last_price}
+        data = yf.Ticker(ticker).history(period="2d", interval="1m", prepost=True)
+        if data.empty: return None, None, None
+        last = data["Close"].iloc[-1]
+        prev = data["Close"].iloc[0]
+        change = ((last - prev) / prev) * 100
+        return last, prev, change
+    except Exception:
+        return None, None, None
+
+def get_rel_volume(ticker):
+    try:
+        hist = yf.download(ticker, period="1mo", interval="1d", progress=False)
+        if hist.empty: return None
+        avg_vol = hist["Volume"].mean()
+        today_vol = hist["Volume"].iloc[-1]
+        return today_vol / avg_vol if avg_vol > 0 else None
     except Exception:
         return None
 
-def get_previous_close(ticker: str):
+def ai_playbook(ticker, change):
+    if not OPENAI_API_KEY:
+        return "Demo Playbook (add API key for live AI)"
     try:
-        data = yf.download(ticker, period="5d", interval="1d", progress=False)
-        if data.empty:
-            return None
-        return float(data["Close"].iloc[-2])  # previous close
-    except Exception:
-        return None
-
-def get_top_movers():
-    """Scan top movers from a fixed universe using yfinance"""
-    movers = []
-    for t in CORE_TICKERS[:50]:  # limit universe for speed
-        try:
-            data = yf.download(t, period="2d", interval="1m", prepost=True, progress=False)
-            if data.empty:
-                continue
-
-            last = float(data["Close"].iloc[-1])
-            prev = float(data["Close"].iloc[0])
-            change = (last - prev) / prev * 100 if prev > 0 else 0
-
-            movers.append({
-                "Ticker": t,
-                "Price": last,
-                "Change %": change
-            })
-        except Exception:
-            continue
-
-    if not movers:
-        return pd.DataFrame(columns=["Ticker", "Price", "Change %"])
-
-    df = pd.DataFrame(movers)
-
-    # ✅ ensure Change % is numeric
-    df["Change %"] = pd.to_numeric(df["Change %"], errors="coerce")
-
-    # sort numerically
-    df = df.sort_values("Change %", ascending=False).head(10).reset_index(drop=True)
-
-    # format only for display
-    df["Price"] = df["Price"].map(lambda x: f"${x:.2f}")
-    df["Change %"] = df["Change %"].map(lambda x: f"{x:+.2f}%")
-
-    return df
-
-
-
-def ai_playbook(ticker: str, change: float, catalyst: str = ""):
-    prompt = f"""
-    You are an expert trader. Analyze {ticker}:
-    - Change: {change:+.2f}%
-    - Catalyst: {catalyst if catalyst else "None"}
-    
-    Provide:
-    1. Sentiment + confidence
-    2. Scalp setup (1-5m)
-    3. Day trade setup (15-30m)
-    4. Swing setup (4H-Daily)
-    """
-    try:
-        resp = openai_client.chat.completions.create(
+        prompt = f"""
+        Analyze {ticker} with {change:+.2f}% change.
+        Provide 3 short bullet points:
+        1. Sentiment (bullish/bearish/neutral)
+        2. Best trade setup (scalp/day/swing)
+        3. Key risk to watch
+        """
+        resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role":"user","content":prompt}],
-            max_tokens=400,
-            temperature=0.3
+            max_tokens=120
         )
-        return resp.choices[0].message.content
-    except Exception as e:
-        return f"AI Error: {e}"
+        return resp.choices[0].message.content.strip()
+    except:
+        return "AI Error"
 
-def get_news_finnhub():
-    url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_KEY}"
-    r = requests.get(url, timeout=10).json()
-    return r[:10] if isinstance(r, list) else []
-
-# ---------------- SIDEBAR ----------------
-with st.sidebar:
-    st.header("📌 Watchlist Manager")
-    list_name = st.selectbox("Active Watchlist", list(st.session_state.watchlists.keys()))
-    st.session_state.active_watchlist = list_name
-    tickers = st.session_state.watchlists[list_name].copy()
-
-    # Add symbol
-    new_ticker = st.text_input("Add Symbol", "").upper().strip()
-    if st.button("➕ Add"):
-        if new_ticker and new_ticker not in tickers:
-            tickers.append(new_ticker)
-            st.session_state.watchlists[list_name] = tickers
-            save_watchlists(st.session_state.watchlists)
-            st.rerun()
-
-    # Remove
+def build_table(tickers):
+    rows = []
     for t in tickers:
+        price, prev, change = get_quote_yf(t)
+        if price is None or prev is None: continue
+        relvol = get_rel_volume(t)
+        playbook = ai_playbook(t, change)
+        rows.append({
+            "Ticker": t,
+            "Price": f"${price:.2f}",
+            "Change %": f"{change:+.2f}%",
+            "RelVol": f"{relvol:.2f}x" if relvol else "—",
+            "AI Playbook": playbook
+        })
+    return pd.DataFrame(rows)
+
+# ---------------- LAYOUT ----------------
+st.title("🔥 AI Radar Pro — Live Trading Assistant")
+
+tabs = st.tabs(["📊 Sessions", "📌 Watchlist", "📰 Catalysts", "🤖 AI Playbooks"])
+
+# TAB 1: Sessions (Premarket, Intraday, Postmarket in columns)
+with tabs[0]:
+    st.subheader("📊 Market Sessions (Live)")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("### 🔥 Premarket Movers")
+        df = build_table(st.session_state.watchlist[:20])
+        st.dataframe(df, use_container_width=True, height=500)
+
+    with col2:
+        st.markdown("### 💥 Intraday Movers")
+        df = build_table(st.session_state.watchlist[20:40])
+        st.dataframe(df, use_container_width=True, height=500)
+
+    with col3:
+        st.markdown("### 🌙 Postmarket Movers")
+        df = build_table(st.session_state.watchlist[40:60])
+        st.dataframe(df, use_container_width=True, height=500)
+
+# TAB 2: Watchlist Management
+with tabs[1]:
+    st.subheader("📌 Manage Watchlist")
+    new_ticker = st.text_input("Add Ticker").upper()
+    if st.button("➕ Add"):
+        if new_ticker and new_ticker not in st.session_state.watchlist:
+            st.session_state.watchlist.append(new_ticker)
+            st.success(f"Added {new_ticker}")
+    st.write("### Current Watchlist")
+    for t in st.session_state.watchlist:
         col1, col2 = st.columns([4,1])
         col1.write(t)
         if col2.button("🗑️", key=f"rm_{t}"):
-            tickers.remove(t)
-            st.session_state.watchlists[list_name] = tickers
-            save_watchlists(st.session_state.watchlists)
+            st.session_state.watchlist.remove(t)
             st.rerun()
 
-# ---------------- MAIN ----------------
-st.title("🔥 AI Radar Pro — Live Trading Assistant")
+# TAB 3: Catalysts (placeholder)
+with tabs[2]:
+    st.subheader("📰 Catalyst Scanner")
+    st.info("Coming soon: Polygon, Finnhub, StockTwits integration here")
 
-tabs = st.tabs(["📊 Premarket", "📈 Intraday", "🌙 Postmarket", "🔥 Catalyst Scanner", "🤖 AI Playbooks"])
-
-# TAB 1-3: Sessions
-for i, session in enumerate(["Premarket","Intraday","Postmarket"]):
-    with tabs[i]:
-        st.subheader(f"{session} Movers")
-        auto = st.checkbox(f"🔄 Auto-refresh {session}", key=f"auto_{session}")
-        interval = st.selectbox("Refresh interval", [30,60,120], key=f"int_{session}")
-        if st.button(f"Refresh {session}"):
-            st.rerun()
-
-        # Top movers
-        st.markdown("### 🔥 Top 10 Market Movers")
-        st.dataframe(get_top_movers(), use_container_width=True)
-
-        # Watchlist movers
-        st.markdown("### 📌 Your Watchlist Movers")
-        wl_data = []
-        for t in tickers:
-            q = get_quote(t)
-            prev = get_previous_close(t)
-            if not q or not prev: continue
-            change = ((q["last"]-prev)/prev)*100
-            wl_data.append({
-                "Ticker": t,
-                "Price": f"${q['last']:.2f}",
-                "Change %": f"{change:+.2f}%"
-            })
-        if wl_data:
-            st.dataframe(pd.DataFrame(wl_data), use_container_width=True)
-
-# TAB 4: Catalyst Scanner
+# TAB 4: AI Playbooks Search
 with tabs[3]:
-    st.subheader("🔥 Catalyst Scanner (Finnhub)")
-    news = get_news_finnhub()
-    for item in news:
-        title = item.get("headline") or item.get("title")
-        summary = item.get("summary","")
-        st.markdown(f"**{title}**")
-        st.caption(summary)
-        if st.button(f"📊 AI Playbook {title}", key=f"ai_{title}"):
-            with st.spinner("Analyzing..."):
-                analysis = ai_playbook("SPY", 0, title)
-                st.markdown(analysis)
-        st.divider()
-
-# TAB 5: AI Playbooks
-with tabs[4]:
-    st.subheader("🤖 AI Playbooks")
-    sel = st.selectbox("Select Ticker", tickers+["Custom"])
-    if sel=="Custom":
-        sel = st.text_input("Enter ticker").upper()
-    catalyst = st.text_input("Catalyst (optional)")
-    if st.button("Generate AI Playbook"):
-        q = get_quote(sel)
-        prev = get_previous_close(sel)
-        if q and prev:
-            change = ((q["last"]-prev)/prev)*100
+    st.subheader("🤖 Search AI Playbook")
+    search = st.text_input("Enter Ticker", "").upper()
+    if st.button("Generate Playbook") and search:
+        price, prev, change = get_quote_yf(search)
+        if price:
+            pb = ai_playbook(search, change)
+            st.markdown(f"### {search} Playbook")
+            st.markdown(pb)
         else:
-            change=0
-        pb = ai_playbook(sel, change, catalyst)
-        st.markdown(pb)
-
-# ---------------- FOOTER ----------------
-st.markdown("---")
-st.caption("🔥 Powered by yfinance, Finnhub, OpenAI")
+            st.warning("No data for this ticker")
