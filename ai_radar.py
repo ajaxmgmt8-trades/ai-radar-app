@@ -450,9 +450,11 @@ with tabs[0]:
     st.subheader("📊 Real-Time Watchlist")
     
     # Session status
-    central = pytz.timezone("US/Central")
-    current_hour = datetime.datetime.now(central).hour
-    current_minute = datetime.datetime.now(central).minute
+    central_offset = timedelta(hours=-6)  # Central Time is UTC-6 (CST) or UTC-5 (CDT)
+    central_tz = timezone(central_offset)
+    now_central = datetime.datetime.now(central_tz)
+    current_hour = now_central.hour
+    current_minute = now_central.minute
     
     if 4 <= current_hour < 8 or (current_hour == 8 and current_minute < 30):
         session_status = "🌅 Premarket"
