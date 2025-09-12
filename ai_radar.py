@@ -147,8 +147,11 @@ class TwelveDataClient:
     def get_quote(self, symbol: str) -> Dict:
         """Get real-time quote from Twelve Data"""
         try:
+            # According to documentation, quote() takes same parameters as time_series()
+            # interval is REQUIRED per the docs
             params = {
                 "symbol": symbol,
+                "interval": "1min",  # REQUIRED parameter
                 "apikey": self.api_key
             }
             
