@@ -202,33 +202,39 @@ class TwelveDataClient:
                 # If that didn't work, try with exchange specified
                 params["symbol"] = f"{symbol}:NASDAQ"  # Try with exchange
                 response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "price" in data:
-                    price = float(data.get("close", data.get("price", 0)))
-                    change = float(data.get("change", 0))
-                    change_percent = float(data.get("percent_change", 0))
-                    volume = int(data.get("volume", 0))
+                if response.status_code == 200:
+                    data = response.json()
                     
-                    return {
-                        "last": price,
-                        "bid": float(data.get("low", price - 0.01)),
-                        "ask": float(data.get("high", price + 0.01)),
-                        "volume": volume,
-                        "change": change,
-                        "change_percent": change_percent,
-                        "premarket_change": 0,
-                        "intraday_change": change_percent,
-                        "postmarket_change": 0,
-                        "previous_close": float(data.get("previous_close", price - change)),
-                        "market_open": float(data.get("open", price)),
-                        "last_updated": datetime.datetime.now().isoformat(),
-                        "data_source": "Twelve Data",
-                        "error": None
-                    }
-                else:
-                    return {"error": f"No data found for {symbol}", "data_source": "Twelve Data"}
+                    if "values" in data and len(data["values"]) > 0:
+                        latest = data["values"][0]
+                        
+                        price = float(latest.get("close", 0))
+                        open_price = float(latest.get("open", price))
+                        high_price = float(latest.get("high", price))
+                        low_price = float(latest.get("low", price))
+                        volume = int(latest.get("volume", 0))
+                        
+                        change = price - open_price
+                        change_percent = ((price - open_price) / open_price * 100) if open_price > 0 else 0
+                        
+                        if price > 0:
+                            return {
+                                "last": price,
+                                "bid": low_price,
+                                "ask": high_price,
+                                "volume": volume,
+                                "change": change,
+                                "change_percent": change_percent,
+                                "premarket_change": 0,
+                                "intraday_change": change_percent,
+                                "postmarket_change": 0,
+                                "previous_close": open_price,
+                                "market_open": open_price,
+                                "last_updated": datetime.datetime.now().isoformat(),
+                                "data_source": "Twelve Data",
+                                "error": None,
+                                "raw_data": data
+                            }
             else:
                 return {"error": f"API error: {response.status_code}", "data_source": "Twelve Data"}
                 
@@ -500,21 +506,117 @@ def get_technical_analysis(ticker: str) -> str:
     except Exception as e:
         return f"Error in technical analysis: {str(e)}"
 
-# Placeholder options data function
+# New function to fetch option chain data
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
+    """Fetch 0DTE or nearest expiration option chain using yfinance"""
+    try:
+        stock = yf.Ticker(ticker)
+        # Get all expiration dates
+        expirations = stock.options
+        if not expirations:
+            return {"error": f"No options data available for {ticker}"}
+
+        # Find today's expiration or closest future date
+        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
+        expiration_dates = [datetime.datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
+        valid_expirations = [exp for exp in expiration_dates if exp >= today]
+        if not valid_expirations:
+            return {"error": f"No valid expirations found for {ticker}"}
+
+        # Select 0DTE or closest expiration
+        target_expiration = min(valid_expirations, key=lambda x: (x - today).days)
+        expiration_str = target_expiration.strftime('%Y-%m-%d')
+
+        # Fetch option chain
+        option_chain = stock.option_chain(expiration_str)
+        calls = option_chain.calls
+        puts = option_chain.puts
+
+        # Clean and format data
+        calls = calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        puts = puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        
+        # Determine moneyness
+        current_price = get_live_quote(ticker, tz).get('last', 0)
+        calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
+        puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
+
+        # Convert IV to percentage
+        calls['impliedVolatility'] = calls['impliedVolatility'] * 100
+        puts['impliedVolatility'] = puts['impliedVolatility'] * 100
+
+        return {
+            "calls": calls,
+            "puts": puts,
+            "expiration": expiration_str,
+            "current_price": current_price,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": f"Error fetching option chain for {ticker}: {str(e)}"}
+
+# New function to simulate order flow (placeholder for premium API integration)
+@st.cache_data(ttl=300)
+def get_order_flow(ticker: str, option_chain: Dict) -> Dict:
+    """Simulate order flow by analyzing option chain volume and open interest"""
+    calls = option_chain.get('calls', pd.DataFrame())
+    puts = option_chain.get('puts', pd.DataFrame())
+    if calls.empty or puts.empty:
+        return {"error": "No option chain data for order flow analysis"}
+
+    try:
+        # Calculate put/call volume ratio
+        total_call_volume = calls['volume'].sum() if not calls.empty else 0
+        total_put_volume = puts['volume'].sum() if not puts.empty else 0
+        put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else 0
+
+        # Identify unusual activity (high volume relative to open interest)
+        calls['volume_oi_ratio'] = calls['volume'] / calls['openInterest'].replace(0, 1)
+        puts['volume_oi_ratio'] = puts['volume'] / puts['openInterest'].replace(0, 1)
+
+        # Top trades (simulated as high volume or high volume/OI ratio)
+        top_calls = calls[calls['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
+        top_puts = puts[puts['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
+
+        # Sentiment based on volume
+        sentiment = "Bullish" if total_call_volume > total_put_volume else "Bearish" if total_put_volume > total_call_volume else "Neutral"
+
+        return {
+            "put_call_ratio": put_call_ratio,
+            "top_calls": top_calls.to_dict('records'),
+            "top_puts": top_puts.to_dict('records'),
+            "sentiment": sentiment,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": f"Error analyzing order flow: {str(e)}"}
+
+# Modified get_options_data to use real data
 def get_options_data(ticker: str) -> Optional[Dict]:
-    """
-    Placeholder function for options data
-    """
+    """Fetch real options data for a ticker"""
+    option_chain = get_option_chain(ticker, st.session_state.selected_tz)
+    if option_chain.get("error"):
+        return {"error": option_chain["error"]}
+
+    calls = option_chain["calls"]
+    puts = option_chain["puts"]
+    current_price = option_chain["current_price"]
+
+    # Find high IV strike
+    high_iv_call = calls[calls['impliedVolatility'] == calls['impliedVolatility'].max()] if not calls.empty else pd.DataFrame()
+    high_iv_put = puts[puts['impliedVolatility'] == puts['impliedVolatility'].max()] if not puts.empty else pd.DataFrame()
+
     return {
-        "iv": np.random.uniform(20.0, 150.0),
-        "put_call_ratio": np.random.uniform(0.5, 2.0),
-        "top_call_oi": 15000 + np.random.randint(1, 10) * 100,
-        "top_call_oi_strike": 200 + np.random.randint(-10, 10),
-        "top_put_oi": 12000 + np.random.randint(1, 10) * 100,
-        "top_put_oi_strike": 180 + np.random.randint(-10, 10),
-        "high_iv_strike": np.random.choice([195, 205, 210]),
-        "total_calls": np.random.randint(500, 2000),
-        "total_puts": np.random.randint(400, 1800)
+        "iv": calls['impliedVolatility'].mean() if not calls.empty else 0,
+        "put_call_ratio": puts['volume'].sum() / calls['volume'].sum() if calls['volume'].sum() > 0 else 0,
+        "top_call_oi": calls['openInterest'].max() if not calls.empty else 0,
+        "top_call_oi_strike": calls[calls['openInterest'] == calls['openInterest'].max()]['strike'].iloc[0] if not calls.empty and calls['openInterest'].max() > 0 else 0,
+        "top_put_oi": puts['openInterest'].max() if not puts.empty else 0,
+        "top_put_oi_strike": puts[puts['openInterest'] == puts['openInterest'].max()]['strike'].iloc[0] if not puts.empty and puts['openInterest'].max() > 0 else 0,
+        "high_iv_strike": high_iv_call['strike'].iloc[0] if not high_iv_call.empty else (high_iv_put['strike'].iloc[0] if not high_iv_put.empty else 0),
+        "total_calls": calls['volume'].sum() if not calls.empty else 0,
+        "total_puts": puts['volume'].sum() if not puts.empty else 0
     }
 
 def get_earnings_calendar() -> List[Dict]:
@@ -613,7 +715,7 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
     else:
         return "No AI model selected or configured."
 
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict] ) -> str:
     if st.session_state.model == "OpenAI":
         if not openai_client:
             return "OpenAI API not configured for AI analysis."
@@ -1601,7 +1703,7 @@ with tabs[6]:
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
-        current_price = quote['last']  # Force from Twelve Data if available, but since get_live_quote already prefers it
+        current_price = quote['last']  # Use from quote, which prefers Twelve Data
         expiration = option_chain["expiration"]
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
