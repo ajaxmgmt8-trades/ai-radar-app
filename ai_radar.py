@@ -799,16 +799,20 @@ if st.session_state.model == "OpenAI" and not OPENAI_KEY:
 # Data source status
 st.sidebar.subheader("Data Sources")
 
+# Debug toggle
+debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
+st.session_state.debug_mode = debug_mode
+
 # Show available data sources
+if twelvedata_client:
+    st.sidebar.success("✅ Twelve Data Connected (Primary)")
+else:
+    st.sidebar.warning("⚠️ Twelve Data Not Connected")
+
 if alpha_vantage_client:
     st.sidebar.success("✅ Alpha Vantage Connected")
 else:
     st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
-
-if twelvedata_client:
-    st.sidebar.success("✅ Twelve Data Connected")
-else:
-    st.sidebar.warning("⚠️ Twelve Data Not Connected")
 
 st.sidebar.success("✅ Yahoo Finance Connected")
 
