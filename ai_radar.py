@@ -1989,6 +1989,194 @@ with tabs[9]:
         with col1:
             st.caption("Get real-time Twitter/X sentiment analysis for the overall market")
         with col2:
+            if st.button("🔍 Scan Market Sentiment", type="primary", key="scan_market_sentiment"):
+                with st.spinner("Grok analyzing Twitter/X market sentiment..."):
+                    market_sentiment = grok_enhanced.get_twitter_market_sentiment()
+                    st.markdown("### 🐦 Twitter/X Market Analysis")
+                    st.markdown(market_sentiment)
+                    st.caption("Analysis powered by Grok with real-time Twitter/X access")
+        
+        st.divider()
+        
+        # Stock-Specific Analysis
+        st.markdown("### 🎯 Stock-Specific Social Analysis")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            social_ticker = st.text_input("🔍 Analyze Twitter sentiment for stock", placeholder="Enter ticker (e.g., TSLA)", key="social_ticker").upper().strip()
+        with col2:
+            analyze_social = st.button("Analyze Sentiment", key="analyze_social_btn")
+        
+        if analyze_social and social_ticker:
+            with st.spinner(f"Grok analyzing Twitter/X sentiment for {social_ticker}..."):
+                try:
+                    # Get current quote for context
+                    quote = get_live_quote(social_ticker, tz_label)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    if not quote.get("error"):
+                        col1.metric(f"{social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                        col2.metric("Volume", f"{quote['volume']:,}")
+                        col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
+                    
+                    # Get Twitter sentiment
+                    sentiment_analysis = grok_enhanced.get_twitter_market_sentiment(social_ticker)
+                    
+                    st.markdown(f"### 🐦 Twitter/X Sentiment for {social_ticker}")
+                    st.markdown(sentiment_analysis)
+                    
+                    # Get social catalysts
+                    st.markdown(f"### 🔥 Social Media Catalysts for {social_ticker}")
+                    with st.spinner("Scanning for social catalysts..."):
+                        catalyst_analysis = grok_enhanced.analyze_social_catalyst(social_ticker)
+                        st.markdown(catalyst_analysis)
+                    
+                    # Add to watchlist option
+                    if st.button(f"Add {social_ticker} to Watchlist", key="add_social_ticker"):
+                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                        if social_ticker not in current_list:
+                            current_list.append(social_ticker)
+                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                            st.success(f"Added {social_ticker} to watchlist!")
+                            st.rerun()
+                    
+                    st.caption("Analysis powered by Grok with real-time Twitter/X access")
+                    
+                except Exception as e:
+                    st.error(f"Error analyzing {social_ticker}: {str(e)}")
+        
+        st.divider()
+        
+        # Watchlist Social Scanning
+        tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+        if tickers:
+            st.markdown("### 📋 Watchlist Social Media Scan")
+            selected_social_ticker = st.selectbox("Select from watchlist for social analysis", [""] + tickers, key="watchlist_social")
+            
+            col1, col2 = st.columns([2, 2])
+            with col1:
+                timeframe = st.selectbox("Timeframe", ["24h", "12h", "6h", "3h"], key="social_timeframe")
+            with col2:
+                if st.button("🔍 Scan Social Media", key="scan_watchlist_social") and selected_social_ticker:
+                    with st.spinner(f"Grok scanning social media for {selected_social_ticker}..."):
+                        try:
+                            quote = get_live_quote(selected_social_ticker, tz_label)
+                            
+                            if not quote.get("error"):
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric(f"{selected_social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                                col2.metric("Volume", f"{quote['volume']:,}")
+                                col3.metric("Session", f"PM: {quote['premarket_change']:+.1f}% | Day: {quote['intraday_change']:+.1f}% | AH: {quote['postmarket_change']:+.1f}%")
+                            
+                            # Get comprehensive social analysis
+                            sentiment = grok_enhanced.get_twitter_market_sentiment(selected_social_ticker)
+                            catalysts = grok_enhanced.analyze_social_catalyst(selected_social_ticker, timeframe)
+                            
+                            st.markdown(f"### 🐦 Social Sentiment: {selected_social_ticker}")
+                            st.markdown(sentiment)
+                            
+                            st.markdown(f"### 🔥 Social Catalysts ({timeframe})")
+                            st.markdown(catalysts)
+                            
+                            st.caption(f"Analysis for {timeframe} timeframe | Powered by Grok with real-time Twitter/X access")
+                            
+                        except Exception as e:
+                            st.error(f"Error scanning social media for {selected_social_ticker}: {str(e)}")
+        else:
+            st.info("Add stocks to your watchlist to enable watchlist social media scanning.")
+        
+        st.divider()
+        
+        # Quick Social Sentiment for Popular Tickers
+        st.markdown("### ⭐ Popular Stocks Social Sentiment")
+        st.caption("Quick sentiment check for popular tickers")
+        
+        popular_for_social = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
+        cols = st.columns(4)
+        
+        for i, ticker in enumerate(popular_for_social):
+            with cols[i % 4]:
+                if st.button(f"📊 {ticker}", key=f"quick_social_{ticker}"):
+                    with st.spinner(f"Getting {ticker} social sentiment..."):
+                        try:
+                            sentiment = grok_enhanced.get_twitter_market_sentiment(ticker)
+                            quote = get_live_quote(ticker, tz_label)
+                            
+                            st.markdown(f"**{ticker} Social Analysis**")
+                            if not quote.get("error"):
+                                st.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                            
+                            with st.expander(f"📱 {ticker} Twitter Analysis"):
+                                st.markdown(sentiment)
+                                st.caption("Powered by Grok")
+                        except Exception as e:
+                            st.error(f"Error getting {ticker} sentiment: {str(e)}")
+        
+        # Social Media Trading Tips
+        with st.expander("💡 Social Media Trading Guidelines"):
+            st.markdown("""
+            **Using Social Media for Trading Research:**
+            
+            ✅ **Best Practices:**
+            - Verify information through multiple sources
+            - Focus on verified accounts and credible sources
+            - Look for consistent themes across multiple posts
+            - Use sentiment as one factor among many in your analysis
+            - Pay attention to unusual volume spikes mentioned on social media
+            
+            ❌ **Avoid:**
+            - Trading based solely on rumors or unverified information
+            - Following pump and dump schemes
+            - FOMO trading based on viral posts
+            - Ignoring fundamental analysis in favor of social sentiment
+            
+            **Remember:** Social media sentiment can be a valuable tool for gauging market psychology, but should never be your only source for trading decisions. Always combine with technical analysis, fundamental research, and proper risk management.
+            """)
+                    
+# Auto refresh
+if st.session_state.auto_refresh:
+    time.sleep(0.1)
+    if st.session_state.refresh_interval == 10:
+        st.rerun()
+
+# Footer
+st.markdown("---")
+footer_sources = []
+if alpha_vantage_client:
+    footer_sources.append("Alpha Vantage")
+if twelvedata_client:
+    footer_sources.append("Twelve Data")
+footer_sources.append("Yahoo Finance")
+footer_text = " + ".join(footer_sources)
+
+# Enhanced footer with AI info
+available_ai_models = multi_ai.get_available_models()
+ai_footer = f"AI: {st.session_state.ai_model}"
+if st.session_state.ai_model == "Multi-AI" and available_ai_models:
+    ai_footer += f" ({'+'.join(available_ai_models)})"
+
+st.markdown(
+    f"<div style='text-align: center; color: #666;'>"
+    f"🔥 AI Radar Pro | Data: {footer_text} | {ai_footer}"
+    "</div>",
+    unsafe_allow_html=True
+)
+    st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
+    
+    # Important disclaimer
+    st.warning("⚠️ **Risk Disclaimer:** Social media content includes unverified rumors and speculation. Always verify information through official sources before making trading decisions. GROK analysis may include both verified news and unconfirmed rumors - trade responsibly.")
+    
+    if not grok_enhanced:
+        st.error("🔴 Grok API not configured. This tab requires Grok API access for Twitter/X integration.")
+        st.info("Please add your Grok API key to access real-time Twitter sentiment and social media catalysts.")
+    else:
+        st.success("✅ Grok connected for Twitter/X analysis")
+        
+        # Overall Market Sentiment
+        st.markdown("### 📊 Overall Market Sentiment")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption("Get real-time Twitter/X sentiment analysis for the overall market")
+        with col2:
             if st.button("🔍 Scan Market Sentiment", type="primary"):
                 with st.spinner("Grok analyzing Twitter/X market sentiment..."):
                     market_sentiment = grok_enhanced.get_twitter_market_sentiment()
