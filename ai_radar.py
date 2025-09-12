@@ -94,6 +94,7 @@ class AlphaVantageClient:
         })
         
     def get_quote(self, symbol: str) -> Dict:
+        """Get real-time quote from Alpha Vantage"""
         try:
             params = {
                 "function": "GLOBAL_QUOTE",
@@ -147,6 +148,7 @@ class TwelveDataClient:
         self.session = requests.Session()
         
     def get_quote(self, symbol: str) -> Dict:
+        """Get real-time quote from Twelve Data using time_series endpoint"""
         try:
             params = {
                 "symbol": symbol,
