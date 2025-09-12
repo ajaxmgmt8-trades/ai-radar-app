@@ -50,6 +50,8 @@ if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
+if "data_source" not in st.session_state:
+    st.session_state.data_source = "Yahoo Finance"  # Default data source
 
 # API Keys
 try:
@@ -57,7 +59,6 @@ try:
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
-    # Add new API keys
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
 
@@ -77,7 +78,7 @@ except Exception as e:
     openai_client = None
     gemini_model = None
 
-# Alpha Vantage Client (Better alternative to Public.com)
+# Alpha Vantage Client
 class AlphaVantageClient:
     """Enhanced Alpha Vantage client for real-time stock data"""
     
@@ -105,7 +106,6 @@ class AlphaVantageClient:
                 if "Global Quote" in data:
                     quote_data = data["Global Quote"]
                     
-                    # Parse the Alpha Vantage response
                     price = float(quote_data.get("05. price", 0))
                     change = float(quote_data.get("09. change", 0))
                     change_percent = float(quote_data.get("10. change percent", "0%").replace("%", ""))
@@ -118,11 +118,11 @@ class AlphaVantageClient:
                         "volume": volume,
                         "change": change,
                         "change_percent": change_percent,
-                        "premarket_change": 0,  # Not available in free tier
+                        "premarket_change": 0,
                         "intraday_change": change_percent,
-                        "postmarket_change": 0,  # Not available in free tier
+                        "postmarket_change": 0,
                         "previous_close": price - change,
-                        "market_open": price - change,  # Approximate
+                        "market_open": price - change,
                         "last_updated": datetime.datetime.now().isoformat(),
                         "data_source": "Alpha Vantage",
                         "error": None
@@ -147,12 +147,10 @@ class TwelveDataClient:
     def get_quote(self, symbol: str) -> Dict:
         """Get real-time quote from Twelve Data using time_series endpoint"""
         try:
-            # Try time_series endpoint with outputsize=1 to get latest data point
-            # This is more likely to work on free plan
             params = {
                 "symbol": symbol,
                 "interval": "1min",
-                "outputsize": "1",  # Get only the latest data point
+                "outputsize": "1",
                 "apikey": self.api_key
             }
             
@@ -160,15 +158,12 @@ class TwelveDataClient:
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"Twelve Data time_series response for {symbol}: {data}")
                 
-                # Check for API errors
                 if "status" in data and data["status"] == "error":
                     return {"error": f"Twelve Data API Error: {data.get('message', 'Unknown error')}", "data_source": "Twelve Data", "raw_data": data}
                 
-                # time_series returns data in 'values' array
                 if "values" in data and len(data["values"]) > 0:
-                    latest = data["values"][0]  # Most recent data point
+                    latest = data["values"][0]
                     
                     price = float(latest.get("close", 0))
                     open_price = float(latest.get("open", price))
@@ -176,7 +171,6 @@ class TwelveDataClient:
                     low_price = float(latest.get("low", price))
                     volume = int(latest.get("volume", 0))
                     
-                    # Calculate change (approximate)
                     change = price - open_price
                     change_percent = ((price - open_price) / open_price * 100) if open_price > 0 else 0
                     
@@ -199,8 +193,8 @@ class TwelveDataClient:
                             "raw_data": data
                         }
                 
-                # If that didn't work, try with exchange specified
-                params["symbol"] = f"{symbol}:NASDAQ"  # Try with exchange
+                # Try with exchange specified
+                params["symbol"] = f"{symbol}:NASDAQ"
                 response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
