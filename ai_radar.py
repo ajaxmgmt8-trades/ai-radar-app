@@ -59,24 +59,27 @@ try:
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
+    GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
 
     openai_client = None
     gemini_model = None
+    grok_client = None
     
     if OPENAI_KEY:
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
-        st.session_state.model = 'OpenAI'
     if GEMINI_KEY:
         genai.configure(api_key=GEMINI_KEY)
         gemini_model = genai.GenerativeModel('gemini-1.5-pro')
-        st.session_state.model = 'Gemini'
+    if GROK_API_KEY:
+        grok_client = True  # Flag for Grok API
 
 except Exception as e:
     st.error(f"Error loading API keys: {e}")
     openai_client = None
     gemini_model = None
+    grok_client = None
 
 # Alpha Vantage Client
 class AlphaVantageClient:
@@ -91,7 +94,6 @@ class AlphaVantageClient:
         })
         
     def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote from Alpha Vantage"""
         try:
             params = {
                 "function": "GLOBAL_QUOTE",
@@ -145,7 +147,6 @@ class TwelveDataClient:
         self.session = requests.Session()
         
     def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote from Twelve Data using time_series endpoint"""
         try:
             params = {
                 "symbol": symbol,
@@ -976,10 +977,15 @@ tz_label = st.session_state.selected_tz
 # AI Settings
 st.sidebar.subheader("AI Settings")
 st.session_state.model = st.sidebar.selectbox("AI Model", ("OpenAI", "Gemini"))
-if st.session_state.model == "Gemini" and not GEMINI_KEY:
-    st.sidebar.warning("Gemini API Key not found. Please add to Streamlit secrets.")
-if st.session_state.model == "OpenAI" and not OPENAI_KEY:
-    st.sidebar.warning("OpenAI API Key not found. Please add to Streamlit secrets.")
+
+# Data Source Toggle
+st.sidebar.subheader("Data Source")
+available_sources = ["Yahoo Finance"]
+if alpha_vantage_client:
+    available_sources.append("Alpha Vantage")
+if twelvedata_client:
+    available_sources.append("Twelve Data")
+st.session_state.data_source = st.sidebar.selectbox("Select Data Source", available_sources, index=available_sources.index(st.session_state.data_source))
 
 # Data source status
 st.sidebar.subheader("Data Sources")
