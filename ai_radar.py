@@ -145,17 +145,63 @@ class TwelveDataClient:
         self.session = requests.Session()
         
     def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote from Twelve Data"""
+        """Get real-time quote from Twelve Data using time_series endpoint"""
         try:
-            # According to documentation, quote() takes same parameters as time_series()
-            # interval is REQUIRED per the docs
+            # Try time_series endpoint with outputsize=1 to get latest data point
+            # This is more likely to work on free plan
             params = {
                 "symbol": symbol,
-                "interval": "1min",  # REQUIRED parameter
+                "interval": "1min",
+                "outputsize": "1",  # Get only the latest data point
                 "apikey": self.api_key
             }
             
-            response = self.session.get(f"{self.base_url}/quote", params=params, timeout=10)
+            response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Twelve Data time_series response for {symbol}: {data}")
+                
+                # Check for API errors
+                if "status" in data and data["status"] == "error":
+                    return {"error": f"Twelve Data API Error: {data.get('message', 'Unknown error')}", "data_source": "Twelve Data", "raw_data": data}
+                
+                # time_series returns data in 'values' array
+                if "values" in data and len(data["values"]) > 0:
+                    latest = data["values"][0]  # Most recent data point
+                    
+                    price = float(latest.get("close", 0))
+                    open_price = float(latest.get("open", price))
+                    high_price = float(latest.get("high", price))
+                    low_price = float(latest.get("low", price))
+                    volume = int(latest.get("volume", 0))
+                    
+                    # Calculate change (approximate)
+                    change = price - open_price
+                    change_percent = ((price - open_price) / open_price * 100) if open_price > 0 else 0
+                    
+                    if price > 0:
+                        return {
+                            "last": price,
+                            "bid": low_price,
+                            "ask": high_price,
+                            "volume": volume,
+                            "change": change,
+                            "change_percent": change_percent,
+                            "premarket_change": 0,
+                            "intraday_change": change_percent,
+                            "postmarket_change": 0,
+                            "previous_close": open_price,
+                            "market_open": open_price,
+                            "last_updated": datetime.datetime.now().isoformat(),
+                            "data_source": "Twelve Data",
+                            "error": None,
+                            "raw_data": data
+                        }
+                
+                # If that didn't work, try with exchange specified
+                params["symbol"] = f"{symbol}:NASDAQ"  # Try with exchange
+                response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 
