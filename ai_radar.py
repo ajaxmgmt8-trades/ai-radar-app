@@ -52,6 +52,8 @@ if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
 if "data_source" not in st.session_state:
     st.session_state.data_source = "Yahoo Finance"  # Default data source
+if "ai_model" not in st.session_state:
+    st.session_state.ai_model = "Multi-AI"  # Default to multi-AI
 
 # API Keys
 try:
@@ -63,23 +65,62 @@ try:
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
 
+    # Initialize AI clients
     openai_client = None
     gemini_model = None
     grok_client = None
     
     if OPENAI_KEY:
         openai_client = openai.OpenAI(api_key=OPENAI_KEY)
+    
     if GEMINI_KEY:
         genai.configure(api_key=GEMINI_KEY)
         gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+    
     if GROK_API_KEY:
-        grok_client = True  # Flag for Grok API
+        # Initialize Grok client (using OpenAI-compatible API)
+        grok_client = openai.OpenAI(
+            api_key=GROK_API_KEY,
+            base_url="https://api.x.ai/v1"
+        )
 
 except Exception as e:
     st.error(f"Error loading API keys: {e}")
     openai_client = None
     gemini_model = None
     grok_client = None
+
+# Enhanced Grok Client
+class GrokClient:
+    """Enhanced Grok client for trading analysis"""
+    
+    def __init__(self, api_key: str):
+        self.client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://api.x.ai/v1"
+        )
+    
+    def analyze_trading_setup(self, prompt: str) -> str:
+        """Generate trading analysis using Grok"""
+        try:
+            response = self.client.chat.completions.create(
+                model="grok-beta",
+                messages=[{
+                    "role": "system", 
+                    "content": "You are an expert trading analyst. Provide concise, actionable trading analysis with specific entry/exit levels and risk management."
+                }, {
+                    "role": "user", 
+                    "content": prompt
+                }],
+                temperature=0.3,
+                max_tokens=400
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Grok Analysis Error: {str(e)}"
+
+# Initialize enhanced Grok client
+grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
 
 # Alpha Vantage Client
 class AlphaVantageClient:
@@ -94,7 +135,6 @@ class AlphaVantageClient:
         })
         
     def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote from Alpha Vantage"""
         try:
             params = {
                 "function": "GLOBAL_QUOTE",
@@ -148,7 +188,6 @@ class TwelveDataClient:
         self.session = requests.Session()
         
     def get_quote(self, symbol: str) -> Dict:
-        """Get real-time quote from Twelve Data using time_series endpoint"""
         try:
             params = {
                 "symbol": symbol,
@@ -238,9 +277,143 @@ class TwelveDataClient:
         except Exception as e:
             return {"error": f"Twelve Data error: {str(e)}", "data_source": "Twelve Data"}
 
-# Initialize new data clients
+# Initialize data clients
 alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
+
+# Multi-AI Analysis System
+class MultiAIAnalyzer:
+    """Comprehensive multi-AI analysis system for trading"""
+    
+    def __init__(self):
+        self.openai_client = openai_client
+        self.gemini_model = gemini_model
+        self.grok_client = grok_enhanced
+        
+    def get_available_models(self) -> List[str]:
+        """Get list of available AI models"""
+        models = []
+        if self.openai_client:
+            models.append("OpenAI")
+        if self.gemini_model:
+            models.append("Gemini")
+        if self.grok_client:
+            models.append("Grok")
+        return models
+    
+    def analyze_with_openai(self, prompt: str) -> str:
+        """OpenAI analysis"""
+        if not self.openai_client:
+            return "OpenAI not available"
+        
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=400
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"OpenAI Error: {str(e)}"
+    
+    def analyze_with_gemini(self, prompt: str) -> str:
+        """Gemini analysis"""
+        if not self.gemini_model:
+            return "Gemini not available"
+        
+        try:
+            response = self.gemini_model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            return f"Gemini Error: {str(e)}"
+    
+    def analyze_with_grok(self, prompt: str) -> str:
+        """Grok analysis"""
+        if not self.grok_client:
+            return "Grok not available"
+        
+        return self.grok_client.analyze_trading_setup(prompt)
+    
+    def multi_ai_consensus(self, ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> Dict[str, str]:
+        """Get consensus analysis from all available AI models"""
+        
+        # Construct comprehensive prompt
+        options_text = ""
+        if options_data:
+            options_text = f"""
+            Options Data:
+            - Implied Volatility: {options_data.get('iv', 'N/A'):.1f}%
+            - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
+            - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
+            - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
+            - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
+            """
+        
+        prompt = f"""
+        Analyze {ticker} with {change:+.2f}% change today.
+        Catalyst: {catalyst if catalyst else "Market movement"}
+        {options_text}
+        
+        Provide expert trading analysis with:
+        1. Sentiment (Bullish/Bearish/Neutral) and confidence (1-100)
+        2. Trading strategy (Scalp/Day Trade/Swing/LEAP)
+        3. Entry, Target, and Stop levels
+        4. Key support/resistance levels
+        5. Risk assessment and position sizing
+        
+        Keep concise and actionable, under 300 words.
+        """
+        
+        analyses = {}
+        
+        # Get analysis from each available model
+        if self.openai_client:
+            analyses["OpenAI"] = self.analyze_with_openai(prompt)
+        
+        if self.gemini_model:
+            analyses["Gemini"] = self.analyze_with_gemini(prompt)
+        
+        if self.grok_client:
+            analyses["Grok"] = self.analyze_with_grok(prompt)
+        
+        return analyses
+    
+    def synthesize_consensus(self, analyses: Dict[str, str], ticker: str) -> str:
+        """Synthesize multiple AI analyses into a consensus view"""
+        if not analyses:
+            return "No AI models available for analysis."
+        
+        # Create synthesis prompt
+        analysis_text = "\n\n".join([f"**{model} Analysis:**\n{analysis}" for model, analysis in analyses.items()])
+        
+        synthesis_prompt = f"""
+        Based on the following AI analyses for {ticker}, provide a synthesized consensus view:
+        
+        {analysis_text}
+        
+        Synthesize into:
+        1. **Consensus Sentiment** and average confidence
+        2. **Agreed Trading Strategy**
+        3. **Consensus Price Levels** (entry, targets, stops)
+        4. **Risk Assessment**
+        5. **Key Points of Agreement/Disagreement**
+        
+        Prioritize areas where models agree and note any significant disagreements.
+        """
+        
+        # Use the first available model for synthesis
+        if self.openai_client:
+            return self.analyze_with_openai(synthesis_prompt)
+        elif self.gemini_model:
+            return self.analyze_with_gemini(synthesis_prompt)
+        elif self.grok_client:
+            return self.analyze_with_grok(synthesis_prompt)
+        
+        return "No AI models available for synthesis."
+
+# Initialize Multi-AI Analyzer
+multi_ai = MultiAIAnalyzer()
 
 # Enhanced primary data function - Alpha Vantage/Twelve Data first, Yahoo Finance fallback
 @st.cache_data(ttl=60)  # Cache for 60 seconds
@@ -628,158 +801,132 @@ def get_earnings_calendar() -> List[Dict]:
         {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
     ]
 
+# Enhanced AI analysis functions
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
-    if st.session_state.model == "OpenAI":
+    """Enhanced AI playbook using selected model or multi-AI consensus"""
+    
+    if st.session_state.ai_model == "Multi-AI":
+        # Use multi-AI consensus
+        analyses = multi_ai.multi_ai_consensus(ticker, change, catalyst, options_data)
+        if analyses:
+            # Show individual analyses first
+            result = f"## 🤖 Multi-AI Analysis for {ticker}\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+            
+            # Add synthesis
+            synthesis = multi_ai.synthesize_consensus(analyses, ticker)
+            result += f"### 🎯 AI Consensus Summary:\n{synthesis}"
+            return result
+        else:
+            return f"**{ticker} Analysis** - No AI models available for multi-AI analysis."
+    
+    elif st.session_state.ai_model == "OpenAI":
         if not openai_client:
             return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
-        
-        try:
-            # Construct the prompt with additional details from options data if available
-            options_text = ""
-            if options_data:
-                options_text = f"""
-                Options Data:
-                - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
-                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
-                - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
-                - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
-                - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
-                """
-            
-            prompt = f"""
-            Analyze {ticker} with {change:+.2f}% change today.
-            Catalyst: {catalyst if catalyst else "Market movement"}
-            {options_text}
-            
-            Provide an expert trading analysis focusing on:
-            1. Overall Sentiment (Bullish/Bearish/Neutral) and confidence rating (out of 100).
-            2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
-            3. Specific Entry levels, Target levels, and Stop levels.
-            4. Key support and resistance levels.
-            5. Analysis using options metrics (IV, OI, put/call ratio) if available.
-            6. Assessment of explosive move potential.
-            
-            Keep concise and actionable, under 300 words.
-            """
-            
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=400
-            )
-            
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"AI Error: {str(e)}"
+        return multi_ai.analyze_with_openai(_construct_analysis_prompt(ticker, change, catalyst, options_data))
     
-    elif st.session_state.model == "Gemini":
+    elif st.session_state.ai_model == "Gemini":
         if not gemini_model:
             return f"**{ticker} Analysis** (Gemini API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Gemini API key for detailed AI analysis."
-        try:
-            options_text = ""
-            if options_data:
-                options_text = f"""
-                Options Data:
-                - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
-                - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
-                - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
-                - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
-                - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
-                """
-            
-            prompt = f"""
-            Analyze {ticker} with {change:+.2f}% change today.
-            Catalyst: {catalyst if catalyst else "Market movement"}
-            {options_text}
-            
-            Provide an expert trading analysis focusing on:
-            1. Overall Sentiment (Bullish/Bearish/Neutral) and confidence rating (out of 100).
-            2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
-            3. Specific Entry levels, Target levels, and Stop levels.
-            4. Key support and resistance levels.
-            5. Analysis using options metrics (IV, OI, put/call ratio) if available.
-            6. Assessment of explosive move potential.
-            
-            Keep concise and actionable, under 300 words.
-            """
-            
-            response = gemini_model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"AI Error: {str(e)}"
+        return multi_ai.analyze_with_gemini(_construct_analysis_prompt(ticker, change, catalyst, options_data))
+    
+    elif st.session_state.ai_model == "Grok":
+        if not grok_enhanced:
+            return f"**{ticker} Analysis** (Grok API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Grok API key for detailed AI analysis."
+        return multi_ai.analyze_with_grok(_construct_analysis_prompt(ticker, change, catalyst, options_data))
     
     else:
         return "No AI model selected or configured."
 
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict] ) -> str:
-    if st.session_state.model == "OpenAI":
+def _construct_analysis_prompt(ticker: str, change: float, catalyst: str, options_data: Optional[Dict]) -> str:
+    """Construct comprehensive analysis prompt"""
+    options_text = ""
+    if options_data:
+        options_text = f"""
+        Options Data:
+        - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
+        - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
+        - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
+        - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
+        - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
+        """
+    
+    return f"""
+    Analyze {ticker} with {change:+.2f}% change today.
+    Catalyst: {catalyst if catalyst else "Market movement"}
+    {options_text}
+    
+    Provide an expert trading analysis focusing on:
+    1. Overall Sentiment (Bullish/Bearish/Neutral) and confidence rating (out of 100).
+    2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
+    3. Specific Entry levels, Target levels, and Stop levels.
+    4. Key support and resistance levels.
+    5. Analysis using options metrics (IV, OI, put/call ratio) if available.
+    6. Assessment of explosive move potential.
+    
+    Keep concise and actionable, under 300 words.
+    """
+
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
+    """Enhanced market analysis using selected AI model"""
+    
+    news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
+    movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
+    
+    prompt = f"""
+    Analyze current market conditions:
+
+    Top News Headlines:
+    {news_context}
+
+    Top Market Movers:
+    {movers_context}
+
+    Provide a brief market analysis covering:
+    1. Overall market sentiment
+    2. Key themes driving movement
+    3. Sectors to watch
+    4. Trading opportunities
+
+    Keep it under 200 words and actionable.
+    """
+    
+    if st.session_state.ai_model == "Multi-AI":
+        analyses = {}
+        if openai_client:
+            analyses["OpenAI"] = multi_ai.analyze_with_openai(prompt)
+        if gemini_model:
+            analyses["Gemini"] = multi_ai.analyze_with_gemini(prompt)
+        if grok_enhanced:
+            analyses["Grok"] = multi_ai.analyze_with_grok(prompt)
+        
+        if analyses:
+            result = "## 🤖 Multi-AI Market Analysis\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+            
+            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
+            result += f"### 🎯 Market Consensus:\n{synthesis}"
+            return result
+        else:
+            return "No AI models available for market analysis."
+    
+    elif st.session_state.ai_model == "OpenAI":
         if not openai_client:
             return "OpenAI API not configured for AI analysis."
-        
-        try:
-            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
-            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
-            
-            prompt = f"""
-            Analyze current market conditions:
-
-            Top News Headlines:
-            {news_context}
-
-            Top Market Movers:
-            {movers_context}
-
-            Provide a brief market analysis covering:
-            1. Overall market sentiment
-            2. Key themes driving movement
-            3. Sectors to watch
-            4. Trading opportunities
-
-            Keep it under 200 words and actionable.
-            """
-            
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=300
-            )
-            
-            return response.choices[0].message.content
-        except Exception as e:
-            return f"AI Analysis Error: {str(e)}"
+        return multi_ai.analyze_with_openai(prompt)
     
-    elif st.session_state.model == "Gemini":
+    elif st.session_state.ai_model == "Gemini":
         if not gemini_model:
             return "Gemini API not configured for AI analysis."
-        
-        try:
-            news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
-            movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
-            
-            prompt = f"""
-            Analyze current market conditions:
-
-            Top News Headlines:
-            {news_context}
-
-            Top Market Movers:
-            {movers_context}
-
-            Provide a brief market analysis covering:
-            1. Overall market sentiment
-            2. Key themes driving movement
-            3. Sectors to watch
-            4. Trading opportunities
-
-            Keep it under 200 words and actionable.
-            """
-            
-            response = gemini_model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            return f"AI Analysis Error: {str(e)}"
+        return multi_ai.analyze_with_gemini(prompt)
+    
+    elif st.session_state.ai_model == "Grok":
+        if not grok_enhanced:
+            return "Grok API not configured for AI analysis."
+        return multi_ai.analyze_with_grok(prompt)
+    
     else:
         return "No AI model selected or configured."
 
@@ -834,70 +981,8 @@ def ai_auto_generate_plays(tz: str):
             # Get options data for enhanced analysis
             options_data = get_options_data(ticker)
             
-            # Generate AI analysis
-            if st.session_state.model == "OpenAI" and openai_client:
-                try:
-                    play_prompt = f"""
-                    Generate a trading play for {ticker}:
-                    
-                    Current Price: ${quote['last']:.2f}
-                    Change: {quote['change_percent']:+.2f}%
-                    Volume: {quote['volume']:,}
-                    Data Source: {quote.get('data_source', 'Yahoo Finance')}
-                    Catalyst: {catalyst if catalyst else "Market movement"}
-
-                    Provide:
-                    1. Play type (Scalp/Day/Swing)
-                    2. Entry strategy and levels
-                    3. Target and stop levels
-                    4. Risk/reward ratio
-                    5. Confidence (1-10)
-                    
-                    Keep under 200 words, be specific and actionable.
-                    """
-                    
-                    response = openai_client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[{"role": "user", "content": play_prompt}],
-                        temperature=0.3,
-                        max_tokens=300
-                    )
-                    play_analysis = response.choices[0].message.content
-                except Exception as ai_error:
-                    play_analysis = f"AI analysis unavailable: {str(ai_error)[:50]}..."
-            elif st.session_state.model == "Gemini" and gemini_model:
-                try:
-                    play_prompt = f"""
-                    Generate a trading play for {ticker}:
-                    
-                    Current Price: ${quote['last']:.2f}
-                    Change: {quote['change_percent']:+.2f}%
-                    Volume: {quote['volume']:,}
-                    Data Source: {quote.get('data_source', 'Yahoo Finance')}
-                    Catalyst: {catalyst if catalyst else "Market movement"}
-
-                    Provide:
-                    1. Play type (Scalp/Day/Swing)
-                    2. Entry strategy and levels
-                    3. Target and stop levels
-                    4. Risk/reward ratio
-                    5. Confidence (1-10)
-                    
-                    Keep under 200 words, be specific and actionable.
-                    """
-                    response = gemini_model.generate_content(play_prompt)
-                    play_analysis = response.text
-                except Exception as ai_error:
-                    play_analysis = f"AI analysis unavailable: {str(ai_error)[:50]}..."
-            else:
-                play_analysis = f"""
-                **{ticker} Trading Setup**
-                **Movement:** {quote['change_percent']:+.2f}% change
-                **Volume:** {quote['volume']:,} shares
-                **Data Source:** {quote.get('data_source', 'Yahoo Finance')}
-                **Setup:** Monitor for continuation or reversal. Consider risk management.
-                *Configure AI API for detailed analysis*
-                """
+            # Generate AI analysis using selected model
+            play_analysis = ai_playbook(ticker, quote["change_percent"], catalyst, options_data)
 
             # Create play dictionary
             play = {
@@ -922,9 +1007,9 @@ def ai_auto_generate_plays(tz: str):
         st.error(f"Error generating auto plays: {str(e)}")
         return []
 
-# Function to get important economic events using OpenAI/Gemini
+# Function to get important economic events using AI
 def get_important_events() -> List[Dict]:
-    if not openai_client and not gemini_model:
+    if not openai_client and not gemini_model and not grok_enhanced:
         return []
     
     try:
@@ -942,21 +1027,26 @@ def get_important_events() -> List[Dict]:
         Do not include any text, notes, or explanations outside of the JSON.
         """
         
-        if st.session_state.model == "OpenAI" and openai_client:
-            response = openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=300
-            )
-            json_string = response.choices[0].message.content
-        elif st.session_state.model == "Gemini" and gemini_model:
-            response = gemini_model.generate_content(prompt)
-            json_string = response.text
+        if st.session_state.ai_model == "Multi-AI":
+            # Use first available model for events
+            if openai_client:
+                response = multi_ai.analyze_with_openai(prompt)
+            elif gemini_model:
+                response = multi_ai.analyze_with_gemini(prompt)
+            elif grok_enhanced:
+                response = multi_ai.analyze_with_grok(prompt)
+            else:
+                return []
+        elif st.session_state.ai_model == "OpenAI" and openai_client:
+            response = multi_ai.analyze_with_openai(prompt)
+        elif st.session_state.ai_model == "Gemini" and gemini_model:
+            response = multi_ai.analyze_with_gemini(prompt)
+        elif st.session_state.ai_model == "Grok" and grok_enhanced:
+            response = multi_ai.analyze_with_grok(prompt)
         else:
             return []
         
-        events = json.loads(json_string)
+        events = json.loads(response)
         return events
     except Exception as e:
         st.error(f"Error fetching economic events: {str(e)}")
@@ -976,12 +1066,31 @@ tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else Zo
 current_tz = datetime.datetime.now(tz_zone)
 tz_label = st.session_state.selected_tz
 
-# AI Settings
-st.sidebar.subheader("AI Settings")
-st.session_state.model = st.sidebar.selectbox("AI Model", ("OpenAI", "Gemini"))
+# Enhanced AI Settings
+st.sidebar.subheader("🤖 AI Configuration")
+available_models = ["Multi-AI"] + multi_ai.get_available_models()
+st.session_state.ai_model = st.sidebar.selectbox("AI Model", available_models, 
+                                                  index=available_models.index(st.session_state.ai_model) if st.session_state.ai_model in available_models else 0)
+
+# Show AI model status
+st.sidebar.subheader("AI Models Status")
+if openai_client:
+    st.sidebar.success("✅ OpenAI Connected")
+else:
+    st.sidebar.warning("⚠️ OpenAI Not Connected")
+
+if gemini_model:
+    st.sidebar.success("✅ Gemini Connected")
+else:
+    st.sidebar.warning("⚠️ Gemini Not Connected")
+
+if grok_enhanced:
+    st.sidebar.success("✅ Grok Connected")
+else:
+    st.sidebar.warning("⚠️ Grok Not Connected")
 
 # Data Source Toggle
-st.sidebar.subheader("Data Source")
+st.sidebar.subheader("📊 Data Configuration")
 available_sources = ["Yahoo Finance"]
 if alpha_vantage_client:
     available_sources.append("Alpha Vantage")
@@ -996,13 +1105,27 @@ st.sidebar.subheader("Data Sources")
 debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
 st.session_state.debug_mode = debug_mode
 
-if debug_mode and st.sidebar.button("🧪 Test Twelve Data API"):
+if debug_mode and st.sidebar.button("🧪 Test All APIs"):
+    st.sidebar.write("**Testing Data APIs:**")
     if twelvedata_client:
         with st.spinner("Testing Twelve Data API..."):
             test_response = twelvedata_client.get_quote("AAPL")
             st.sidebar.json(test_response)
-    else:
-        st.sidebar.error("Twelve Data client not initialized")
+    
+    st.sidebar.write("**Testing AI APIs:**")
+    test_prompt = "Test connection - respond with 'OK'"
+    
+    if openai_client:
+        openai_test = multi_ai.analyze_with_openai(test_prompt)
+        st.sidebar.write(f"OpenAI: {openai_test[:50]}...")
+    
+    if gemini_model:
+        gemini_test = multi_ai.analyze_with_gemini(test_prompt)
+        st.sidebar.write(f"Gemini: {gemini_test[:50]}...")
+    
+    if grok_enhanced:
+        grok_test = multi_ai.analyze_with_grok(test_prompt)
+        st.sidebar.write(f"Grok: {grok_test[:50]}...")
 
 # Show available data sources
 if twelvedata_client:
@@ -1058,7 +1181,14 @@ if twelvedata_client:
     data_sources.append("Twelve Data")
 data_sources.append("Yahoo Finance")
 data_source_info = " + ".join(data_sources)
-st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Powered by {data_source_info}</div>", unsafe_allow_html=True)
+
+# AI model info
+ai_info = f"AI: {st.session_state.ai_model}"
+if st.session_state.ai_model == "Multi-AI":
+    active_models = multi_ai.get_available_models()
+    ai_info += f" ({'+'.join(active_models)})" if active_models else " (None Available)"
+
+st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Data: {data_source_info} | {ai_info}</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
 with tabs[0]:
@@ -1173,7 +1303,7 @@ with tabs[0]:
                         opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
                         opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                         opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                        st.caption("Note: Options data is simulated for demonstration")
+                        st.caption("Note: Options data is real from yfinance")
                     
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
@@ -1410,7 +1540,7 @@ with tabs[3]:
                     opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
                     opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
                     opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
-                    st.caption("Note: Options data is simulated for demonstration")
+                    st.caption("Note: Options data is real from yfinance")
                 
                 st.markdown("### 🎯 AI Analysis")
                 st.markdown(analysis)
@@ -1459,6 +1589,9 @@ with tabs[3]:
 # TAB 5: AI Playbooks
 with tabs[4]:
     st.subheader("🤖 AI Trading Playbooks")
+    
+    # Show current AI configuration
+    st.info(f"🤖 Current AI Mode: **{st.session_state.ai_model}** | Available Models: {', '.join(multi_ai.get_available_models()) if multi_ai.get_available_models() else 'None'}")
     
     # Auto-generated plays section
     st.markdown("### 🎯 Auto-Generated Trading Plays")
@@ -1554,7 +1687,7 @@ with tabs[4]:
                     opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                     opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
                     opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
-                    st.caption("Note: Options data is simulated for demonstration")
+                    st.caption("Note: Options data is real from yfinance")
                 
                 st.markdown("### 🎯 AI Trading Playbook")
                 st.markdown(playbook)
@@ -1617,19 +1750,24 @@ with tabs[4]:
     # Quick tips
     with st.expander("💡 About the Analysis"):
         st.markdown("""
-        **Data Integration** provides:
+        **Enhanced Multi-AI System:**
+        - **Multi-AI Mode:** Gets consensus from all available AI models (OpenAI + Gemini + Grok)
+        - **Individual Models:** Use specific AI for targeted analysis styles
+        - **Real Options Data:** Integrated yfinance options chain analysis
+        - **Session Tracking:** Premarket, intraday, and after-hours performance
+        
+        **Data Integration:**
         - Primary: Alpha Vantage/Twelve Data for real-time data (when connected)
         - Fallback: Yahoo Finance with 15-20 minute delays
-        - Extended hours tracking (premarket/after-hours)
-        - Volume and price data with session breakdown
+        - Extended hours tracking with session breakdown
+        - Volume and price data with multiple data source validation
         
         **AI Analysis includes:**
-        - Market sentiment assessment
-        - Trading strategy recommendations
-        - Entry, target, and stop levels
-        - Risk management guidance
-        
-        **Note:** Options data is simulated for demonstration. For live options data, consider upgrading to a professional data provider.
+        - Market sentiment assessment with confidence ratings
+        - Multi-timeframe trading strategy recommendations
+        - Specific entry, target, and stop levels
+        - Risk management and position sizing guidance
+        - Options flow analysis and unusual activity detection
         """)
 
 # TAB 6: Sector/ETF Tracking
@@ -1811,7 +1949,7 @@ with tabs[7]:
                         col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
                         
                         if options_data:
-                            st.write("**Simulated Options Metrics:**")
+                            st.write("**Options Metrics:**")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
                             opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
@@ -1870,10 +2008,17 @@ if alpha_vantage_client:
 if twelvedata_client:
     footer_sources.append("Twelve Data")
 footer_sources.append("Yahoo Finance")
-footer_text = " + ".join(footer_sources) + " | AI: OpenAI/Gemini"
+footer_text = " + ".join(footer_sources)
+
+# Enhanced footer with AI info
+available_ai_models = multi_ai.get_available_models()
+ai_footer = f"AI: {st.session_state.ai_model}"
+if st.session_state.ai_model == "Multi-AI" and available_ai_models:
+    ai_footer += f" ({'+'.join(available_ai_models)})"
+
 st.markdown(
     f"<div style='text-align: center; color: #666;'>"
-    f"🔥 AI Radar Pro | Data: {footer_text}"
+    f"🔥 AI Radar Pro | Data: {footer_text} | {ai_footer}"
     "</div>",
     unsafe_allow_html=True
 )
