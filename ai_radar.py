@@ -799,9 +799,17 @@ if st.session_state.model == "OpenAI" and not OPENAI_KEY:
 # Data source status
 st.sidebar.subheader("Data Sources")
 
-# Debug toggle
+# Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
 st.session_state.debug_mode = debug_mode
+
+if debug_mode and st.sidebar.button("🧪 Test Twelve Data API"):
+    if twelvedata_client:
+        with st.spinner("Testing Twelve Data API..."):
+            test_response = twelvedata_client.get_quote("AAPL")
+            st.sidebar.json(test_response)
+    else:
+        st.sidebar.error("Twelve Data client not initialized")
 
 # Show available data sources
 if twelvedata_client:
