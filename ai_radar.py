@@ -336,34 +336,10 @@ class MultiAIAnalyzer:
         return self.grok_client.analyze_trading_setup(prompt)
     
     def multi_ai_consensus(self, ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> Dict[str, str]:
-        """Get consensus analysis from all available AI models"""
+        """Get consensus analysis from all available AI models with enhanced prompts"""
         
-        # Construct comprehensive prompt
-        options_text = ""
-        if options_data:
-            options_text = f"""
-            Options Data:
-            - Implied Volatility: {options_data.get('iv', 'N/A'):.1f}%
-            - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
-            - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
-            - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
-            - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
-            """
-        
-        prompt = f"""
-        Analyze {ticker} with {change:+.2f}% change today.
-        Catalyst: {catalyst if catalyst else "Market movement"}
-        {options_text}
-        
-        Provide expert trading analysis with:
-        1. Sentiment (Bullish/Bearish/Neutral) and confidence (1-100)
-        2. Trading strategy (Scalp/Day Trade/Swing/LEAP)
-        3. Entry, Target, and Stop levels
-        4. Key support/resistance levels
-        5. Risk assessment and position sizing
-        
-        Keep concise and actionable, under 300 words.
-        """
+        # Use the enhanced comprehensive prompt
+        prompt = _construct_analysis_prompt(ticker, change, catalyst, options_data)
         
         analyses = {}
         
