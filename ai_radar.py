@@ -1970,8 +1970,9 @@ with tabs[8]:
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
                     
+# TAB 10: Twitter Social Media Analysis
 with tabs[9]:
-    st.write("Twitter/X Market Sentiment & Rumors")
+    st.markdown("## Twitter/X Market Sentiment & Rumors")
     
     st.warning("Risk Disclaimer: Social media content includes unverified rumors and speculation. Always verify information through official sources before making trading decisions.")
     
