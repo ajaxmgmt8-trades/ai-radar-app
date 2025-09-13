@@ -1972,148 +1972,52 @@ with tabs[8]:
                     
 # TAB 10: Twitter Social Media Analysis
 with tabs[9]:
-    st.header("Twitter Social Media Analysis - Premium")
-    
-    st.success("Premium Twitter/X & Grok access detected - Enhanced real-time analysis available")
+    st.title("Twitter Social Media Analysis")
     
     if not grok_enhanced:
         st.error("Grok API not configured")
+        st.info("Add your Grok API key to access Twitter sentiment analysis.")
     else:
-        st.success("Grok Premium connected")
+        st.success("Grok Premium Connected")
         
-        # Premium Market Pulse
-        st.write("**Real-Time Market Pulse**")
-        if st.button("Get Premium Market Pulse", key="premium_pulse", type="primary"):
-            with st.spinner("Analyzing real-time market intelligence..."):
-                result = grok_enhanced.get_premium_market_pulse()
-                st.write("Premium Market Intelligence:")
-                st.markdown(result)
-        
-        st.divider()
-        
-        # Enhanced Market Sentiment
-        st.write("**Market Sentiment Analysis**")
-        if st.button("Scan Market Sentiment", key="market_sentiment"):
+        # Market Sentiment
+        st.markdown("**Market Sentiment Analysis**")
+        if st.button("Scan Market", key="scan_market"):
             with st.spinner("Analyzing market sentiment..."):
                 result = grok_enhanced.get_twitter_market_sentiment()
-                st.write("Market Analysis:")
-                st.markdown(result)
+                st.write("Market Sentiment:")
+                st.text(result)
         
         st.divider()
         
-        # Stock-Specific Analysis
-        st.write("**Stock-Specific Analysis**")
-        ticker_input = st.text_input("Enter ticker for sentiment analysis", key="ticker_sentiment")
-        timeframe = st.selectbox("Analysis Timeframe", ["24h", "12h", "6h", "3h"], key="timeframe_select")
+        # Stock Analysis
+        st.markdown("**Stock Analysis**")
+        ticker = st.text_input("Enter ticker", key="ticker_input")
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("Analyze Sentiment", key="stock_sentiment") and ticker_input:
-                with st.spinner(f"Analyzing {ticker_input}..."):
-                    try:
-                        # Get live quote for context
-                        quote = get_live_quote(ticker_input.upper(), tz_label)
-                        
-                        if not quote.get("error"):
-                            st.metric(f"{ticker_input.upper()}", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                        
-                        result = grok_enhanced.get_twitter_market_sentiment(ticker_input.upper())
-                        st.write(f"Sentiment for {ticker_input.upper()}:")
-                        st.markdown(result)
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-        
-        with col2:
-            if st.button("Analyze Catalysts", key="stock_catalysts") and ticker_input:
-                with st.spinner(f"Finding catalysts for {ticker_input}..."):
-                    try:
-                        result = grok_enhanced.analyze_social_catalyst(ticker_input.upper(), timeframe)
-                        st.write(f"Catalysts for {ticker_input.upper()} ({timeframe}):")
-                        st.markdown(result)
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+        if st.button("Analyze Stock", key="analyze_stock") and ticker:
+            with st.spinner(f"Analyzing {ticker}..."):
+                try:
+                    sentiment = grok_enhanced.get_twitter_market_sentiment(ticker.upper())
+                    st.write(f"Sentiment for {ticker.upper()}:")
+                    st.text(sentiment)
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
         
         st.divider()
         
-        # Watchlist Integration
-        tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-        if tickers:
-            st.write("**Watchlist Social Scan**")
-            selected_ticker = st.selectbox("Select from watchlist", [""] + tickers, key="watchlist_select")
-            
-            if st.button("Scan Watchlist Ticker", key="watchlist_scan") and selected_ticker:
-                with st.spinner(f"Premium analysis for {selected_ticker}..."):
+        # Quick Analysis
+        st.markdown("**Quick Analysis**")
+        stocks = ["TSLA", "NVDA", "AAPL", "SPY"]
+        
+        for stock in stocks:
+            if st.button(stock, key=f"quick_{stock}"):
+                with st.spinner(f"Analyzing {stock}..."):
                     try:
-                        # Get quote
-                        quote = get_live_quote(selected_ticker, tz_label)
-                        
-                        if not quote.get("error"):
-                            col1, col2, col3 = st.columns(3)
-                            col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                            col2.metric("Volume", f"{quote['volume']:,}")
-                            col3.metric("Source", quote.get('data_source', 'Yahoo Finance'))
-                        
-                        # Get sentiment and catalysts
-                        sentiment = grok_enhanced.get_twitter_market_sentiment(selected_ticker)
-                        catalysts = grok_enhanced.analyze_social_catalyst(selected_ticker, "24h")
-                        
-                        st.write(f"Premium Analysis for {selected_ticker}:")
-                        st.markdown("**Sentiment:**")
-                        st.markdown(sentiment)
-                        
-                        st.markdown("**Catalysts:**")
-                        st.markdown(catalysts)
-                        
+                        result = grok_enhanced.get_twitter_market_sentiment(stock)
+                        st.write(f"{stock} Analysis:")
+                        st.text(result)
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
-        
-        st.divider()
-        
-        # Popular Stocks Quick Analysis
-        st.write("**Popular Stocks**")
-        popular_stocks = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
-        
-        cols = st.columns(4)
-        for i, stock in enumerate(popular_stocks):
-            with cols[i % 4]:
-                if st.button(stock, key=f"pop_{stock}"):
-                    with st.spinner(f"Analyzing {stock}..."):
-                        try:
-                            quote = get_live_quote(stock, tz_label)
-                            sentiment = grok_enhanced.get_twitter_market_sentiment(stock)
-                            
-                            if not quote.get("error"):
-                                st.metric(stock, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                            
-                            with st.expander(f"{stock} Premium Analysis"):
-                                st.markdown(sentiment)
-                        except Exception as e:
-                            st.error(f"Error: {str(e)}")
-        
-        # Premium Features Info
-        with st.expander("Premium Features"):
-            st.markdown("""
-            **Your Premium Access Provides:**
-            
-            **Enhanced Data:**
-            - Real-time Twitter/X stream access
-            - Verified account priority analysis
-            - Higher API rate limits
-            - Advanced sentiment algorithms
-            
-            **Professional Features:**
-            - Catalyst detection with confidence scoring
-            - Institutional flow commentary analysis
-            - Breaking news vs rumor classification
-            - Time-sensitive trading intelligence
-            
-            **Risk Management:**
-            - Source credibility assessment
-            - Confidence levels for all analysis
-            - Rumor vs verified fact distinction
-            - Impact timing predictions
-            """)
 
 # Auto refresh
 if st.session_state.auto_refresh:
