@@ -1970,36 +1970,31 @@ with tabs[8]:
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
                     
-# TAB 10: Twitter/Social Media Analysis
 with tabs[9]:
-    st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
+    st.write("Twitter/X Market Sentiment & Rumors")
     
-    st.warning("⚠️ **Risk Disclaimer:** Social media content includes unverified rumors and speculation. Always verify information through official sources before making trading decisions.")
+    st.warning("Risk Disclaimer: Social media content includes unverified rumors and speculation. Always verify information through official sources before making trading decisions.")
     
     if not grok_enhanced:
-        st.error("🔴 Grok API not configured. This tab requires Grok API access for Twitter/X integration.")
+        st.error("Grok API not configured. This tab requires Grok API access for Twitter/X integration.")
         st.info("Please add your Grok API key to access real-time Twitter sentiment and social media catalysts.")
     else:
-        st.success("✅ Grok connected for Twitter/X analysis")
+        st.success("Grok connected for Twitter/X analysis")
         
-        st.markdown("### 📊 Overall Market Sentiment")
-        if st.button("🔍 Scan Market Sentiment", type="primary", key="scan_market_sentiment"):
-            with st.spinner("Grok analyzing Twitter/X market sentiment..."):
+        st.markdown("### Overall Market Sentiment")
+        if st.button("Scan Market Sentiment", type="primary", key="scan_market_sentiment"):
+            with st.spinner("Analyzing Twitter/X market sentiment..."):
                 market_sentiment = grok_enhanced.get_twitter_market_sentiment()
-                st.markdown("### 🐦 Twitter/X Market Analysis")
+                st.markdown("### Twitter/X Market Analysis")
                 st.markdown(market_sentiment)
                 st.caption("Analysis powered by Grok")
         
         st.divider()
         
-        st.markdown("### 🎯 Stock-Specific Social Analysis")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            social_ticker = st.text_input("Analyze Twitter sentiment for stock", placeholder="Enter ticker (e.g., TSLA)", key="social_ticker").upper().strip()
-        with col2:
-            analyze_social = st.button("Analyze Sentiment", key="analyze_social_btn")
+        st.markdown("### Stock-Specific Social Analysis")
+        social_ticker = st.text_input("Analyze Twitter sentiment for stock", placeholder="Enter ticker", key="social_ticker").upper().strip()
         
-        if analyze_social and social_ticker:
+        if st.button("Analyze Sentiment", key="analyze_social_btn") and social_ticker:
             with st.spinner(f"Analyzing Twitter/X sentiment for {social_ticker}..."):
                 try:
                     quote = get_live_quote(social_ticker, tz_label)
@@ -2103,7 +2098,7 @@ with tabs[9]:
             
             **Remember:** Social media sentiment can be valuable for gauging market psychology, but should never be your only source for trading decisions.
             """)
-                    
+
 # Auto refresh
 if st.session_state.auto_refresh:
     time.sleep(0.1)
