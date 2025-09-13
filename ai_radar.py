@@ -1982,7 +1982,7 @@ with tabs[9]:
         st.success("Grok Premium connected")
         
         # Premium Market Pulse
-        st.subheader("Real-Time Market Pulse")
+        st.write("**Real-Time Market Pulse**")
         if st.button("Get Premium Market Pulse", key="premium_pulse", type="primary"):
             with st.spinner("Analyzing real-time market intelligence..."):
                 result = grok_enhanced.get_premium_market_pulse()
@@ -1992,7 +1992,7 @@ with tabs[9]:
         st.divider()
         
         # Enhanced Market Sentiment
-        st.subheader("Market Sentiment Analysis")
+        st.write("**Market Sentiment Analysis**")
         if st.button("Scan Market Sentiment", key="market_sentiment"):
             with st.spinner("Analyzing market sentiment..."):
                 result = grok_enhanced.get_twitter_market_sentiment()
@@ -2002,7 +2002,7 @@ with tabs[9]:
         st.divider()
         
         # Stock-Specific Analysis
-        st.subheader("Stock-Specific Analysis")
+        st.write("**Stock-Specific Analysis**")
         ticker_input = st.text_input("Enter ticker for sentiment analysis", key="ticker_sentiment")
         timeframe = st.selectbox("Analysis Timeframe", ["24h", "12h", "6h", "3h"], key="timeframe_select")
         
@@ -2039,7 +2039,7 @@ with tabs[9]:
         # Watchlist Integration
         tickers = st.session_state.watchlists[st.session_state.active_watchlist]
         if tickers:
-            st.subheader("Watchlist Social Scan")
+            st.write("**Watchlist Social Scan**")
             selected_ticker = st.selectbox("Select from watchlist", [""] + tickers, key="watchlist_select")
             
             if st.button("Scan Watchlist Ticker", key="watchlist_scan") and selected_ticker:
@@ -2071,7 +2071,7 @@ with tabs[9]:
         st.divider()
         
         # Popular Stocks Quick Analysis
-        st.subheader("Popular Stocks")
+        st.write("**Popular Stocks**")
         popular_stocks = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
         
         cols = st.columns(4)
