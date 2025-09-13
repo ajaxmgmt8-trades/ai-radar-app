@@ -1972,7 +1972,7 @@ with tabs[8]:
                     
 # TAB 10: Twitter Social Media Analysis
 with tabs[9]:
-    st.markdown("## Twitter/X Market Sentiment & Rumors")
+    st.title("Twitter/X Market Sentiment & Rumors")
     
     st.warning("Risk Disclaimer: Social media content includes unverified rumors and speculation. Always verify information through official sources before making trading decisions.")
     
@@ -1982,17 +1982,17 @@ with tabs[9]:
     else:
         st.success("Grok connected for Twitter/X analysis")
         
-        st.markdown("### Overall Market Sentiment")
+        st.write("### Overall Market Sentiment")
         if st.button("Scan Market Sentiment", type="primary", key="scan_market_sentiment"):
             with st.spinner("Analyzing Twitter/X market sentiment..."):
                 market_sentiment = grok_enhanced.get_twitter_market_sentiment()
-                st.markdown("### Twitter/X Market Analysis")
+                st.write("### Twitter/X Market Analysis")
                 st.markdown(market_sentiment)
                 st.caption("Analysis powered by Grok")
         
         st.divider()
         
-        st.markdown("### Stock-Specific Social Analysis")
+        st.write("### Stock-Specific Social Analysis")
         social_ticker = st.text_input("Analyze Twitter sentiment for stock", placeholder="Enter ticker", key="social_ticker").upper().strip()
         
         if st.button("Analyze Sentiment", key="analyze_social_btn") and social_ticker:
@@ -2007,11 +2007,11 @@ with tabs[9]:
                         col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
                     
                     sentiment_analysis = grok_enhanced.get_twitter_market_sentiment(social_ticker)
-                    st.markdown(f"### Twitter/X Sentiment for {social_ticker}")
+                    st.write(f"### Twitter/X Sentiment for {social_ticker}")
                     st.markdown(sentiment_analysis)
                     
                     catalyst_analysis = grok_enhanced.analyze_social_catalyst(social_ticker)
-                    st.markdown(f"### Social Media Catalysts for {social_ticker}")
+                    st.write(f"### Social Media Catalysts for {social_ticker}")
                     st.markdown(catalyst_analysis)
                     
                     if st.button(f"Add {social_ticker} to Watchlist", key="add_social_ticker"):
@@ -2029,7 +2029,7 @@ with tabs[9]:
         
         tickers = st.session_state.watchlists[st.session_state.active_watchlist]
         if tickers:
-            st.markdown("### Watchlist Social Media Scan")
+            st.write("### Watchlist Social Media Scan")
             selected_social_ticker = st.selectbox("Select from watchlist", [""] + tickers, key="watchlist_social")
             timeframe = st.selectbox("Timeframe", ["24h", "12h", "6h", "3h"], key="social_timeframe")
             
@@ -2047,10 +2047,10 @@ with tabs[9]:
                         sentiment = grok_enhanced.get_twitter_market_sentiment(selected_social_ticker)
                         catalysts = grok_enhanced.analyze_social_catalyst(selected_social_ticker, timeframe)
                         
-                        st.markdown(f"### Social Sentiment: {selected_social_ticker}")
+                        st.write(f"### Social Sentiment: {selected_social_ticker}")
                         st.markdown(sentiment)
                         
-                        st.markdown(f"### Social Catalysts ({timeframe})")
+                        st.write(f"### Social Catalysts ({timeframe})")
                         st.markdown(catalysts)
                         
                     except Exception as e:
@@ -2060,7 +2060,7 @@ with tabs[9]:
         
         st.divider()
         
-        st.markdown("### Popular Stocks Social Sentiment")
+        st.write("### Popular Stocks Social Sentiment")
         popular_for_social = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
         cols = st.columns(4)
         
@@ -2072,7 +2072,7 @@ with tabs[9]:
                             sentiment = grok_enhanced.get_twitter_market_sentiment(ticker)
                             quote = get_live_quote(ticker, tz_label)
                             
-                            st.markdown(f"**{ticker} Social Analysis**")
+                            st.write(f"**{ticker} Social Analysis**")
                             if not quote.get("error"):
                                 st.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                             
