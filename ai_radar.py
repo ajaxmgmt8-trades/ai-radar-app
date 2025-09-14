@@ -118,7 +118,28 @@ class GrokClient:
             return response.choices[0].message.content
         except Exception as e:
             return f"Grok Analysis Error: {str(e)}"
-
+     class GrokClient:
+    def __init__(self, api_key: str):
+        # ... your existing __init__ code ...
+    
+    def analyze_trading_setup(self, prompt: str) -> str:
+        # ... your existing analyze_trading_setup code ...
+    
+    # ADD THESE TWO NEW METHODS:
+    def get_twitter_market_sentiment(self, ticker: str = None) -> str:
+        """Get Twitter sentiment analysis"""
+        if ticker:
+            prompt = f"Analyze recent Twitter sentiment and discussion for ${ticker} stock. What are traders saying?"
+        else:
+            prompt = "Analyze overall market sentiment on Twitter/X. What are the main themes in trading discussions today?"
+        
+        return self.analyze_trading_setup(prompt)
+    
+    def analyze_social_catalyst(self, ticker: str, timeframe: str = "24h") -> str:
+        """Analyze social media catalysts"""
+        prompt = f"Analyze social media catalysts and rumors for ${ticker} over the last {timeframe}. What news or events are driving discussion?"
+        return self.analyze_trading_setup(prompt)
+        
 # Initialize enhanced Grok client
 grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
 
