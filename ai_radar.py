@@ -89,8 +89,6 @@ except Exception as e:
     openai_client = None
     gemini_model = None
     grok_client = None
-
-# Enhanced Grok Client
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
     
@@ -118,14 +116,8 @@ class GrokClient:
             return response.choices[0].message.content
         except Exception as e:
             return f"Grok Analysis Error: {str(e)}"
-            
-    def __init__(self, api_key: str):
-        # ... your existing __init__ code ...
     
-    def analyze_trading_setup(self, prompt: str) -> str:
-        # ... your existing analyze_trading_setup code ...
-    
-    # ADD THESE TWO NEW METHODS:
+    # ADD THESE TWO NEW METHODS HERE (with proper indentation):
     def get_twitter_market_sentiment(self, ticker: str = None) -> str:
         """Get Twitter sentiment analysis"""
         if ticker:
