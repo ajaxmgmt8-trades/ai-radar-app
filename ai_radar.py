@@ -118,7 +118,7 @@ class GrokClient:
             return response.choices[0].message.content
         except Exception as e:
             return f"Grok Analysis Error: {str(e)}"
-     class GrokClient:
+            
     def __init__(self, api_key: str):
         # ... your existing __init__ code ...
     
