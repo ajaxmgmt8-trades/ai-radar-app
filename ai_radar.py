@@ -932,7 +932,11 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
         fund_summary += f"- Financial Health: {fundamental.get('financial_health', 'Unknown')}\n"
         fund_summary += f"- Valuation: {fundamental.get('valuation_assessment', 'Unknown')}\n"
         fund_summary += f"- Sector: {fundamental.get('sector', 'Unknown')}\n"
-        fund_summary += f"- Revenue Growth: {fundamental.get('revenue_growth', 0):.1%}\n"
+        revenue_growth = fundamental.get('revenue_growth', 'N/A')
+        if revenue_growth != 'N/A' and revenue_growth is not None:
+            fund_summary += f"- Revenue Growth: {revenue_growth:.1%}\n"
+        else:
+            fund_summary += "- Revenue Growth: N/A\n"
         fund_summary += f"- Debt/Equity: {fundamental.get('debt_to_equity', 'N/A')}\n"
     
     # Options summary
@@ -2063,28 +2067,16 @@ with tabs[0]:
             else:
                 st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
     
-    # Watchlist display with optimized parallel loading
+    # Watchlist display
     tickers = st.session_state.watchlists[st.session_state.active_watchlist]
     
     if not tickers:
         st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab.")
     else:
         st.markdown("### Your Watchlist")
-        
-        # Performance optimization: Fetch all quotes in parallel
-        if len(tickers) > 1 and PERFORMANCE_CONFIG["enable_parallel_processing"]:
-            with st.spinner("Loading watchlist quotes..."):
-                quotes_dict = get_multiple_quotes_parallel(tickers, tz_label)
-        else:
-            quotes_dict = {}
-            for ticker in tickers:
-                quotes_dict[ticker] = get_live_quote(ticker, tz_label)
-        
-        # Display quotes
         for ticker in tickers:
-            quote = quotes_dict.get(ticker, {"error": "Failed to load"})
-            
-            if quote.get("error"):
+            quote = get_live_quote(ticker, tz_label)
+            if quote["error"]:
                 st.error(f"{ticker}: {quote['error']}")
                 continue
             
@@ -2096,57 +2088,49 @@ with tabs[0]:
                 col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
                 col3.write("**Volume**")
                 col3.write(f"{quote['volume']:,}")
-                col3.caption(f"Updated: {quote.get('last_updated', 'N/A')}")
+                col3.caption(f"Updated: {quote['last_updated']}")
                 col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
-                # Lazy load AI analysis only when requested
                 if abs(quote['change_percent']) >= 2.0:
                     if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}"):
                         with st.spinner(f"Analyzing {ticker}..."):
-                            # Quick options data fetch
+                            # Get options data for analysis
                             options_data = get_options_data(ticker)
                             analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
                             st.success(f"🤖 {ticker} Analysis")
                             st.markdown(analysis)
                 
-                # Session data - faster display
+                # Session data
                 sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
-                sess_col1.caption(f"**PM:** {quote.get('premarket_change', 0):+.2f}%")
-                sess_col2.caption(f"**Day:** {quote.get('intraday_change', 0):+.2f}%")
-                sess_col3.caption(f"**AH:** {quote.get('postmarket_change', 0):+.2f}%")
+                sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
+                sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
+                sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
                 
-                # Lazy load detailed view - only when expanded
+                # Expandable detailed view
                 with st.expander(f"🔎 Expand {ticker}"):
-                    # Lazy load news only when expanded
-                    @st.cache_data(ttl=300)
-                    def get_ticker_news(symbol):
-                        return get_finnhub_news(symbol)
-                    
-                    news = get_ticker_news(ticker)
+                    # Catalyst headlines
+                    news = get_finnhub_news(ticker)
                     if news:
                         st.write("### 📰 Catalysts (last 24h)")
-                        for n in news[:3]:  # Limit to 3 for speed
+                        for n in news:
                             st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
                     else:
                         st.info("No recent news.")
                     
-                    # Lazy load AI Playbook
-                    if st.button(f"Generate AI Playbook for {ticker}", key=f"lazy_ai_{ticker}"):
-                        with st.spinner(f"Generating playbook for {ticker}..."):
-                            catalyst_title = news[0].get('headline', '') if news else ""
-                            options_data = get_options_data(ticker)
-                            
-                            if options_data and not options_data.get("error"):
-                                st.write("**Options Metrics:**")
-                                opt_col1, opt_col2, opt_col3 = st.columns(3)
-                                opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                                opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                                opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                                st.caption("Note: Options data is real from yfinance")
-                            
-                            playbook = ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data)
-                            st.markdown("### 🎯 AI Playbook")
-                            st.markdown(playbook)
+                    # AI Playbook with options data
+                    st.markdown("### 🎯 AI Playbook")
+                    catalyst_title = news[0].get('headline', '') if news else ""
+                    options_data = get_options_data(ticker)
+                    
+                    if options_data:
+                        st.write("**Options Metrics:**")
+                        opt_col1, opt_col2, opt_col3 = st.columns(3)
+                        opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
+                        opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                        st.caption("Note: Options data is real from yfinance")
+                    
+                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
                 st.divider()
 
