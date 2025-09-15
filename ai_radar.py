@@ -1319,6 +1319,356 @@ def get_all_news() -> List[Dict]:
     
     return all_news[:15]
 
+def get_comprehensive_news(ticker: str) -> List[Dict]:
+    """Get comprehensive news from all sources for a specific ticker"""
+    all_news = []
+    
+    # Get Finnhub news
+    finnhub_news = get_finnhub_news(ticker)
+    for item in finnhub_news:
+        all_news.append({
+            "title": item.get("headline", ""),
+            "summary": item.get("summary", ""),
+            "source": "Finnhub",
+            "url": item.get("url", ""),
+            "datetime": item.get("datetime", 0),
+            "related": item.get("related", ""),
+            "provider": "Finnhub API"
+        })
+    
+    # Get Yahoo Finance news
+    try:
+        import yfinance as yf
+        stock = yf.Ticker(ticker)
+        yf_news = stock.news
+        
+        for item in yf_news[:10]:  # Limit to recent news
+            all_news.append({
+                "title": item.get("title", ""),
+                "summary": item.get("summary", ""),
+                "source": "Yahoo Finance",
+                "url": item.get("link", ""),
+                "datetime": item.get("providerPublishTime", 0),
+                "related": ticker,
+                "provider": "Yahoo Finance"
+            })
+    except Exception as e:
+        print(f"Yahoo Finance news error for {ticker}: {e}")
+    
+    return all_news
+
+def get_yfinance_news() -> List[Dict]:
+    """Get general market news from Yahoo Finance"""
+    try:
+        # Use a major index to get general market news
+        import yfinance as yf
+        spy = yf.Ticker("SPY")
+        news = spy.news
+        
+        formatted_news = []
+        for item in news[:15]:
+            formatted_news.append({
+                "title": item.get("title", ""),
+                "summary": item.get("summary", ""),
+                "source": "Yahoo Finance",
+                "url": item.get("link", ""),
+                "datetime": item.get("providerPublishTime", ""),
+                "related": "",
+                "provider": "Yahoo Finance"
+            })
+        
+        return formatted_news
+    except Exception as e:
+        print(f"Yahoo Finance general news error: {e}")
+        return []
+
+def analyze_catalyst_impact(title: str, summary: str = "") -> Dict:
+    """Analyze the potential market impact of a news item"""
+    text = (title + " " + summary).lower()
+    
+    # Enhanced keyword analysis for market impact
+    high_impact_keywords = [
+        "fed", "federal reserve", "rate", "inflation", "cpi", "ppi", "gdp", 
+        "earnings", "guidance", "acquisition", "merger", "bankruptcy", "sec", 
+        "fda approval", "clinical trial", "breakthrough", "partnership",
+        "upgrade", "downgrade", "analyst", "target price", "revenue beat",
+        "earnings miss", "layoffs", "restructuring", "ipo", "dings"
+    ]
+    
+    bullish_keywords = [
+        "beat", "exceed", "strong", "growth", "positive", "approval", "partnership",
+        "acquisition", "upgrade", "buy", "outperform", "breakthrough", "expansion",
+        "record", "surge", "jump", "rally", "bullish"
+    ]
+    
+    bearish_keywords = [
+        "miss", "disappoint", "weak", "decline", "negative", "rejection", "delay",
+        "downgrade", "sell", "underperform", "warning", "concern", "drop",
+        "fall", "crash", "bearish", "loss", "lawsuit", "investigation"
+    ]
+    
+    category_keywords = {
+        "earnings": ["earnings", "revenue", "eps", "guidance", "quarter"],
+        "regulatory": ["fda", "sec", "regulation", "approval", "investigation"],
+        "corporate": ["merger", "acquisition", "partnership", "ceo", "management"],
+        "economic": ["fed", "inflation", "gdp", "unemployment", "rate"],
+        "technical": ["breakthrough", "innovation", "patent", "technology"],
+        "analyst": ["upgrade", "downgrade", "target", "rating", "analyst"]
+    }
+    
+    # Calculate scores
+    high_impact_score = sum(2 for word in high_impact_keywords if word in text)
+    bullish_score = sum(1 for word in bullish_keywords if word in text)
+    bearish_score = sum(1 for word in bearish_keywords if word in text)
+    
+    # Determine primary category
+    category_scores = {}
+    for category, keywords in category_keywords.items():
+        score = sum(1 for word in keywords if word in text)
+        if score > 0:
+            category_scores[category] = score
+    
+    primary_category = max(category_scores.items(), key=lambda x: x[1])[0] if category_scores else "general"
+    
+    # Determine sentiment
+    if bullish_score > bearish_score:
+        sentiment = "positive"
+    elif bearish_score > bullish_score:
+        sentiment = "negative"
+    else:
+        sentiment = "neutral"
+    
+    # Calculate overall catalyst strength (0-100)
+    catalyst_strength = min(100, (high_impact_score * 15) + (bullish_score * 5) + (bearish_score * 5) + 
+                           (max(category_scores.values()) * 10 if category_scores else 0))
+    
+    # Determine impact level
+    if catalyst_strength >= 60:
+        impact_level = "high"
+    elif catalyst_strength >= 30:
+        impact_level = "medium"
+    else:
+        impact_level = "low"
+    
+    return {
+        "catalyst_strength": catalyst_strength,
+        "sentiment": sentiment,
+        "impact_level": impact_level,
+        "primary_category": primary_category,
+        "category_scores": category_scores
+    }
+
+def get_market_moving_news() -> List[Dict]:
+    """Get market-moving news from all sources with catalyst analysis"""
+    all_news = []
+    
+    # Get general market news from all sources
+    finnhub_general = get_finnhub_news()  # General news
+    polygon_general = get_polygon_news()
+    yahoo_general = get_yfinance_news()
+    
+    # Process Finnhub news
+    for item in finnhub_general:
+        catalyst_analysis = analyze_catalyst_impact(
+            item.get("headline", ""), 
+            item.get("summary", "")
+        )
+        
+        news_item = {
+            "title": item.get("headline", ""),
+            "summary": item.get("summary", ""),
+            "source": "Finnhub",
+            "url": item.get("url", ""),
+            "datetime": item.get("datetime", 0),
+            "related": item.get("related", ""),
+            "provider": "Finnhub API",
+            "catalyst_analysis": catalyst_analysis
+        }
+        all_news.append(news_item)
+    
+    # Process Polygon news
+    for item in polygon_general:
+        catalyst_analysis = analyze_catalyst_impact(
+            item.get("title", ""), 
+            item.get("description", "")
+        )
+        
+        news_item = {
+            "title": item.get("title", ""),
+            "summary": item.get("description", ""),
+            "source": "Polygon",
+            "url": item.get("article_url", ""),
+            "datetime": item.get("published_utc", ""),
+            "related": ",".join(item.get("tickers", [])),
+            "provider": "Polygon API",
+            "catalyst_analysis": catalyst_analysis
+        }
+        all_news.append(news_item)
+    
+    # Process Yahoo Finance news
+    for item in yahoo_general:
+        catalyst_analysis = analyze_catalyst_impact(
+            item.get("title", ""), 
+            item.get("summary", "")
+        )
+        
+        news_item = {
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "source": "Yahoo Finance",
+            "url": item.get("url", ""),
+            "datetime": item.get("datetime", ""),
+            "related": item.get("related", ""),
+            "provider": "Yahoo Finance",
+            "catalyst_analysis": catalyst_analysis
+        }
+        all_news.append(news_item)
+    
+    # Sort by catalyst strength and return top items
+    all_news.sort(key=lambda x: x["catalyst_analysis"]["catalyst_strength"], reverse=True)
+    return all_news
+
+def get_stock_specific_catalysts(ticker: str) -> Dict:
+    """Get comprehensive catalyst analysis for a specific stock"""
+    try:
+        # Get news from all sources
+        all_news = get_comprehensive_news(ticker)
+        
+        # Analyze each news item
+        analyzed_news = []
+        for news_item in all_news:
+            catalyst_analysis = analyze_catalyst_impact(
+                news_item.get("title", ""),
+                news_item.get("summary", "")
+            )
+            news_item["catalyst_analysis"] = catalyst_analysis
+            analyzed_news.append(news_item)
+        
+        # Generate summary statistics
+        total_catalysts = len(analyzed_news)
+        positive_catalysts = len([n for n in analyzed_news if n["catalyst_analysis"]["sentiment"] == "positive"])
+        negative_catalysts = len([n for n in analyzed_news if n["catalyst_analysis"]["sentiment"] == "negative"])
+        
+        # Find highest impact and primary categories
+        highest_impact = max([n["catalyst_analysis"]["catalyst_strength"] for n in analyzed_news]) if analyzed_news else 0
+        
+        # Count categories
+        category_counts = {}
+        for news in analyzed_news:
+            category = news["catalyst_analysis"]["primary_category"]
+            category_counts[category] = category_counts.get(category, 0) + 1
+        
+        primary_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        # Generate trading implications
+        trading_implications = generate_trading_implications_text(
+            ticker, analyzed_news, highest_impact, positive_catalysts, negative_catalysts
+        )
+        
+        return {
+            "news_items": analyzed_news,
+            "catalyst_summary": {
+                "total_catalysts": total_catalysts,
+                "positive_catalysts": positive_catalysts,
+                "negative_catalysts": negative_catalysts,
+                "highest_impact": highest_impact,
+                "primary_categories": primary_categories[:5]  # Top 5 categories
+            },
+            "trading_implications": trading_implications
+        }
+        
+    except Exception as e:
+        return {
+            "error": f"Error analyzing catalysts for {ticker}: {str(e)}",
+            "news_items": [],
+            "catalyst_summary": {
+                "total_catalysts": 0,
+                "positive_catalysts": 0,
+                "negative_catalysts": 0,
+                "highest_impact": 0,
+                "primary_categories": []
+            },
+            "trading_implications": f"Unable to analyze catalysts for {ticker} due to data error."
+        }
+
+def generate_trading_implications_text(ticker: str, news_items: List[Dict], 
+                                     highest_impact: int, positive: int, negative: int) -> str:
+    """Generate trading implications text based on catalyst analysis"""
+    
+    if not news_items:
+        return f"No recent catalysts found for {ticker}. Monitor for new developments."
+    
+    # Determine overall sentiment bias
+    if positive > negative:
+        sentiment_bias = "bullish"
+        sentiment_desc = f"with {positive} positive vs {negative} negative catalysts"
+    elif negative > positive:
+        sentiment_bias = "bearish" 
+        sentiment_desc = f"with {negative} negative vs {positive} positive catalysts"
+    else:
+        sentiment_bias = "neutral"
+        sentiment_desc = f"with balanced sentiment ({positive} positive, {negative} negative)"
+    
+    # Determine impact level
+    if highest_impact >= 70:
+        impact_desc = "HIGH IMPACT catalysts detected"
+    elif highest_impact >= 40:
+        impact_desc = "moderate impact catalysts present"
+    else:
+        impact_desc = "low impact catalysts only"
+    
+    # Generate implications
+    implications = f"""
+**Catalyst Overview for {ticker}:**
+- Overall sentiment bias: **{sentiment_bias.upper()}** {sentiment_desc}
+- Impact level: **{impact_desc}**
+- Total catalysts analyzed: {len(news_items)}
+
+**Trading Considerations:**
+"""
+    
+    if highest_impact >= 70:
+        implications += f"""
+- **High volatility expected** due to significant catalysts
+- Consider wider stops and position sizing adjustments
+- Monitor for breakout/breakdown from key technical levels
+- Options implied volatility likely elevated
+"""
+    elif highest_impact >= 40:
+        implications += f"""
+- **Moderate volatility possible** from catalyst developments
+- Watch for confirmation of direction with volume
+- Standard risk management appropriate
+"""
+    else:
+        implications += f"""
+- **Low catalyst impact** - focus on technical analysis
+- Normal market conditions expected
+- Standard trading approaches suitable
+"""
+    
+    if sentiment_bias == "bullish":
+        implications += f"""
+- **Bullish bias** suggests looking for long opportunities on dips
+- Watch for bullish continuation patterns
+- Consider call options if volatility is reasonable
+"""
+    elif sentiment_bias == "bearish":
+        implications += f"""
+- **Bearish bias** suggests caution on long positions
+- Look for short opportunities on rallies
+- Consider protective puts for existing positions
+"""
+    
+    implications += f"""
+**Risk Management:**
+- Set alerts for new catalyst developments
+- Adjust position size based on catalyst volatility
+- Monitor news flow throughout trading session
+"""
+    
+    return implications.strip()
+
 def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     text = (title + " " + summary).lower()
     
@@ -1975,8 +2325,6 @@ if st.session_state.ai_model == "Multi-AI":
     active_models = multi_ai.get_available_models()
     ai_info += f" ({'+'.join(active_models)})" if active_models else " (None Available)"
 
-st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Last Updated: {data_timestamp} | Data: {data_source_info} | {ai_info}</div>", unsafe_allow_html=True)
-
 # TAB 1: Live Quotes
 with tabs[0]:
     st.subheader("📊 Real-Time Watchlist & Market Movers")
@@ -2162,6 +2510,7 @@ with tabs[0]:
                     st.success(f"Added {mover['ticker']} to watchlist!")
                     st.rerun()
             st.divider()
+
 # TAB 2: Watchlist Manager
 with tabs[1]:
     st.subheader("📋 Watchlist Manager")
@@ -2320,13 +2669,10 @@ with tabs[2]:
                         # Create impact indicator
                         if analysis["impact_level"] == "high":
                             impact_emoji = "🚀"
-                            impact_color = "red"
                         elif analysis["impact_level"] == "medium":
                             impact_emoji = "📈"
-                            impact_color = "orange"
                         else:
                             impact_emoji = "📊"
-                            impact_color = "blue"
                         
                         # Sentiment indicator
                         sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
@@ -2504,57 +2850,6 @@ with tabs[2]:
                                 st.session_state.watchlists[st.session_state.active_watchlist] = current_list
                                 st.success(f"Added {mover['ticker']}")
                                 st.rerun()
-    
-    # News source breakdown
-    with st.expander("📊 News Sources & Coverage"):
-        st.markdown("""
-        **Enhanced News Integration:**
-        - **Finnhub:** Company-specific news, earnings, analyst updates
-        - **Polygon:** Real-time market news, regulatory filings, insider trading
-        - **Yahoo Finance:** Broad market coverage, social sentiment, trending stories
-        
-        **Catalyst Analysis Features:**
-        - **Impact Scoring:** 0-100 scale based on keywords and sentiment
-        - **Category Detection:** Earnings, M&A, partnerships, regulatory, etc.
-        - **Sentiment Analysis:** Positive, negative, neutral market impact
-        - **Correlation Tracking:** Links news to price movements
-        
-        **Trading Applications:**
-        - **Pre-market Scanning:** Identify overnight catalysts
-        - **Intraday Alerts:** Real-time catalyst detection
-        - **Sector Rotation:** Track thematic news trends
-        - **Risk Management:** Monitor negative sentiment buildup
-        """)
-        
-        # Quick source test
-        if st.button("🧪 Test All News Sources"):
-            with st.spinner("Testing news source connections..."):
-                test_results = {}
-                
-                # Test Finnhub
-                try:
-                    finnhub_test = get_finnhub_news()
-                    test_results["Finnhub"] = f"✅ {len(finnhub_test)} articles"
-                except Exception as e:
-                    test_results["Finnhub"] = f"❌ Error: {str(e)[:50]}"
-                
-                # Test Polygon
-                try:
-                    polygon_test = get_polygon_news()
-                    test_results["Polygon"] = f"✅ {len(polygon_test)} articles"
-                except Exception as e:
-                    test_results["Polygon"] = f"❌ Error: {str(e)[:50]}"
-                
-                # Test Yahoo Finance
-                try:
-                    yf_test = get_yfinance_news()
-                    test_results["Yahoo Finance"] = f"✅ {len(yf_test)} articles"
-                except Exception as e:
-                    test_results["Yahoo Finance"] = f"❌ Error: {str(e)[:50]}"
-                
-                st.write("**Source Test Results:**")
-                for source, result in test_results.items():
-                    st.write(f"• {source}: {result}")
 
 # TAB 4: Market Analysis
 with tabs[3]:
@@ -2819,31 +3114,6 @@ with tabs[4]:
                                 st.write("---")
     else:
         st.info("Add stocks to watchlist or use search above.")
-    
-    # Quick tips
-    with st.expander("💡 About the Enhanced Analysis"):
-        st.markdown("""
-        **Enhanced Multi-AI System:**
-        - **Multi-AI Mode:** Gets consensus from all available AI models (OpenAI + Gemini + Grok)
-        - **Individual Models:** Use specific AI for targeted analysis styles
-        - **Real Options Data:** Integrated yfinance options chain analysis
-        - **Session Tracking:** Premarket, intraday, and after-hours performance
-        
-        **Enhanced Data Integration:**
-        - **Primary:** Twelve Data for real-time comprehensive technical analysis
-        - **Secondary:** Alpha Vantage for additional market data validation
-        - **Fallback:** Yahoo Finance with enhanced session tracking
-        - **Fundamental Analysis:** Complete financial health scoring and valuation assessment
-        - **Advanced Options Flow:** Unusual activity detection, gamma levels, sentiment analysis
-        
-        **Comprehensive Analysis includes:**
-        - Multi-timeframe technical analysis (1D, 5D, 3M)
-        - Complete fundamental health scoring
-        - Advanced options flow analysis with order sentiment
-        - Enhanced AI prompts with all data integrated
-        - Volume-weighted significance scoring for auto-plays
-        - Real-time data source prioritization
-        """)
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
@@ -3070,7 +3340,7 @@ with tabs[8]:
                     st.write(f"**Time:** {event['time']}")
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
-                    
+
 # TAB 10: Twitter/X Market Sentiment & Rumors
 with tabs[9]:
     st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
