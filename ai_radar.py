@@ -1656,10 +1656,13 @@ def generate_options_summary(options: Dict) -> str:
     
     basic = options.get('basic_metrics', {})
     flow = options.get('flow_analysis', {})
+    
     pc_ratio = basic.get('put_call_volume_ratio', 0)
+    pc_ratio_str = f"{pc_ratio:.2f}" if pc_ratio is not None else "N/A"
+    
     sentiment = flow.get('flow_sentiment', 'Neutral')
     
-    return f"P/C Ratio: {pc_ratio:.2f}, Flow: {sentiment}"
+    return f"P/C Ratio: {pc_ratio_str}, Flow: {sentiment}"
 
 # Enhanced market analysis
 def ai_market_analysis_enhanced(news_items: List[Dict], movers: List[Dict]) -> str:
@@ -2201,28 +2204,47 @@ with tabs[1]:
     else:
         st.info("Watchlist is empty. Search for stocks above or add popular tickers.")
 
-# TAB 3: Catalyst Scanner
+# TAB 3: Enhanced Catalyst Scanner
 with tabs[2]:
-    st.subheader("🔥 Real-Time Catalyst Scanner")
+    st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
+    st.caption("Comprehensive news analysis from Finnhub, Polygon, and Yahoo Finance")
     
-    # Search specific stock
+    # Show data sources status
+    sources_status = []
+    if FINNHUB_KEY:
+        sources_status.append("✅ Finnhub")
+    else:
+        sources_status.append("❌ Finnhub")
+    if POLYGON_KEY:
+        sources_status.append("✅ Polygon")
+    else:
+        sources_status.append("❌ Polygon")
+    sources_status.append("✅ Yahoo Finance")
+    
+    st.info(f"**News Sources:** {' | '.join(sources_status)}")
+    
+    # Search specific stock catalysts
     col1, col2 = st.columns([3, 1])
     with col1:
         search_catalyst_ticker = st.text_input("🔍 Search catalysts for stock", placeholder="Enter ticker", key="search_catalyst").upper().strip()
     with col2:
-        search_catalyst = st.button("Search Catalysts", key="search_catalyst_btn")
+        search_catalyst = st.button("🔍 Analyze Catalysts", key="search_catalyst_btn")
     
     if search_catalyst and search_catalyst_ticker:
-        with st.spinner(f"Searching catalysts for {search_catalyst_ticker}..."):
-            specific_news = get_finnhub_news(search_catalyst_ticker)
+        with st.spinner(f"Searching all news sources for {search_catalyst_ticker} catalysts..."):
+            # Get comprehensive catalyst analysis
+            catalyst_data = get_stock_specific_catalysts(search_catalyst_ticker)
             quote = get_live_quote(search_catalyst_ticker, tz_label)
             
             if not quote["error"]:
                 st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
-                col1, col2, col3 = st.columns(3)
+                # Price and volume info
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                 col2.metric("Volume", f"{quote['volume']:,}")
+                col3.metric("Total Catalysts", catalyst_data["catalyst_summary"]["total_catalysts"])
+                col4.metric("Highest Impact", f"{catalyst_data['catalyst_summary']['highest_impact']}")
                 
                 # Session breakdown
                 st.markdown("#### Session Performance")
@@ -2231,34 +2253,95 @@ with tabs[2]:
                 sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%") 
                 sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
                 
-                if col3.button(f"Add {search_catalyst_ticker} to WL", key="add_catalyst_search"):
+                # Catalyst Summary
+                st.markdown("#### 📊 Catalyst Summary")
+                summary = catalyst_data["catalyst_summary"]
+                
+                summary_col1, summary_col2, summary_col3 = st.columns(3)
+                summary_col1.metric("Positive", summary["positive_catalysts"], help="Bullish catalysts")
+                summary_col2.metric("Negative", summary["negative_catalysts"], help="Bearish catalysts")
+                summary_col3.metric("Categories", len(summary["primary_categories"]), help="Types of catalysts found")
+                
+                # Primary Categories
+                if summary["primary_categories"]:
+                    st.write("**Main Catalyst Categories:**")
+                    for category, count in summary["primary_categories"]:
+                        st.write(f"• {category.replace('_', ' ').title()}: {count} items")
+                
+                # Trading Implications
+                if catalyst_data["trading_implications"]:
+                    st.markdown("#### 🎯 Trading Implications")
+                    st.markdown(catalyst_data["trading_implications"])
+                
+                # Individual News Items
+                if catalyst_data["news_items"]:
+                    st.markdown("#### 📰 Individual Catalysts")
+                    
+                    # Sort by catalyst strength
+                    sorted_news = sorted(catalyst_data["news_items"], 
+                                       key=lambda x: x["catalyst_analysis"]["catalyst_strength"], 
+                                       reverse=True)
+                    
+                    for i, news_item in enumerate(sorted_news[:10]):  # Show top 10
+                        analysis = news_item["catalyst_analysis"]
+                        
+                        # Create impact indicator
+                        if analysis["impact_level"] == "high":
+                            impact_emoji = "🚀"
+                            impact_color = "red"
+                        elif analysis["impact_level"] == "medium":
+                            impact_emoji = "📈"
+                            impact_color = "orange"
+                        else:
+                            impact_emoji = "📊"
+                            impact_color = "blue"
+                        
+                        # Sentiment indicator
+                        sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                        
+                        with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news_item['title'][:80]}... | {news_item['source']}"):
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                st.write(f"**Summary:** {news_item.get('summary', 'No summary available')}")
+                                st.write(f"**Source:** {news_item['source']} | **Provider:** {news_item.get('provider', 'Unknown')}")
+                                if news_item.get('url'):
+                                    st.markdown(f"[📖 Read Full Article]({news_item['url']})")
+                            
+                            with col2:
+                                st.metric("Impact", f"{analysis['catalyst_strength']}/100")
+                                st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
+                                st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
+                                st.write(f"**Level:** {analysis['impact_level'].title()}")
+                
+                # Add to watchlist button
+                if st.button(f"Add {search_catalyst_ticker} to Watchlist", key="add_catalyst_search"):
                     current_list = st.session_state.watchlists[st.session_state.active_watchlist]
                     if search_catalyst_ticker not in current_list:
                         current_list.append(search_catalyst_ticker)
                         st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                        st.success(f"Added {search_catalyst_ticker}")
+                        st.success(f"Added {search_catalyst_ticker} to watchlist!")
                         st.rerun()
                 
-                if specific_news:
-                    st.markdown("### News Catalysts")
-                    for news_item in specific_news[:5]:
-                        sentiment, confidence = analyze_news_sentiment(news_item.get("headline", ""), news_item.get("summary", ""))
-                        
-                        with st.expander(f"{sentiment} ({confidence}%) - {news_item.get('headline', 'No title')[:80]}..."):
-                            st.write(f"**Summary:** {news_item.get('summary', 'No summary')}")
-                            if news_item.get('url'):
-                                st.markdown(f"[Read Article]({news_item['url']})")
-                else:
-                    st.info(f"No recent news found for {search_catalyst_ticker}")
-                
                 st.divider()
+            else:
+                st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
-    # Main catalyst scan
-    if st.button("🔍 Scan for Market Catalysts", type="primary"):
-        with st.spinner("Scanning for catalysts..."):
-            all_news = get_all_news()
+    # Main market catalyst scan
+    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
+    
+    scan_col1, scan_col2 = st.columns([2, 1])
+    with scan_col1:
+        st.caption("Scan all news sources for market-moving catalysts")
+    with scan_col2:
+        scan_type = st.selectbox("Scan Type", ["All Catalysts", "High Impact Only", "By Category"], key="catalyst_scan_type")
+    
+    if st.button("🔍 Scan Market Catalysts", type="primary"):
+        with st.spinner("Scanning all news sources for market catalysts..."):
+            # Get market-moving news
+            market_news = get_market_moving_news()
             
-            # Get movers
+            # Get significant movers for correlation
             movers = []
             for ticker in CORE_TICKERS[:20]:
                 quote = get_live_quote(ticker, tz_label)
@@ -2273,39 +2356,173 @@ with tabs[2]:
             
             movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
             
-            # Display news catalysts
-            st.markdown("### 📰 News Catalysts")
-            for news in all_news[:10]:
-                sentiment, confidence = analyze_news_sentiment(news["title"], news["summary"])
+            # Display results based on scan type
+            if scan_type == "High Impact Only":
+                filtered_news = [n for n in market_news if n["catalyst_analysis"]["impact_level"] == "high"]
+            elif scan_type == "By Category":
+                # Group by category
+                category_groups = {}
+                for n in market_news:
+                    cat = n["catalyst_analysis"]["primary_category"]
+                    if cat not in category_groups:
+                        category_groups[cat] = []
+                    category_groups[cat].append(n)
                 
-                with st.expander(f"{sentiment} ({confidence}%) - {news['title'][:100]}..."):
-                    st.write(f"**Source:** {news['source']}")
-                    st.write(f"**Summary:** {news['summary']}")
-                    if news["related"]:
-                        st.write(f"**Related Tickers:** {news['related']}")
-                    if news["url"]:
-                        st.markdown(f"[Read Article]({news['url']})")
+                st.markdown("### 📊 Catalysts by Category")
+                for category, news_items in category_groups.items():
+                    with st.expander(f"📂 {category.replace('_', ' ').title()} ({len(news_items)} items)"):
+                        for news in news_items[:5]:  # Show top 5 per category
+                            analysis = news["catalyst_analysis"]
+                            sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                            
+                            st.write(f"{sentiment_emoji} **{news['title']}** ({news['source']})")
+                            st.write(f"Impact: {analysis['catalyst_strength']}/100 | Sentiment: {analysis['sentiment'].title()}")
+                            if news.get('related'):
+                                st.write(f"Related: {news['related']}")
+                            st.write("---")
+                filtered_news = []  # Don't show main list for category view
+            else:
+                filtered_news = market_news
             
-            # Display market movers
-            st.markdown("### 📊 Significant Market Moves")
-            for mover in movers[:10]:
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    direction = "🚀" if mover["change_pct"] > 0 else "📉"
-                    st.metric(
-                        f"{direction} {mover['ticker']}", 
-                        f"${mover['price']:.2f}",
-                        f"{mover['change_pct']:+.2f}%"
-                    )
-                    st.caption(f"Source: {mover.get('data_source', 'Yahoo Finance')}")
-                with col2:
-                    if st.button(f"Add to WL", key=f"add_mover_{mover['ticker']}"):
-                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                        if mover['ticker'] not in current_list:
-                            current_list.append(mover['ticker'])
-                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                            st.success(f"Added {mover['ticker']}")
-                            st.rerun()
+            # Display main catalyst list
+            if filtered_news:
+                st.markdown("### 🔥 Market-Moving Catalysts")
+                st.caption(f"Found {len(filtered_news)} significant catalysts from all news sources")
+                
+                # Summary metrics
+                high_impact = len([n for n in filtered_news if n["catalyst_analysis"]["impact_level"] == "high"])
+                positive_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "positive"])
+                negative_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "negative"])
+                
+                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                metric_col1.metric("Total Catalysts", len(filtered_news))
+                metric_col2.metric("High Impact", high_impact)
+                metric_col3.metric("Positive", positive_news)
+                metric_col4.metric("Negative", negative_news)
+                
+                # Display news items
+                for i, news in enumerate(filtered_news[:15]):  # Show top 15
+                    analysis = news["catalyst_analysis"]
+                    
+                    # Impact and sentiment indicators
+                    if analysis["impact_level"] == "high":
+                        impact_emoji = "🚀"
+                    elif analysis["impact_level"] == "medium":
+                        impact_emoji = "📈"
+                    else:
+                        impact_emoji = "📊"
+                    
+                    sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                    
+                    with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news['title'][:100]}... | {news['source']}"):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.write(f"**Summary:** {news['summary'][:300]}{'...' if len(news['summary']) > 300 else ''}")
+                            st.write(f"**Source:** {news['source']} | **Provider:** {news.get('provider', 'Unknown')}")
+                            if news.get('related'):
+                                st.write(f"**Related Tickers:** {news['related']}")
+                            if news.get('url'):
+                                st.markdown(f"[📖 Read Full Article]({news['url']})")
+                        
+                        with col2:
+                            st.metric("Impact Score", f"{analysis['catalyst_strength']}/100")
+                            st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
+                            st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
+                            st.write(f"**Impact Level:** {analysis['impact_level'].title()}")
+                            
+                            # Category breakdown
+                            if analysis["category_scores"]:
+                                st.write("**Categories:**")
+                                for cat, score in list(analysis["category_scores"].items())[:3]:
+                                    st.write(f"• {cat}: {score}")
+            
+            # Display significant market movers
+            if movers:
+                st.markdown("### 📊 Significant Market Moves")
+                st.caption("Stocks with major price movements that may be catalyst-driven")
+                
+                for mover in movers[:10]:
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        direction = "🚀" if mover["change_pct"] > 0 else "📉"
+                        st.metric(
+                            f"{direction} {mover['ticker']}", 
+                            f"${mover['price']:.2f}",
+                            f"{mover['change_pct']:+.2f}%"
+                        )
+                    with col2:
+                        st.write(f"Volume: {mover['volume']:,}")
+                        st.caption(f"Source: {mover.get('data_source', 'Yahoo Finance')}")
+                    with col3:
+                        if st.button(f"📰 News", key=f"news_{mover['ticker']}"):
+                            # Quick news lookup for this ticker
+                            ticker_news = get_comprehensive_news(mover['ticker'])
+                            if ticker_news:
+                                st.write(f"**Recent news for {mover['ticker']}:**")
+                                for news in ticker_news[:3]:
+                                    st.write(f"• {news['title'][:80]}... ({news['source']})")
+                            else:
+                                st.write(f"No recent news found for {mover['ticker']}")
+                        
+                        if st.button(f"Add", key=f"add_mover_{mover['ticker']}"):
+                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                            if mover['ticker'] not in current_list:
+                                current_list.append(mover['ticker'])
+                                st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                st.success(f"Added {mover['ticker']}")
+                                st.rerun()
+    
+    # News source breakdown
+    with st.expander("📊 News Sources & Coverage"):
+        st.markdown("""
+        **Enhanced News Integration:**
+        - **Finnhub:** Company-specific news, earnings, analyst updates
+        - **Polygon:** Real-time market news, regulatory filings, insider trading
+        - **Yahoo Finance:** Broad market coverage, social sentiment, trending stories
+        
+        **Catalyst Analysis Features:**
+        - **Impact Scoring:** 0-100 scale based on keywords and sentiment
+        - **Category Detection:** Earnings, M&A, partnerships, regulatory, etc.
+        - **Sentiment Analysis:** Positive, negative, neutral market impact
+        - **Correlation Tracking:** Links news to price movements
+        
+        **Trading Applications:**
+        - **Pre-market Scanning:** Identify overnight catalysts
+        - **Intraday Alerts:** Real-time catalyst detection
+        - **Sector Rotation:** Track thematic news trends
+        - **Risk Management:** Monitor negative sentiment buildup
+        """)
+        
+        # Quick source test
+        if st.button("🧪 Test All News Sources"):
+            with st.spinner("Testing news source connections..."):
+                test_results = {}
+                
+                # Test Finnhub
+                try:
+                    finnhub_test = get_finnhub_news()
+                    test_results["Finnhub"] = f"✅ {len(finnhub_test)} articles"
+                except Exception as e:
+                    test_results["Finnhub"] = f"❌ Error: {str(e)[:50]}"
+                
+                # Test Polygon
+                try:
+                    polygon_test = get_polygon_news()
+                    test_results["Polygon"] = f"✅ {len(polygon_test)} articles"
+                except Exception as e:
+                    test_results["Polygon"] = f"❌ Error: {str(e)[:50]}"
+                
+                # Test Yahoo Finance
+                try:
+                    yf_test = get_yfinance_news()
+                    test_results["Yahoo Finance"] = f"✅ {len(yf_test)} articles"
+                except Exception as e:
+                    test_results["Yahoo Finance"] = f"❌ Error: {str(e)[:50]}"
+                
+                st.write("**Source Test Results:**")
+                for source, result in test_results.items():
+                    st.write(f"• {source}: {result}")
 
 # TAB 4: Market Analysis
 with tabs[3]:
