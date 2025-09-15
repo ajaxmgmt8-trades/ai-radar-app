@@ -2066,27 +2066,26 @@ Provide comprehensive market analysis covering:
 Keep analysis under 300 words but be specific and actionable.
 """
     
-    # Use selected AI model for analysis
-    if st.session_state.ai_model == "Multi-AI":
-        analyses = {}
-        if openai_client:
-            analyses["OpenAI"] = multi_ai.analyze_with_openai(market_context)
-        if gemini_model:
-            analyses["Gemini"] = multi_ai.analyze_with_gemini(market_context)
-        if grok_enhanced:
-            analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
-        
-        if analyses:
-            result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
-            for model, analysis in analyses.items():
-                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+        if st.session_state.ai_model == "Multi-AI":
+            analyses = {}
+            if openai_client:
+                analyses["OpenAI"] = multi_ai.analyze_with_openai(market_context)
+            if gemini_model:
+                analyses["Gemini"] = multi_ai.analyze_with_gemini(market_context)
+            if grok_enhanced:
+                analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
             
-            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
-            result += f"### 🎯 Market Consensus:\n{synthesis}"
-            return result
-    else:
-        # Use individual AI model
-        return multi_ai.analyze_with_openai(market_context) if openai_client else "AI analysis not available"
+            if analyses:
+                result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
+                for model, analysis in analyses.items():
+                    result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+                
+                synthesis = multi_ai.synthesize_consensus(analyses, "Market")
+                result += f"### 🎯 Market Consensus:\n{synthesis}"
+                return result
+        else:
+            # Use individual AI model
+            return multi_ai.analyze_with_openai(market_context) if openai_client else "AI analysis not available"
 
 def format_market_technical(market_tech: Dict) -> str:
     """Format market technical data for prompt"""
