@@ -1979,7 +1979,7 @@ st.markdown(f"<div style='text-align: center; color: #888; font-size: 12px;'>Las
 
 # TAB 1: Live Quotes
 with tabs[0]:
-    st.subheader("📊 Real-Time Watchlist")
+    st.subheader("📊 Real-Time Watchlist & Market Movers")
     
     # Session status (using selected TZ)
     current_tz_hour = current_tz.hour
@@ -1992,14 +1992,14 @@ with tabs[0]:
     
     st.markdown(f"**Trading Session ({tz_label}):** {session_status}")
     
-    # Search bar
+    # Search bar for any ticker
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_ticker = st.text_input("🔍 Search Individual Stock", placeholder="Enter ticker", key="search_quotes").upper().strip()
+        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)", key="search_quotes").upper().strip()
     with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
-    # Search result
+    # Search result for any ticker
     if search_quotes and search_ticker:
         with st.spinner(f"Getting quote for {search_ticker}..."):
             quote = get_live_quote(search_ticker, tz_label)
@@ -2069,11 +2069,10 @@ with tabs[0]:
     
     # Watchlist display
     tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-    
+    st.markdown("### Your Watchlist")
     if not tickers:
-        st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab.")
+        st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab or check Market Movers below.")
     else:
-        st.markdown("### Your Watchlist")
         for ticker in tickers:
             quote = get_live_quote(ticker, tz_label)
             if quote["error"]:
@@ -2094,7 +2093,6 @@ with tabs[0]:
                 if abs(quote['change_percent']) >= 2.0:
                     if col4.button(f"🎯 AI Analysis", key=f"ai_{ticker}"):
                         with st.spinner(f"Analyzing {ticker}..."):
-                            # Get options data for analysis
                             options_data = get_options_data(ticker)
                             analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
                             st.success(f"🤖 {ticker} Analysis")
@@ -2106,9 +2104,7 @@ with tabs[0]:
                 sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
                 sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
                 
-                # Expandable detailed view
                 with st.expander(f"🔎 Expand {ticker}"):
-                    # Catalyst headlines
                     news = get_finnhub_news(ticker)
                     if news:
                         st.write("### 📰 Catalysts (last 24h)")
@@ -2117,11 +2113,9 @@ with tabs[0]:
                     else:
                         st.info("No recent news.")
                     
-                    # AI Playbook with options data
                     st.markdown("### 🎯 AI Playbook")
                     catalyst_title = news[0].get('headline', '') if news else ""
                     options_data = get_options_data(ticker)
-                    
                     if options_data:
                         st.write("**Options Metrics:**")
                         opt_col1, opt_col2, opt_col3 = st.columns(3)
@@ -2129,11 +2123,45 @@ with tabs[0]:
                         opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                         opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
                         st.caption("Note: Options data is real from yfinance")
-                    
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
                 st.divider()
 
+    # Top Market Movers
+    st.markdown("### 🌟 Top Market Movers")
+    st.caption("Stocks with significant intraday movement from CORE_TICKERS")
+    movers = []
+    for ticker in CORE_TICKERS[:20]:  # Limit to top 20 for performance
+        quote = get_live_quote(ticker, tz_label)
+        if not quote["error"]:
+            movers.append({
+                "ticker": ticker,
+                "change_pct": quote["change_percent"],
+                "price": quote["last"],
+                "volume": quote["volume"],
+                "data_source": quote.get("data_source", "Yahoo Finance")
+            })
+    movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+    top_movers = movers[:10]  # Show top 10 movers
+
+    for mover in top_movers:
+        with st.container():
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+            direction = "🚀" if mover["change_pct"] > 0 else "📉"
+            col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
+            col2.write("**Bid/Ask**")
+            col2.write(f"N/A")  # Movers don't include bid/ask in this view
+            col3.write("**Volume**")
+            col3.write(f"{mover['volume']:,}")
+            col3.caption(f"Source: {mover['data_source']}")
+            if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"add_mover_{mover['ticker']}"):
+                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                if mover['ticker'] not in current_list:
+                    current_list.append(mover['ticker'])
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                    st.success(f"Added {mover['ticker']} to watchlist!")
+                    st.rerun()
+            st.divider()
 # TAB 2: Watchlist Manager
 with tabs[1]:
     st.subheader("📋 Watchlist Manager")
