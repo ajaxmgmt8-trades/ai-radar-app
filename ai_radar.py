@@ -89,6 +89,7 @@ except Exception as e:
     openai_client = None
     gemini_model = None
     grok_client = None
+
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
     
@@ -117,7 +118,6 @@ class GrokClient:
         except Exception as e:
             return f"Grok Analysis Error: {str(e)}"
     
-    # ADD THESE TWO NEW METHODS HERE (with proper indentation):
     def get_twitter_market_sentiment(self, ticker: str = None) -> str:
         """Get Twitter sentiment analysis"""
         if ticker:
@@ -294,9 +294,707 @@ class TwelveDataClient:
 alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 
+# Enhanced Technical Analysis using multiple data sources
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_comprehensive_technical_analysis(ticker: str) -> Dict:
+    """Enhanced technical analysis with multiple indicators and timeframes"""
+    try:
+        # Try Twelve Data first for more comprehensive data
+        if twelvedata_client:
+            # Get multiple timeframes from Twelve Data
+            timeframes = ["1day", "4h", "1h"]
+            analysis_data = {}
+            
+            for tf in timeframes:
+                try:
+                    params = {
+                        "symbol": ticker,
+                        "interval": tf,
+                        "outputsize": "50",
+                        "apikey": TWELVEDATA_KEY
+                    }
+                    
+                    response = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if "values" in data and len(data["values"]) > 0:
+                            analysis_data[tf] = data["values"]
+                except Exception:
+                    continue
+            
+            if analysis_data:
+                # Calculate comprehensive indicators
+                indicators = calculate_advanced_indicators(analysis_data, ticker)
+                return indicators
+        
+        # Fallback to yfinance with enhanced analysis
+        stock = yf.Ticker(ticker)
+        hist_1d = stock.history(period="1d", interval="5m")
+        hist_5d = stock.history(period="5d", interval="15m") 
+        hist_1mo = stock.history(period="1mo")
+        hist_3mo = stock.history(period="3mo")
+        
+        if hist_3mo.empty:
+            return {"error": "No historical data available"}
+        
+        # Calculate multiple timeframe analysis
+        indicators = {
+            "short_term": calculate_indicators(hist_1d, "1D"),
+            "medium_term": calculate_indicators(hist_5d, "5D"), 
+            "long_term": calculate_indicators(hist_3mo, "3M"),
+            "trend_analysis": analyze_trend_strength(hist_3mo),
+            "volatility": calculate_volatility_metrics(hist_3mo),
+            "momentum": calculate_momentum_indicators(hist_3mo),
+            "support_resistance": find_support_resistance_levels(hist_3mo),
+            "signal_strength": calculate_signal_strength(hist_3mo)
+        }
+        
+        return indicators
+        
+    except Exception as e:
+        return {"error": f"Technical analysis error: {str(e)}"}
+
+def calculate_advanced_indicators(data_dict: Dict, ticker: str) -> Dict:
+    """Calculate advanced technical indicators from Twelve Data"""
+    try:
+        # Convert Twelve Data format to DataFrame for analysis
+        daily_data = data_dict.get("1day", [])
+        if not daily_data:
+            return {"error": "No daily data available"}
+        
+        df = pd.DataFrame(daily_data)
+        df['datetime'] = pd.to_datetime(df['datetime'])
+        df = df.set_index('datetime')
+        
+        # Convert string values to float
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+        
+        df = df.sort_index()
+        
+        # Calculate comprehensive indicators
+        indicators = {}
+        
+        # Trend Indicators
+        indicators['sma_20'] = df['close'].rolling(20).mean().iloc[-1]
+        indicators['sma_50'] = df['close'].rolling(50).mean().iloc[-1] if len(df) >= 50 else None
+        indicators['ema_12'] = df['close'].ewm(span=12).mean().iloc[-1]
+        indicators['ema_26'] = df['close'].ewm(span=26).mean().iloc[-1]
+        
+        # MACD
+        ema12 = df['close'].ewm(span=12).mean()
+        ema26 = df['close'].ewm(span=26).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9).mean()
+        indicators['macd'] = macd.iloc[-1]
+        indicators['macd_signal'] = signal.iloc[-1]
+        indicators['macd_histogram'] = (macd - signal).iloc[-1]
+        
+        # RSI
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        indicators['rsi'] = (100 - (100 / (1 + rs))).iloc[-1]
+        
+        # Bollinger Bands
+        sma20 = df['close'].rolling(20).mean()
+        std20 = df['close'].rolling(20).std()
+        indicators['bb_upper'] = (sma20 + (std20 * 2)).iloc[-1]
+        indicators['bb_lower'] = (sma20 - (std20 * 2)).iloc[-1]
+        indicators['bb_position'] = (df['close'].iloc[-1] - indicators['bb_lower']) / (indicators['bb_upper'] - indicators['bb_lower'])
+        
+        # Volume indicators
+        indicators['volume_sma'] = df['volume'].rolling(20).mean().iloc[-1]
+        indicators['volume_ratio'] = df['volume'].iloc[-1] / indicators['volume_sma']
+        
+        # ATR (Average True Range)
+        high_low = df['high'] - df['low']
+        high_close_prev = abs(df['high'] - df['close'].shift())
+        low_close_prev = abs(df['low'] - df['close'].shift())
+        true_range = pd.concat([high_low, high_close_prev, low_close_prev], axis=1).max(axis=1)
+        indicators['atr'] = true_range.rolling(14).mean().iloc[-1]
+        
+        # Price levels
+        indicators['current_price'] = df['close'].iloc[-1]
+        indicators['price_change_pct'] = ((df['close'].iloc[-1] - df['close'].iloc[-2]) / df['close'].iloc[-2]) * 100
+        
+        # Support/Resistance
+        recent_highs = df['high'].rolling(10).max()
+        recent_lows = df['low'].rolling(10).min()
+        indicators['resistance'] = recent_highs.iloc[-5:].max()
+        indicators['support'] = recent_lows.iloc[-5:].min()
+        
+        # Trend analysis
+        if indicators['sma_20'] and indicators['sma_50']:
+            if indicators['current_price'] > indicators['sma_20'] > indicators['sma_50']:
+                indicators['trend_analysis'] = "Strong Bullish"
+            elif indicators['current_price'] > indicators['sma_20']:
+                indicators['trend_analysis'] = "Bullish"
+            elif indicators['current_price'] < indicators['sma_20'] < indicators['sma_50']:
+                indicators['trend_analysis'] = "Strong Bearish"
+            else:
+                indicators['trend_analysis'] = "Bearish"
+        else:
+            indicators['trend_analysis'] = "Neutral"
+        
+        return indicators
+        
+    except Exception as e:
+        return {"error": f"Advanced indicators calculation error: {str(e)}"}
+
+def calculate_indicators(df: pd.DataFrame, timeframe: str) -> Dict:
+    """Calculate indicators for a specific timeframe"""
+    if df.empty:
+        return {"error": f"No data for {timeframe}"}
+    
+    try:
+        # RSI
+        delta = df['Close'].diff(1)
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+        avg_gain = gain.rolling(window=14, min_periods=1).mean()
+        avg_loss = loss.rolling(window=14, min_periods=1).mean()
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs)).iloc[-1]
+        
+        # Moving Averages
+        sma_20 = df['Close'].rolling(20).mean().iloc[-1] if len(df) >= 20 else df['Close'].mean()
+        ema_12 = df['Close'].ewm(span=12).mean().iloc[-1]
+        
+        # MACD
+        ema12 = df['Close'].ewm(span=12).mean()
+        ema26 = df['Close'].ewm(span=26).mean()
+        macd = ema12 - ema26
+        signal = macd.ewm(span=9).mean()
+        macd_val = macd.iloc[-1] - signal.iloc[-1] if len(macd) > 0 else 0
+        
+        # Volume analysis
+        avg_volume = df['Volume'].rolling(20).mean().iloc[-1] if len(df) >= 20 else df['Volume'].mean()
+        volume_ratio = df['Volume'].iloc[-1] / avg_volume if avg_volume > 0 else 1
+        
+        return {
+            "timeframe": timeframe,
+            "rsi": rsi,
+            "sma_20": sma_20,
+            "ema_12": ema_12,
+            "macd": macd_val,
+            "volume_ratio": volume_ratio,
+            "current_price": df['Close'].iloc[-1]
+        }
+    except Exception as e:
+        return {"error": f"Indicator calculation error for {timeframe}: {str(e)}"}
+
+def analyze_trend_strength(df: pd.DataFrame) -> str:
+    """Analyze trend strength"""
+    if df.empty or len(df) < 50:
+        return "Insufficient data"
+    
+    try:
+        sma_20 = df['Close'].rolling(20).mean().iloc[-1]
+        sma_50 = df['Close'].rolling(50).mean().iloc[-1]
+        current_price = df['Close'].iloc[-1]
+        
+        if current_price > sma_20 > sma_50:
+            return "Strong Bullish"
+        elif current_price > sma_20:
+            return "Bullish"
+        elif current_price < sma_20 < sma_50:
+            return "Strong Bearish"
+        elif current_price < sma_20:
+            return "Bearish"
+        else:
+            return "Sideways"
+    except:
+        return "Unknown"
+
+def calculate_volatility_metrics(df: pd.DataFrame) -> Dict:
+    """Calculate volatility metrics"""
+    if df.empty:
+        return {"error": "No data"}
+    
+    try:
+        returns = df['Close'].pct_change().dropna()
+        volatility = returns.std() * np.sqrt(252)  # Annualized
+        
+        return {
+            "daily_volatility": returns.std(),
+            "annualized_volatility": volatility,
+            "volatility_level": "High" if volatility > 0.3 else "Medium" if volatility > 0.15 else "Low"
+        }
+    except:
+        return {"error": "Volatility calculation failed"}
+
+def calculate_momentum_indicators(df: pd.DataFrame) -> Dict:
+    """Calculate momentum indicators"""
+    if df.empty or len(df) < 14:
+        return {"error": "Insufficient data"}
+    
+    try:
+        # Rate of Change
+        roc = ((df['Close'].iloc[-1] - df['Close'].iloc[-14]) / df['Close'].iloc[-14]) * 100
+        
+        # Momentum
+        momentum = df['Close'].iloc[-1] - df['Close'].iloc[-10] if len(df) >= 10 else 0
+        
+        return {
+            "roc_14": roc,
+            "momentum_10": momentum,
+            "momentum_signal": "Strong" if abs(roc) > 5 else "Weak"
+        }
+    except:
+        return {"error": "Momentum calculation failed"}
+
+def find_support_resistance_levels(df: pd.DataFrame) -> Dict:
+    """Find support and resistance levels"""
+    if df.empty or len(df) < 20:
+        return {"error": "Insufficient data"}
+    
+    try:
+        # Recent highs and lows
+        recent_high = df['High'].rolling(20).max().iloc[-1]
+        recent_low = df['Low'].rolling(20).min().iloc[-1]
+        
+        # Pivot points (simplified)
+        high = df['High'].iloc[-1]
+        low = df['Low'].iloc[-1]
+        close = df['Close'].iloc[-1]
+        
+        pivot = (high + low + close) / 3
+        r1 = 2 * pivot - low
+        s1 = 2 * pivot - high
+        
+        return {
+            "support": min(recent_low, s1),
+            "resistance": max(recent_high, r1),
+            "pivot": pivot
+        }
+    except:
+        return {"error": "Support/Resistance calculation failed"}
+
+def calculate_signal_strength(df: pd.DataFrame) -> str:
+    """Calculate overall signal strength"""
+    if df.empty:
+        return "No Signal"
+    
+    try:
+        # Simple signal strength based on multiple factors
+        signals = 0
+        
+        # Price vs SMA
+        if len(df) >= 20:
+            sma_20 = df['Close'].rolling(20).mean().iloc[-1]
+            if df['Close'].iloc[-1] > sma_20:
+                signals += 1
+            else:
+                signals -= 1
+        
+        # Volume
+        if len(df) >= 20:
+            avg_volume = df['Volume'].rolling(20).mean().iloc[-1]
+            if df['Volume'].iloc[-1] > avg_volume * 1.5:
+                signals += 1
+        
+        # RSI
+        if len(df) >= 14:
+            delta = df['Close'].diff(1)
+            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = (100 - (100 / (1 + rs))).iloc[-1]
+            
+            if 30 <= rsi <= 70:  # Not overbought/oversold
+                signals += 1
+        
+        if signals >= 2:
+            return "Strong"
+        elif signals >= 1:
+            return "Moderate"
+        else:
+            return "Weak"
+    except:
+        return "Unknown"
+
+# Enhanced Fundamental Analysis
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_fundamental_analysis(ticker: str) -> Dict:
+    """Comprehensive fundamental analysis using yfinance and external APIs"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Financial metrics
+        fundamentals = {
+            "market_cap": info.get('marketCap', 0),
+            "pe_ratio": info.get('trailingPE', None),
+            "forward_pe": info.get('forwardPE', None),
+            "peg_ratio": info.get('pegRatio', None),
+            "price_to_book": info.get('priceToBook', None),
+            "price_to_sales": info.get('priceToSalesTrailing12Months', None),
+            "debt_to_equity": info.get('debtToEquity', None),
+            "roe": info.get('returnOnEquity', None),
+            "roa": info.get('returnOnAssets', None),
+            "profit_margin": info.get('profitMargins', None),
+            "operating_margin": info.get('operatingMargins', None),
+            "current_ratio": info.get('currentRatio', None),
+            "quick_ratio": info.get('quickRatio', None),
+            "revenue_growth": info.get('revenueGrowth', None),
+            "earnings_growth": info.get('earningsGrowth', None),
+            "beta": info.get('beta', None),
+            "dividend_yield": info.get('dividendYield', None),
+            "payout_ratio": info.get('payoutRatio', None),
+            "free_cashflow": info.get('freeCashflow', None),
+            "operating_cashflow": info.get('operatingCashflow', None),
+            "total_cash": info.get('totalCash', None),
+            "total_debt": info.get('totalDebt', None),
+            "book_value": info.get('bookValue', None),
+            "shares_outstanding": info.get('sharesOutstanding', None),
+            "float_shares": info.get('floatShares', None),
+            "insider_ownership": info.get('heldPercentInsiders', None),
+            "institutional_ownership": info.get('heldPercentInstitutions', None),
+            "short_ratio": info.get('shortRatio', None),
+            "short_percent": info.get('shortPercentOfFloat', None),
+            "analyst_rating": info.get('recommendationMean', None),
+            "target_price": info.get('targetMeanPrice', None),
+            "52_week_high": info.get('fiftyTwoWeekHigh', None),
+            "52_week_low": info.get('fiftyTwoWeekLow', None),
+            "sector": info.get('sector', None),
+            "industry": info.get('industry', None)
+        }
+        
+        # Calculate derived metrics
+        current_price = info.get('currentPrice', 0)
+        if fundamentals['52_week_high'] and fundamentals['52_week_low']:
+            fundamentals['price_position'] = ((current_price - fundamentals['52_week_low']) / 
+                                           (fundamentals['52_week_high'] - fundamentals['52_week_low'])) * 100
+        
+        # Financial health score
+        fundamentals['financial_health'] = calculate_financial_health_score(fundamentals)
+        
+        # Valuation assessment
+        fundamentals['valuation_assessment'] = assess_valuation(fundamentals)
+        
+        return fundamentals
+        
+    except Exception as e:
+        return {"error": f"Fundamental analysis error: {str(e)}"}
+
+def calculate_financial_health_score(fundamentals: Dict) -> str:
+    """Calculate overall financial health score"""
+    score = 0
+    max_score = 0
+    
+    # Profitability metrics
+    if fundamentals.get('roe') is not None:
+        max_score += 20
+        if fundamentals['roe'] > 0.15: score += 20
+        elif fundamentals['roe'] > 0.10: score += 15
+        elif fundamentals['roe'] > 0.05: score += 10
+    
+    # Liquidity metrics
+    if fundamentals.get('current_ratio') is not None:
+        max_score += 15
+        if fundamentals['current_ratio'] > 2: score += 15
+        elif fundamentals['current_ratio'] > 1.5: score += 12
+        elif fundamentals['current_ratio'] > 1: score += 8
+    
+    # Debt metrics
+    if fundamentals.get('debt_to_equity') is not None:
+        max_score += 15
+        if fundamentals['debt_to_equity'] < 0.3: score += 15
+        elif fundamentals['debt_to_equity'] < 0.6: score += 10
+        elif fundamentals['debt_to_equity'] < 1: score += 5
+    
+    # Growth metrics
+    if fundamentals.get('revenue_growth') is not None:
+        max_score += 15
+        if fundamentals['revenue_growth'] > 0.2: score += 15
+        elif fundamentals['revenue_growth'] > 0.1: score += 12
+        elif fundamentals['revenue_growth'] > 0.05: score += 8
+    
+    # Valuation metrics
+    if fundamentals.get('pe_ratio') is not None:
+        max_score += 10
+        if 10 <= fundamentals['pe_ratio'] <= 25: score += 10
+        elif 5 <= fundamentals['pe_ratio'] <= 35: score += 7
+    
+    if max_score > 0:
+        health_score = (score / max_score) * 100
+        if health_score >= 80: return "Excellent"
+        elif health_score >= 60: return "Good"
+        elif health_score >= 40: return "Fair"
+        else: return "Poor"
+    
+    return "Insufficient Data"
+
+def assess_valuation(fundamentals: Dict) -> str:
+    """Assess if stock is undervalued, fairly valued, or overvalued"""
+    valuation_signals = []
+    
+    # P/E Analysis
+    pe = fundamentals.get('pe_ratio')
+    if pe is not None:
+        if pe < 15: valuation_signals.append("Undervalued")
+        elif pe > 25: valuation_signals.append("Overvalued")
+        else: valuation_signals.append("Fair")
+    
+    # P/B Analysis
+    pb = fundamentals.get('price_to_book')
+    if pb is not None:
+        if pb < 1.5: valuation_signals.append("Undervalued")
+        elif pb > 3: valuation_signals.append("Overvalued")
+        else: valuation_signals.append("Fair")
+    
+    # PEG Analysis
+    peg = fundamentals.get('peg_ratio')
+    if peg is not None:
+        if peg < 1: valuation_signals.append("Undervalued")
+        elif peg > 1.5: valuation_signals.append("Overvalued")
+        else: valuation_signals.append("Fair")
+    
+    if not valuation_signals:
+        return "Insufficient Data"
+    
+    # Majority vote
+    undervalued = valuation_signals.count("Undervalued")
+    overvalued = valuation_signals.count("Overvalued")
+    fair = valuation_signals.count("Fair")
+    
+    if undervalued > overvalued and undervalued > fair:
+        return "Undervalued"
+    elif overvalued > undervalued and overvalued > fair:
+        return "Overvalued"
+    else:
+        return "Fairly Valued"
+
+# Enhanced Options Flow Analysis
+def get_advanced_options_analysis(ticker: str) -> Dict:
+    """Comprehensive options analysis with order flow insights"""
+    try:
+        option_chain = get_option_chain(ticker, st.session_state.selected_tz)
+        if option_chain.get("error"):
+            return {"error": option_chain["error"]}
+        
+        calls = option_chain["calls"]
+        puts = option_chain["puts"]
+        current_price = option_chain["current_price"]
+        
+        # Advanced analysis
+        analysis = {
+            "basic_metrics": calculate_basic_options_metrics(calls, puts),
+            "flow_analysis": analyze_options_flow(calls, puts, current_price),
+            "unusual_activity": detect_unusual_activity(calls, puts),
+            "gamma_levels": calculate_gamma_levels(calls, puts, current_price),
+            "sentiment_indicators": calculate_options_sentiment(calls, puts),
+            "expiration": option_chain["expiration"],
+            "current_price": current_price
+        }
+        
+        return analysis
+        
+    except Exception as e:
+        return {"error": f"Advanced options analysis error: {str(e)}"}
+
+def calculate_basic_options_metrics(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Calculate basic options metrics"""
+    total_call_volume = calls['volume'].sum()
+    total_put_volume = puts['volume'].sum()
+    total_call_oi = calls['openInterest'].sum()
+    total_put_oi = puts['openInterest'].sum()
+    
+    return {
+        "total_call_volume": total_call_volume,
+        "total_put_volume": total_put_volume,
+        "total_call_oi": total_call_oi,
+        "total_put_oi": total_put_oi,
+        "put_call_volume_ratio": total_put_volume / total_call_volume if total_call_volume > 0 else 0,
+        "put_call_oi_ratio": total_put_oi / total_call_oi if total_call_oi > 0 else 0,
+        "avg_call_iv": calls['impliedVolatility'].mean(),
+        "avg_put_iv": puts['impliedVolatility'].mean(),
+        "iv_skew": puts['impliedVolatility'].mean() - calls['impliedVolatility'].mean()
+    }
+
+def analyze_options_flow(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
+    """Analyze options order flow"""
+    # Volume/OI ratios indicate new positions
+    calls['vol_oi_ratio'] = calls['volume'] / calls['openInterest'].replace(0, 1)
+    puts['vol_oi_ratio'] = puts['volume'] / puts['openInterest'].replace(0, 1)
+    
+    # ITM vs OTM analysis
+    itm_calls = calls[calls['strike'] < current_price]
+    otm_calls = calls[calls['strike'] >= current_price]
+    itm_puts = puts[puts['strike'] > current_price]
+    otm_puts = puts[puts['strike'] <= current_price]
+    
+    return {
+        "itm_call_volume": itm_calls['volume'].sum(),
+        "otm_call_volume": otm_calls['volume'].sum(),
+        "itm_put_volume": itm_puts['volume'].sum(),
+        "otm_put_volume": otm_puts['volume'].sum(),
+        "net_call_bias": otm_calls['volume'].sum() - itm_calls['volume'].sum(),
+        "net_put_bias": itm_puts['volume'].sum() - otm_puts['volume'].sum(),
+        "flow_sentiment": "Bullish" if otm_calls['volume'].sum() > itm_puts['volume'].sum() else "Bearish"
+    }
+
+def detect_unusual_activity(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Detect unusual options activity"""
+    # High volume relative to OI
+    calls_unusual = calls[calls['volume'] > calls['openInterest'] * 2]
+    puts_unusual = puts[puts['volume'] > puts['openInterest'] * 2]
+    
+    # High volume absolute
+    high_vol_threshold = max(calls['volume'].quantile(0.8), puts['volume'].quantile(0.8))
+    calls_high_vol = calls[calls['volume'] >= high_vol_threshold]
+    puts_high_vol = puts[puts['volume'] >= high_vol_threshold]
+    
+    return {
+        "unusual_calls": calls_unusual[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
+        "unusual_puts": puts_unusual[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
+        "high_volume_calls": calls_high_vol[['strike', 'volume', 'lastPrice']].to_dict('records'),
+        "high_volume_puts": puts_high_vol[['strike', 'volume', 'lastPrice']].to_dict('records'),
+        "total_unusual_contracts": len(calls_unusual) + len(puts_unusual)
+    }
+
+def calculate_gamma_levels(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
+    """Calculate gamma exposure levels (simplified)"""
+    # Approximate gamma calculation
+    calls['approx_gamma'] = calls['openInterest'] * 0.01  # Simplified
+    puts['approx_gamma'] = puts['openInterest'] * -0.01  # Simplified
+    
+    # Find strikes with highest gamma exposure
+    all_strikes = pd.concat([
+        calls[['strike', 'approx_gamma', 'openInterest']].assign(type='call'),
+        puts[['strike', 'approx_gamma', 'openInterest']].assign(type='put')
+    ])
+    
+    gamma_by_strike = all_strikes.groupby('strike')['approx_gamma'].sum().sort_values(ascending=False)
+    
+    return {
+        "max_gamma_strike": gamma_by_strike.index[0] if len(gamma_by_strike) > 0 else current_price,
+        "max_gamma_level": gamma_by_strike.iloc[0] if len(gamma_by_strike) > 0 else 0,
+        "gamma_strikes": gamma_by_strike.head(5).to_dict()
+    }
+
+def calculate_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Calculate options-based sentiment indicators"""
+    # Premium analysis
+    call_premium = (calls['volume'] * calls['lastPrice']).sum()
+    put_premium = (puts['volume'] * puts['lastPrice']).sum()
+    
+    # Aggressive vs defensive positioning
+    aggressive_calls = calls[calls['volume'] > calls['volume'].quantile(0.7)]['volume'].sum()
+    defensive_puts = puts[puts['volume'] > puts['volume'].quantile(0.7)]['volume'].sum()
+    
+    sentiment_score = (call_premium - put_premium) / (call_premium + put_premium) if (call_premium + put_premium) > 0 else 0
+    
+    return {
+        "call_premium": call_premium,
+        "put_premium": put_premium,
+        "premium_ratio": call_premium / put_premium if put_premium > 0 else float('inf'),
+        "sentiment_score": sentiment_score,
+        "aggressive_positioning": aggressive_calls,
+        "defensive_positioning": defensive_puts,
+        "overall_sentiment": "Bullish" if sentiment_score > 0.1 else "Bearish" if sentiment_score < -0.1 else "Neutral"
+    }
+
+# Enhanced AI Analysis Prompt Construction
+def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical: Dict, fundamental: Dict, options: Dict, news_context: str = "") -> str:
+    """Construct comprehensive analysis prompt with all data"""
+    
+    # Technical summary
+    tech_summary = "Technical Analysis:\n"
+    if technical.get("error"):
+        tech_summary += f"Technical Error: {technical['error']}\n"
+    else:
+        if "short_term" in technical:
+            tech_summary += f"- RSI: {technical['short_term'].get('rsi', 'N/A'):.1f}\n"
+            tech_summary += f"- SMA20: ${technical['short_term'].get('sma_20', 0):.2f}\n"
+            tech_summary += f"- MACD: {technical['short_term'].get('macd', 0):.3f}\n"
+        if "trend_analysis" in technical:
+            tech_summary += f"- Trend: {technical.get('trend_analysis', 'Unknown')}\n"
+        if "support_resistance" in technical:
+            tech_summary += f"- Support: ${technical.get('support_resistance', {}).get('support', 0):.2f}\n"
+            tech_summary += f"- Resistance: ${technical.get('support_resistance', {}).get('resistance', 0):.2f}\n"
+        # Enhanced technical from Twelve Data
+        if "rsi" in technical:
+            tech_summary += f"- RSI: {technical.get('rsi', 'N/A'):.1f}\n"
+            tech_summary += f"- Trend: {technical.get('trend_analysis', 'Unknown')}\n"
+            tech_summary += f"- Support: ${technical.get('support', 0):.2f}\n"
+            tech_summary += f"- Resistance: ${technical.get('resistance', 0):.2f}\n"
+    
+    # Fundamental summary
+    fund_summary = "Fundamental Analysis:\n"
+    if fundamental.get("error"):
+        fund_summary += f"Fundamental Error: {fundamental['error']}\n"
+    else:
+        fund_summary += f"- P/E Ratio: {fundamental.get('pe_ratio', 'N/A')}\n"
+        fund_summary += f"- Market Cap: ${fundamental.get('market_cap', 0):,.0f}\n"
+        fund_summary += f"- Financial Health: {fundamental.get('financial_health', 'Unknown')}\n"
+        fund_summary += f"- Valuation: {fundamental.get('valuation_assessment', 'Unknown')}\n"
+        fund_summary += f"- Sector: {fundamental.get('sector', 'Unknown')}\n"
+        fund_summary += f"- Revenue Growth: {fundamental.get('revenue_growth', 0):.1%}\n"
+        fund_summary += f"- Debt/Equity: {fundamental.get('debt_to_equity', 'N/A')}\n"
+    
+    # Options summary
+    options_summary = "Options Analysis:\n"
+    if options.get("error"):
+        options_summary += f"Options Error: {options['error']}\n"
+    else:
+        basic = options.get('basic_metrics', {})
+        flow = options.get('flow_analysis', {})
+        unusual = options.get('unusual_activity', {})
+        options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
+        options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
+        options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
+        options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
+        options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
+        options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
+    
+    # Session data
+    session_summary = f"""Session Performance:
+- Current: ${quote['last']:.2f} ({quote['change_percent']:+.2f}%)
+- Premarket: {quote['premarket_change']:+.2f}%
+- Intraday: {quote['intraday_change']:+.2f}%
+- After Hours: {quote['postmarket_change']:+.2f}%
+- Volume: {quote['volume']:,}
+- Data Source: {quote.get('data_source', 'Yahoo Finance')}
+"""
+    
+    news_section = f"\nNews Context:\n{news_context}" if news_context else ""
+    
+    prompt = f"""
+Comprehensive Trading Analysis for {ticker}:
+
+{session_summary}
+
+{tech_summary}
+
+{fund_summary}
+
+{options_summary}
+{news_section}
+
+Based on this comprehensive analysis, provide:
+
+1. **Overall Assessment** (Bullish/Bearish/Neutral) with confidence rating (1-100)
+2. **Trading Strategy** (Scalp/Day Trade/Swing/Position/Avoid) with specific timeframe
+3. **Entry Strategy**: Exact price levels and conditions
+4. **Profit Targets**: 3 realistic target levels with rationale
+5. **Risk Management**: Stop loss levels and position sizing guidance
+6. **Technical Outlook**: Key levels to watch and breakout scenarios
+7. **Fundamental Justification**: How fundamentals support the technical setup
+8. **Options Strategy**: Specific options plays if applicable
+9. **Catalyst Watch**: Events or levels that could trigger major moves
+10. **Risk Factors**: What could invalidate this analysis
+
+Keep analysis under 400 words but be specific and actionable.
+"""
+    
+    return prompt
+
 # Multi-AI Analysis System
 class MultiAIAnalyzer:
-    """Comprehensive multi-AI analysis system for trading"""
+    """Enhanced multi-AI analysis system with comprehensive data integration"""
     
     def __init__(self):
         self.openai_client = openai_client
@@ -348,11 +1046,27 @@ class MultiAIAnalyzer:
         
         return self.grok_client.analyze_trading_setup(prompt)
     
+    def multi_ai_consensus_enhanced(self, comprehensive_prompt: str) -> Dict[str, str]:
+        """Get consensus analysis from all available AI models with enhanced prompts"""
+        analyses = {}
+        
+        # Get analysis from each available model
+        if self.openai_client:
+            analyses["OpenAI"] = self.analyze_with_openai(comprehensive_prompt)
+        
+        if self.gemini_model:
+            analyses["Gemini"] = self.analyze_with_gemini(comprehensive_prompt)
+        
+        if self.grok_client:
+            analyses["Grok"] = self.analyze_with_grok(comprehensive_prompt)
+        
+        return analyses
+    
     def multi_ai_consensus(self, ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> Dict[str, str]:
         """Get consensus analysis from all available AI models with enhanced prompts"""
         
         # Use the enhanced comprehensive prompt
-        prompt = _construct_analysis_prompt(ticker, change, catalyst, options_data)
+        prompt = construct_comprehensive_analysis_prompt(ticker, {"last": 0, "change_percent": change}, {}, {}, options_data or {}, catalyst)
         
         analyses = {}
         
@@ -625,46 +1339,6 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     else:
         return "⚪ Neutral", max(10, min(50, total_score * 5))
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_technical_analysis(ticker: str) -> str:
-    """Fetch technical indicators using yfinance"""
-    try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="3mo")
-        
-        if hist.empty:
-            return "No historical data available"
-        
-        # RSI (14 days)
-        delta = hist['Close'].diff(1)
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=14, min_periods=1).mean()
-        avg_loss = loss.rolling(window=14, min_periods=1).mean()
-        rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs)).iloc[-1]
-        
-        # SMA 50 and 200
-        sma50 = hist['Close'].rolling(50).mean().iloc[-1]
-        sma200 = hist['Close'].rolling(200).mean().iloc[-1]
-        
-        # MACD
-        ema12 = hist['Close'].ewm(span=12, adjust=False).mean()
-        ema26 = hist['Close'].ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
-        signal = macd.ewm(span=9, adjust=False).mean()
-        macd_val = macd.iloc[-1] - signal.iloc[-1]
-        
-        # Trend
-        trend = "Bullish" if sma50 > sma200 else "Bearish"
-        overbought = rsi > 70
-        oversold = rsi < 30
-        rsi_status = "Overbought" if overbought else "Oversold" if oversold else "Neutral"
-        
-        return f"RSI (14): {rsi:.2f} ({rsi_status}), SMA50: {sma50:.2f}, SMA200: {sma200:.2f}, Trend: {trend}, MACD: {macd_val:.2f}"
-    except Exception as e:
-        return f"Error in technical analysis: {str(e)}"
-
 # New function to fetch option chain data
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
@@ -792,14 +1466,34 @@ def get_earnings_calendar() -> List[Dict]:
 
 # Enhanced AI analysis functions
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
-    """Enhanced AI playbook using selected model or multi-AI consensus"""
+    """Enhanced AI playbook using comprehensive technical, fundamental, and options analysis"""
+    
+    # Get comprehensive analysis data
+    with st.spinner(f"Gathering comprehensive data for {ticker}..."):
+        quote = get_live_quote(ticker, st.session_state.selected_tz)
+        technical_analysis = get_comprehensive_technical_analysis(ticker)
+        fundamental_analysis = get_fundamental_analysis(ticker)
+        options_analysis = get_advanced_options_analysis(ticker)
+        
+        # Get news context
+        news = get_finnhub_news(ticker)
+        news_context = ""
+        if news:
+            news_context = f"Recent News: {news[0].get('headline', '')[:100]}..."
+    
+    # Construct comprehensive prompt
+    comprehensive_prompt = construct_comprehensive_analysis_prompt(
+        ticker, quote, technical_analysis, fundamental_analysis, 
+        options_analysis, news_context
+    )
     
     if st.session_state.ai_model == "Multi-AI":
-        # Use multi-AI consensus
-        analyses = multi_ai.multi_ai_consensus(ticker, change, catalyst, options_data)
+        # Use multi-AI consensus with enhanced data
+        analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
         if analyses:
-            # Show individual analyses first
-            result = f"## 🤖 Multi-AI Analysis for {ticker}\n\n"
+            result = f"## 🤖 Enhanced Multi-AI Analysis for {ticker}\n\n"
+            result += f"**Data Sources:** {quote.get('data_source', 'Yahoo Finance')} | Updated: {quote['last_updated']}\n\n"
+            
             for model, analysis in analyses.items():
                 result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
             
@@ -812,127 +1506,32 @@ def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Op
     
     elif st.session_state.ai_model == "OpenAI":
         if not openai_client:
-            return f"**{ticker} Analysis** (OpenAI API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up OpenAI API key for detailed AI analysis."
-        return multi_ai.analyze_with_openai(_construct_analysis_prompt(ticker, change, catalyst, options_data))
+            return f"**{ticker} Analysis** (OpenAI API not configured)"
+        return multi_ai.analyze_with_openai(comprehensive_prompt)
     
     elif st.session_state.ai_model == "Gemini":
         if not gemini_model:
-            return f"**{ticker} Analysis** (Gemini API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Gemini API key for detailed AI analysis."
-        return multi_ai.analyze_with_gemini(_construct_analysis_prompt(ticker, change, catalyst, options_data))
+            return f"**{ticker} Analysis** (Gemini API not configured)"
+        return multi_ai.analyze_with_gemini(comprehensive_prompt)
     
     elif st.session_state.ai_model == "Grok":
         if not grok_enhanced:
-            return f"**{ticker} Analysis** (Grok API not configured)\n\nCurrent Change: {change:+.2f}%\nSet up Grok API key for detailed AI analysis."
-        return multi_ai.analyze_with_grok(_construct_analysis_prompt(ticker, change, catalyst, options_data))
+            return f"**{ticker} Analysis** (Grok API not configured)"
+        return multi_ai.analyze_with_grok(comprehensive_prompt)
     
     else:
         return "No AI model selected or configured."
 
-def _construct_analysis_prompt(ticker: str, change: float, catalyst: str, options_data: Optional[Dict]) -> str:
-    """Construct comprehensive analysis prompt"""
-    options_text = ""
-    if options_data:
-        options_text = f"""
-        Options Data:
-        - Implied Volatility (IV): {options_data.get('iv', 'N/A'):.1f}%
-        - Put/Call Ratio: {options_data.get('put_call_ratio', 'N/A'):.2f}
-        - Top Call OI: {options_data.get('top_call_oi_strike', 'N/A')} with {options_data.get('top_call_oi', 'N/A'):,} OI
-        - Top Put OI: {options_data.get('top_put_oi_strike', 'N/A')} with {options_data.get('top_put_oi', 'N/A'):,} OI
-        - Total Contracts: {options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}
-        """
-    
-    return f"""
-    Analyze {ticker} with {change:+.2f}% change today.
-    Catalyst: {catalyst if catalyst else "Market movement"}
-    {options_text}
-    
-    Provide an expert trading analysis focusing on:
-    1. Overall Sentiment (Bullish/Bearish/Neutral) and confidence rating (out of 100).
-    2. Trading strategy recommendation (Scalp, Day Trade, Swing, LEAP).
-    3. Specific Entry levels, Target levels, and Stop levels.
-    4. Key support and resistance levels.
-    5. Analysis using options metrics (IV, OI, put/call ratio) if available.
-    6. Assessment of explosive move potential.
-    
-    Keep concise and actionable, under 300 words.
-    """
-
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    """Enhanced market analysis using selected AI model"""
-    
-    news_context = "\n".join([f"- {item['title']}" for item in news_items[:5]])
-    movers_context = "\n".join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])
-    
-    prompt = f"""
-    Analyze current market conditions:
-
-    Top News Headlines:
-    {news_context}
-
-    Top Market Movers:
-    {movers_context}
-
-    Provide a brief market analysis covering:
-    1. Overall market sentiment
-    2. Key themes driving movement
-    3. Sectors to watch
-    4. Trading opportunities
-
-    Keep it under 200 words and actionable.
-    """
-    
-    if st.session_state.ai_model == "Multi-AI":
-        analyses = {}
-        if openai_client:
-            analyses["OpenAI"] = multi_ai.analyze_with_openai(prompt)
-        if gemini_model:
-            analyses["Gemini"] = multi_ai.analyze_with_gemini(prompt)
-        if grok_enhanced:
-            analyses["Grok"] = multi_ai.analyze_with_grok(prompt)
-        
-        if analyses:
-            result = "## 🤖 Multi-AI Market Analysis\n\n"
-            for model, analysis in analyses.items():
-                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
-            
-            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
-            result += f"### 🎯 Market Consensus:\n{synthesis}"
-            return result
-        else:
-            return "No AI models available for market analysis."
-    
-    elif st.session_state.ai_model == "OpenAI":
-        if not openai_client:
-            return "OpenAI API not configured for AI analysis."
-        return multi_ai.analyze_with_openai(prompt)
-    
-    elif st.session_state.ai_model == "Gemini":
-        if not gemini_model:
-            return "Gemini API not configured for AI analysis."
-        return multi_ai.analyze_with_gemini(prompt)
-    
-    elif st.session_state.ai_model == "Grok":
-        if not grok_enhanced:
-            return "Grok API not configured for AI analysis."
-        return multi_ai.analyze_with_grok(prompt)
-    
-    else:
-        return "No AI model selected or configured."
-
-def ai_auto_generate_plays(tz: str):
-    """
-    Auto-generates trading plays by scanning watchlist and market movers
-    """
+# Enhanced auto-generation with comprehensive analysis
+def ai_auto_generate_plays_enhanced(tz: str):
+    """Enhanced auto-generation with comprehensive analysis"""
     plays = []
     
     try:
-        # Get current watchlist
         current_watchlist = st.session_state.watchlists[st.session_state.active_watchlist]
-        
-        # Combine watchlist with core tickers for broader scan
         scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
         
-        # Scan for significant movers
+        # Scan for significant movers with enhanced criteria
         candidates = []
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -942,24 +1541,33 @@ def ai_auto_generate_plays(tz: str):
                 try:
                     quote = future.result()
                     if not quote["error"]:
-                        # Look for significant moves (>1.5% change)
-                        if abs(quote["change_percent"]) >= 1.5:
+                        # Enhanced criteria for significance
+                        volume_significant = quote["volume"] > 1000000  # Minimum volume threshold
+                        price_significant = abs(quote["change_percent"]) >= 1.5
+                        spread_reasonable = (quote["ask"] - quote["bid"]) / quote["last"] < 0.02  # Max 2% spread
+                        
+                        if price_significant and volume_significant and spread_reasonable:
                             candidates.append({
                                 "ticker": ticker,
                                 "quote": quote,
-                                "significance": abs(quote["change_percent"])
+                                "significance": abs(quote["change_percent"]) * (quote["volume"] / 1000000)  # Volume-weighted significance
                             })
                 except Exception as exc:
-                    st.error(f'{ticker} generated an exception: {exc}')
+                    print(f'{ticker} generated an exception: {exc}')
         
         # Sort by significance and take top candidates
         candidates.sort(key=lambda x: x["significance"], reverse=True)
-        top_candidates = candidates[:5]  # Limit to top 5 to avoid API limits
+        top_candidates = candidates[:5]
         
-        # Generate plays for top candidates
+        # Generate enhanced plays for top candidates
         for candidate in top_candidates:
             ticker = candidate["ticker"]
             quote = candidate["quote"]
+            
+            # Get comprehensive analysis data
+            technical_analysis = get_comprehensive_technical_analysis(ticker)
+            fundamental_analysis = get_fundamental_analysis(ticker)
+            options_analysis = get_advanced_options_analysis(ticker)
             
             # Get recent news for context
             news = get_finnhub_news(ticker)
@@ -967,13 +1575,27 @@ def ai_auto_generate_plays(tz: str):
             if news:
                 catalyst = news[0].get('headline', '')[:100] + "..."
             
-            # Get options data for enhanced analysis
-            options_data = get_options_data(ticker)
+            # Generate comprehensive analysis
+            comprehensive_prompt = construct_comprehensive_analysis_prompt(
+                ticker, quote, technical_analysis, fundamental_analysis, 
+                options_analysis, catalyst
+            )
             
             # Generate AI analysis using selected model
-            play_analysis = ai_playbook(ticker, quote["change_percent"], catalyst, options_data)
+            if st.session_state.ai_model == "Multi-AI":
+                analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
+                if analyses:
+                    play_analysis = f"## Enhanced Multi-AI Analysis\n\n"
+                    for model, analysis in analyses.items():
+                        play_analysis += f"**{model}:** {analysis[:200]}...\n\n"
+                    synthesis = multi_ai.synthesize_consensus(analyses, ticker)
+                    play_analysis += f"**Consensus:** {synthesis}"
+                else:
+                    play_analysis = f"No AI models available for {ticker} analysis"
+            else:
+                play_analysis = ai_playbook(ticker, quote["change_percent"], catalyst, options_analysis)
 
-            # Create play dictionary
+            # Create enhanced play dictionary
             play = {
                 "ticker": ticker,
                 "current_price": quote['last'],
@@ -987,14 +1609,160 @@ def ai_auto_generate_plays(tz: str):
                 "play_analysis": play_analysis,
                 "volume": quote['volume'],
                 "timestamp": quote['last_updated'],
-                "data_source": quote.get('data_source', 'Yahoo Finance')
+                "data_source": quote.get('data_source', 'Yahoo Finance'),
+                "technical_summary": generate_technical_summary(technical_analysis),
+                "fundamental_summary": generate_fundamental_summary(fundamental_analysis),
+                "options_summary": generate_options_summary(options_analysis),
+                "significance_score": candidate["significance"]
             }
             plays.append(play)
         
         return plays
     except Exception as e:
-        st.error(f"Error generating auto plays: {str(e)}")
+        st.error(f"Error generating enhanced auto plays: {str(e)}")
         return []
+
+def generate_technical_summary(technical: Dict) -> str:
+    """Generate concise technical summary"""
+    if technical.get("error"):
+        return f"Technical Error: {technical['error']}"
+    
+    if "short_term" in technical:
+        rsi = technical['short_term'].get('rsi', 0)
+        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
+    elif "rsi" in technical:
+        rsi = technical.get('rsi', 0)
+        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
+    
+    return "Technical analysis pending..."
+
+def generate_fundamental_summary(fundamental: Dict) -> str:
+    """Generate concise fundamental summary"""
+    if fundamental.get("error"):
+        return f"Fundamental Error: {fundamental['error']}"
+    
+    health = fundamental.get('financial_health', 'Unknown')
+    valuation = fundamental.get('valuation_assessment', 'Unknown')
+    pe = fundamental.get('pe_ratio', 'N/A')
+    
+    return f"Health: {health}, Valuation: {valuation}, P/E: {pe}"
+
+def generate_options_summary(options: Dict) -> str:
+    """Generate concise options summary"""
+    if options.get("error"):
+        return f"Options Error: {options['error']}"
+    
+    basic = options.get('basic_metrics', {})
+    flow = options.get('flow_analysis', {})
+    pc_ratio = basic.get('put_call_volume_ratio', 0)
+    sentiment = flow.get('flow_sentiment', 'Neutral')
+    
+    return f"P/C Ratio: {pc_ratio:.2f}, Flow: {sentiment}"
+
+# Enhanced market analysis
+def ai_market_analysis_enhanced(news_items: List[Dict], movers: List[Dict]) -> str:
+    """Enhanced market analysis with comprehensive data"""
+    
+    # Gather market-wide technical data
+    market_technical = {}
+    key_indices = ["SPY", "QQQ", "IWM"]
+    
+    for index in key_indices:
+        try:
+            quote = get_live_quote(index)
+            technical = get_comprehensive_technical_analysis(index)
+            market_technical[index] = {
+                "price": quote['last'],
+                "change": quote['change_percent'],
+                "technical": technical
+            }
+        except:
+            continue
+    
+    # Analyze sector rotation
+    sector_data = analyze_sector_rotation()
+    
+    # Construct enhanced market analysis prompt
+    market_context = f"""
+Market Technical Overview:
+{format_market_technical(market_technical)}
+
+Sector Analysis:
+{sector_data}
+
+Top News Headlines:
+{chr(10).join([f"- {item['title']}" for item in news_items[:5]])}
+
+Top Market Movers:
+{chr(10).join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])}
+
+Provide comprehensive market analysis covering:
+1. Overall market sentiment and direction
+2. Key technical levels for major indices
+3. Sector rotation patterns and opportunities
+4. Risk-on vs risk-off positioning
+5. Trading opportunities and strategies
+6. Key events and catalysts to watch
+
+Keep analysis under 300 words but be specific and actionable.
+"""
+    
+    # Use selected AI model for analysis
+    if st.session_state.ai_model == "Multi-AI":
+        analyses = {}
+        if openai_client:
+            analyses["OpenAI"] = multi_ai.analyze_with_openai(market_context)
+        if gemini_model:
+            analyses["Gemini"] = multi_ai.analyze_with_gemini(market_context)
+        if grok_enhanced:
+            analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
+        
+        if analyses:
+            result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+            
+            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
+            result += f"### 🎯 Market Consensus:\n{synthesis}"
+            return result
+    else:
+        # Use individual AI model
+        return multi_ai.analyze_with_openai(market_context) if openai_client else "AI analysis not available"
+
+def format_market_technical(market_tech: Dict) -> str:
+    """Format market technical data for prompt"""
+    formatted = ""
+    for symbol, data in market_tech.items():
+        formatted += f"{symbol}: ${data['price']:.2f} ({data['change']:+.2f}%)\n"
+    return formatted
+
+def analyze_sector_rotation() -> str:
+    """Analyze sector rotation patterns"""
+    sector_etfs = ["XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"]
+    sector_performance = {}
+    
+    for etf in sector_etfs:
+        try:
+            quote = get_live_quote(etf)
+            if not quote.get("error"):
+                sector_performance[etf] = quote['change_percent']
+        except:
+            continue
+    
+    # Sort by performance
+    sorted_sectors = sorted(sector_performance.items(), key=lambda x: x[1], reverse=True)
+    
+    result = "Sector Performance Today:\n"
+    for etf, perf in sorted_sectors[:5]:
+        result += f"- {etf}: {perf:+.2f}%\n"
+    
+    return result
+
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
+    """Enhanced market analysis using selected AI model"""
+    return ai_market_analysis_enhanced(news_items, movers)
 
 # Function to get important economic events using AI
 def get_important_events() -> List[Dict]:
@@ -1093,6 +1861,29 @@ st.sidebar.subheader("Data Sources")
 # Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
 st.session_state.debug_mode = debug_mode
+
+if debug_mode:
+    st.sidebar.subheader("🔬 Enhanced Data Debug")
+    debug_ticker = st.sidebar.selectbox("Debug Ticker", CORE_TICKERS[:10])
+    
+    if st.sidebar.button("🧪 Test Enhanced Analysis"):
+        with st.sidebar:
+            st.write("**Testing Enhanced Functions:**")
+            
+            # Test technical analysis
+            tech_result = get_comprehensive_technical_analysis(debug_ticker)
+            st.write(f"Technical: {'✅' if not tech_result.get('error') else '❌'}")
+            
+            # Test fundamental analysis  
+            fund_result = get_fundamental_analysis(debug_ticker)
+            st.write(f"Fundamental: {'✅' if not fund_result.get('error') else '❌'}")
+            
+            # Test options analysis
+            opt_result = get_advanced_options_analysis(debug_ticker)
+            st.write(f"Options: {'✅' if not opt_result.get('error') else '❌'}")
+            
+            if st.checkbox("Show Raw Data"):
+                st.json({"tech": tech_result, "fund": fund_result, "opts": opt_result})
 
 if debug_mode and st.sidebar.button("🧪 Test All APIs"):
     st.sidebar.write("**Testing Data APIs:**")
@@ -1219,6 +2010,44 @@ with tabs[0]:
                 sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
                 sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
                 sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                # Enhanced Analysis Button
+                if col4.button(f"📊 Enhanced Analysis", key=f"enhanced_{search_ticker}"):
+                    with st.spinner(f"Running comprehensive analysis for {search_ticker}..."):
+                        technical = get_comprehensive_technical_analysis(search_ticker)
+                        fundamental = get_fundamental_analysis(search_ticker)
+                        options = get_advanced_options_analysis(search_ticker)
+                        
+                        # Display technical summary
+                        if not technical.get("error"):
+                            st.success("✅ Technical Analysis Complete")
+                            tech_col1, tech_col2, tech_col3 = st.columns(3)
+                            if "short_term" in technical:
+                                tech_col1.metric("RSI", f"{technical['short_term'].get('rsi', 0):.1f}")
+                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
+                                tech_col3.metric("Signal", technical.get('signal_strength', 'Unknown'))
+                            elif "rsi" in technical:
+                                tech_col1.metric("RSI", f"{technical.get('rsi', 0):.1f}")
+                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
+                                tech_col3.metric("BB Position", f"{technical.get('bb_position', 0):.2f}")
+                        
+                        # Display fundamental summary  
+                        if not fundamental.get("error"):
+                            st.success("✅ Fundamental Analysis Complete")
+                            fund_col1, fund_col2, fund_col3 = st.columns(3)
+                            fund_col1.metric("Health", fundamental.get('financial_health', 'Unknown'))
+                            fund_col2.metric("Valuation", fundamental.get('valuation_assessment', 'Unknown'))
+                            fund_col3.metric("P/E Ratio", fundamental.get('pe_ratio', 'N/A'))
+                        
+                        # Display options summary
+                        if not options.get("error"):
+                            st.success("✅ Options Analysis Complete")
+                            opt_col1, opt_col2, opt_col3 = st.columns(3)
+                            basic = options.get('basic_metrics', {})
+                            flow = options.get('flow_analysis', {})
+                            opt_col1.metric("P/C Ratio", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                            opt_col2.metric("Flow Sentiment", flow.get('flow_sentiment', 'Neutral'))
+                            opt_col3.metric("Unusual Activity", f"{options.get('unusual_activity', {}).get('total_unusual_contracts', 0)}")
                 
                 if col4.button(f"Add {search_ticker} to Watchlist", key="add_searched"):
                     current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -1590,7 +2419,7 @@ with tabs[4]:
     with col2:
         if st.button("🚀 Generate Auto Plays", type="primary"):
             with st.spinner("AI generating trading plays from market scan..."):
-                auto_plays = ai_auto_generate_plays(tz_label)
+                auto_plays = ai_auto_generate_plays_enhanced(tz_label)
                 
                 if auto_plays:
                     st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
@@ -1607,6 +2436,12 @@ with tabs[4]:
                             # Display catalyst
                             if play['catalyst']:
                                 st.write(f"**Catalyst:** {play['catalyst']}")
+                            
+                            # Display enhanced summaries
+                            st.write(f"**Technical:** {play['technical_summary']}")
+                            st.write(f"**Fundamental:** {play['fundamental_summary']}")
+                            st.write(f"**Options:** {play['options_summary']}")
+                            st.write(f"**Significance Score:** {play['significance_score']:.2f}")
                             
                             # Display AI play analysis
                             st.markdown("**AI Trading Play:**")
@@ -1737,7 +2572,7 @@ with tabs[4]:
         st.info("Add stocks to watchlist or use search above.")
     
     # Quick tips
-    with st.expander("💡 About the Analysis"):
+    with st.expander("💡 About the Enhanced Analysis"):
         st.markdown("""
         **Enhanced Multi-AI System:**
         - **Multi-AI Mode:** Gets consensus from all available AI models (OpenAI + Gemini + Grok)
@@ -1745,18 +2580,20 @@ with tabs[4]:
         - **Real Options Data:** Integrated yfinance options chain analysis
         - **Session Tracking:** Premarket, intraday, and after-hours performance
         
-        **Data Integration:**
-        - Primary: Alpha Vantage/Twelve Data for real-time data (when connected)
-        - Fallback: Yahoo Finance with 15-20 minute delays
-        - Extended hours tracking with session breakdown
-        - Volume and price data with multiple data source validation
+        **Enhanced Data Integration:**
+        - **Primary:** Twelve Data for real-time comprehensive technical analysis
+        - **Secondary:** Alpha Vantage for additional market data validation
+        - **Fallback:** Yahoo Finance with enhanced session tracking
+        - **Fundamental Analysis:** Complete financial health scoring and valuation assessment
+        - **Advanced Options Flow:** Unusual activity detection, gamma levels, sentiment analysis
         
-        **AI Analysis includes:**
-        - Market sentiment assessment with confidence ratings
-        - Multi-timeframe trading strategy recommendations
-        - Specific entry, target, and stop levels
-        - Risk management and position sizing guidance
-        - Options flow analysis and unusual activity detection
+        **Comprehensive Analysis includes:**
+        - Multi-timeframe technical analysis (1D, 5D, 3M)
+        - Complete fundamental health scoring
+        - Advanced options flow analysis with order sentiment
+        - Enhanced AI prompts with all data integrated
+        - Volume-weighted significance scoring for auto-plays
+        - Real-time data source prioritization
         """)
 
 # TAB 6: Sector/ETF Tracking
@@ -1841,8 +2678,8 @@ with tabs[6]:
         # AI Analysis at the top
         st.markdown("### 🤖 AI 0DTE Playbook")
         with st.spinner("Generating AI analysis..."):
-            tech_analysis = get_technical_analysis(selected_ticker)
-            options_data = get_options_data(selected_ticker)
+            tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
+            options_analysis = get_advanced_options_analysis(selected_ticker)
             order_flow = get_order_flow(selected_ticker, option_chain)
             # Summarize option chain
             calls = option_chain["calls"]
@@ -1852,12 +2689,13 @@ with tabs[6]:
             option_summary = f"Top Calls:\n{top_calls}\nTop Puts:\n{top_puts}"
             
             # Enhanced prompt for high confidence 0DTE play
-            catalyst = f"0DTE options activity. Technical Analysis: {tech_analysis}. Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, Put/Call Ratio: {order_flow.get('put_call_ratio', 0):.2f}. Option Chain Summary: {option_summary}"
+            tech_summary = generate_technical_summary(tech_analysis)
+            catalyst = f"0DTE options activity. Technical Analysis: {tech_summary}. Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, Put/Call Ratio: {order_flow.get('put_call_ratio', 0):.2f}. Option Chain Summary: {option_summary}"
             playbook = ai_playbook(
                 selected_ticker,
                 quote["change_percent"],
                 catalyst,
-                options_data
+                options_analysis
             )
             st.markdown(playbook)
 
@@ -1929,7 +2767,7 @@ with tabs[7]:
                     
                     # Get live quote and options data for earnings analysis
                     quote = get_live_quote(ticker)
-                    options_data = get_options_data(ticker)
+                    options_analysis = get_advanced_options_analysis(ticker)
                     
                     if not quote.get("error"):
                         col1, col2, col3 = st.columns(3)
@@ -1937,15 +2775,16 @@ with tabs[7]:
                         col2.metric("Volume", f"{quote['volume']:,}")
                         col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
                         
-                        if options_data:
+                        if not options_analysis.get("error"):
                             st.write("**Options Metrics:**")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
-                            opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
-                            opt_col3.metric("Total OI", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                            basic = options_analysis.get('basic_metrics', {})
+                            opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
+                            opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                            opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
                     
-                    if options_data:
-                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str}", options_data)
+                    if not options_analysis.get("error"):
+                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str}", options_analysis)
                     else:
                         ai_analysis = f"""
                         **AI Analysis for {ticker} Earnings:**
@@ -2168,4 +3007,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
