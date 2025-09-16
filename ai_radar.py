@@ -3138,7 +3138,38 @@ with tabs[0]:
     # Search bar for any ticker
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)", key="search_quotes").upper().strip()
+        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)
+
+
+tab0, tab1, tab2 = st.tabs(["0DTE", "Swing", "LEAPS"])
+
+with tab0:
+    st.header("📆 0DTE Option Chains")
+    chain_data = get_options_chain(ticker)
+    filtered_0dte = filter_by_expiration(chain_data, "0DTE")
+    if filtered_0dte:
+        st.dataframe(filtered_0dte)
+    else:
+        st.info("No 0DTE options found.")
+
+with tab1:
+    st.header("📆 Swing Option Chains (3–14 Days)")
+    chain_data = get_options_chain(ticker)
+    filtered_swing = filter_by_expiration(chain_data, "SWING")
+    if filtered_swing:
+        st.dataframe(filtered_swing)
+    else:
+        st.info("No Swing options found.")
+
+with tab2:
+    st.header("📆 LEAP Option Chains (90+ Days)")
+    chain_data = get_options_chain(ticker)
+    filtered_leaps = filter_by_expiration(chain_data, "LEAPS")
+    if filtered_leaps:
+        st.dataframe(filtered_leaps)
+    else:
+        st.info("No LEAPS found.")
+", key="search_quotes").upper().strip()
     with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
@@ -3395,7 +3426,38 @@ with tabs[1]:
     st.markdown("### 🔍 Search & Add Stocks")
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_add_ticker = st.text_input("Search stock to add", placeholder="Enter ticker", key="search_add").upper().strip()
+        search_add_ticker = st.text_input("Search stock to add", placeholder="Enter ticker", key="search_add")
+
+
+tab0, tab1, tab2 = st.tabs(["0DTE", "Swing", "LEAPS"])
+
+with tab0:
+    st.header("📆 0DTE Option Chains")
+    chain_data = get_options_chain(ticker)
+    filtered_0dte = filter_by_expiration(chain_data, "0DTE")
+    if filtered_0dte:
+        st.dataframe(filtered_0dte)
+    else:
+        st.info("No 0DTE options found.")
+
+with tab1:
+    st.header("📆 Swing Option Chains (3–14 Days)")
+    chain_data = get_options_chain(ticker)
+    filtered_swing = filter_by_expiration(chain_data, "SWING")
+    if filtered_swing:
+        st.dataframe(filtered_swing)
+    else:
+        st.info("No Swing options found.")
+
+with tab2:
+    st.header("📆 LEAP Option Chains (90+ Days)")
+    chain_data = get_options_chain(ticker)
+    filtered_leaps = filter_by_expiration(chain_data, "LEAPS")
+    if filtered_leaps:
+        st.dataframe(filtered_leaps)
+    else:
+        st.info("No LEAPS found.")
+.upper().strip()
     with col2:
         if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
             quote = get_live_quote(search_add_ticker, tz_label)
@@ -3526,3 +3588,49 @@ st.markdown(
 if st.session_state.auto_refresh:
     time.sleep(st.session_state.refresh_interval)
     st.rerun()
+
+
+
+def get_options_chain(ticker):
+    """
+    Fetch option chain data from Unusual Whales.
+    """
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
+    headers = {
+        "Authorization": f"Bearer {UW_KEY}",
+        "accept": "application/json"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code != 200:
+            st.warning(f"UW error {response.status_code}: {response.text}")
+            return None
+        return response.json()
+    except Exception as e:
+        st.warning(f"UW API call failed: {e}")
+        return None
+
+
+
+def filter_by_expiration(data, mode="0DTE"):
+    today = datetime.date.today()
+    contracts = []
+
+    if not data:
+        return []
+
+    for contract in data:
+        exp_date = contract.get("expiration")
+        if not exp_date:
+            continue
+        try:
+            exp = datetime.datetime.strptime(exp_date, "%Y-%m-%d").date()
+        except:
+            continue
+
+        delta = (exp - today).days
+        if (mode == "0DTE" and delta == 0) or            (mode == "SWING" and 3 <= delta <= 14) or            (mode == "LEAPS" and delta >= 90):
+            contracts.append(contract)
+    return contracts
+
