@@ -45,18 +45,20 @@ if "show_sparklines" not in st.session_state:
 if "auto_refresh" not in st.session_state:
     st.session_state.auto_refresh = False
 if "refresh_interval" not in st.session_state:
-    st.session_state.refresh_interval = 30
+    st.session_state.refresh_interval = 10  # Faster default refresh
 if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
 if "data_source" not in st.session_state:
-    st.session_state.data_source = "Yahoo Finance"  # Default data source
+    st.session_state.data_source = "Unusual Whales"  # New primary source
 if "ai_model" not in st.session_state:
     st.session_state.ai_model = "Multi-AI"  # Default to multi-AI
 
 # API Keys
 try:
+    UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_API_KEY", "")
+    TRADING_ECONOMICS_KEY = st.secrets.get("TRADING_ECONOMICS_API_KEY", "")
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
     POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
@@ -89,6 +91,172 @@ except Exception as e:
     openai_client = None
     gemini_model = None
     grok_client = None
+
+# NEW: Unusual Whales API Client (Primary Data Source)
+class UnusualWhalesClient:
+    """Primary API client for Unusual Whales - comprehensive trading data"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.unusualwhales.com"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "User-Agent": "AI-Radar-Pro/2.0"
+        })
+    
+    def get_quote(self, symbol: str) -> Dict:
+        """Get real-time quote from Unusual Whales"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/quote",
+                timeout=5  # Faster timeout
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Extract key data points
+                price = float(data.get("price", 0))
+                change = float(data.get("change", 0))
+                change_percent = float(data.get("changePercent", 0))
+                volume = int(data.get("volume", 0))
+                
+                # Enhanced session tracking from UW
+                premarket_change = float(data.get("premarketChangePercent", 0))
+                afterhours_change = float(data.get("afterhoursChangePercent", 0))
+                
+                return {
+                    "last": price,
+                    "bid": float(data.get("bid", price - 0.01)),
+                    "ask": float(data.get("ask", price + 0.01)),
+                    "volume": volume,
+                    "change": change,
+                    "change_percent": change_percent,
+                    "premarket_change": premarket_change,
+                    "intraday_change": change_percent - premarket_change - afterhours_change,
+                    "postmarket_change": afterhours_change,
+                    "previous_close": float(data.get("previousClose", price - change)),
+                    "market_open": float(data.get("open", 0)),
+                    "last_updated": datetime.datetime.now().isoformat(),
+                    "data_source": "Unusual Whales",
+                    "error": None,
+                    "raw_data": data
+                }
+            else:
+                return {"error": f"UW API error: {response.status_code}", "data_source": "Unusual Whales"}
+                
+        except Exception as e:
+            return {"error": f"Unusual Whales error: {str(e)}", "data_source": "Unusual Whales"}
+    
+    def get_options_flow(self, symbol: str) -> Dict:
+        """Get real options flow data from Unusual Whales"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/options-flow/today",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "flows": data.get("flows", []),
+                    "summary": data.get("summary", {}),
+                    "unusual_activity": data.get("unusual", []),
+                    "data_source": "Unusual Whales",
+                    "error": None
+                }
+            else:
+                return {"error": f"Options flow error: {response.status_code}", "data_source": "Unusual Whales"}
+                
+        except Exception as e:
+            return {"error": f"Options flow error: {str(e)}", "data_source": "Unusual Whales"}
+    
+    def get_institutional_activity(self, symbol: str) -> Dict:
+        """Get institutional trading activity"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/institutional/recent",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "activity": data.get("activity", []),
+                    "summary": data.get("summary", {}),
+                    "data_source": "Unusual Whales",
+                    "error": None
+                }
+            else:
+                return {"error": f"Institutional data error: {response.status_code}", "data_source": "Unusual Whales"}
+                
+        except Exception as e:
+            return {"error": f"Institutional data error: {str(e)}", "data_source": "Unusual Whales"}
+
+# NEW: Trading Economics API Client
+class TradingEconomicsClient:
+    """Trading Economics API client for economic data and calendars"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.tradingeconomics.com"
+        self.session = requests.Session()
+    
+    def get_economic_calendar(self, days: int = 7) -> List[Dict]:
+        """Get economic calendar for the next N days"""
+        try:
+            end_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/calendar",
+                params={
+                    "c": self.api_key,
+                    "f": "json",
+                    "d1": datetime.datetime.now().strftime("%Y-%m-%d"),
+                    "d2": end_date
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return []
+                
+        except Exception as e:
+            print(f"Trading Economics calendar error: {e}")
+            return []
+    
+    def get_economic_indicators(self, country: str = "united states") -> Dict:
+        """Get key economic indicators"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/indicators",
+                params={
+                    "c": self.api_key,
+                    "f": "json",
+                    "country": country
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "indicators": data,
+                    "data_source": "Trading Economics",
+                    "error": None
+                }
+            else:
+                return {"error": f"Indicators error: {response.status_code}", "data_source": "Trading Economics"}
+                
+        except Exception as e:
+            return {"error": f"Indicators error: {str(e)}", "data_source": "Trading Economics"}
+
+# Initialize NEW API clients
+unusual_whales_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
+trading_economics_client = TradingEconomicsClient(TRADING_ECONOMICS_KEY) if TRADING_ECONOMICS_KEY else None
 
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
@@ -135,9 +303,9 @@ class GrokClient:
 # Initialize enhanced Grok client
 grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
 
-# Alpha Vantage Client
+# Alpha Vantage Client (now fallback)
 class AlphaVantageClient:
-    """Enhanced Alpha Vantage client for real-time stock data"""
+    """Alpha Vantage client for real-time stock data (fallback)"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -155,7 +323,7 @@ class AlphaVantageClient:
                 "apikey": self.api_key
             }
             
-            response = self.session.get(self.base_url, params=params, timeout=10)
+            response = self.session.get(self.base_url, params=params, timeout=8)
             if response.status_code == 200:
                 data = response.json()
                 
@@ -191,9 +359,9 @@ class AlphaVantageClient:
         except Exception as e:
             return {"error": f"Alpha Vantage error: {str(e)}", "data_source": "Alpha Vantage"}
 
-# Twelve Data Client
+# Twelve Data Client (now secondary fallback)
 class TwelveDataClient:
-    """Twelve Data client for real-time stock data"""
+    """Twelve Data client for real-time stock data (secondary fallback)"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -209,7 +377,7 @@ class TwelveDataClient:
                 "apikey": self.api_key
             }
             
-            response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
+            response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=8)
             
             if response.status_code == 200:
                 data = response.json()
@@ -250,7 +418,7 @@ class TwelveDataClient:
                 
                 # Try with exchange specified
                 params["symbol"] = f"{symbol}:NASDAQ"
-                response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=10)
+                response = self.session.get(f"{self.base_url}/time_series", params=params, timeout=8)
                 if response.status_code == 200:
                     data = response.json()
                     
@@ -290,16 +458,48 @@ class TwelveDataClient:
         except Exception as e:
             return {"error": f"Twelve Data error: {str(e)}", "data_source": "Twelve Data"}
 
-# Initialize data clients
+# Initialize data clients (with new priority order)
 alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 
 # Enhanced Technical Analysis using multiple data sources
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=60)  # Faster refresh - reduced from 300 to 60 seconds
 def get_comprehensive_technical_analysis(ticker: str) -> Dict:
     """Enhanced technical analysis with multiple indicators and timeframes"""
     try:
-        # Try Twelve Data first for more comprehensive data
+        # Try Unusual Whales first for enhanced data
+        if unusual_whales_client:
+            try:
+                # Get enhanced data from UW including technical indicators
+                quote = unusual_whales_client.get_quote(ticker)
+                if not quote.get("error") and quote.get("raw_data"):
+                    raw_data = quote["raw_data"]
+                    
+                    # Extract technical data if available from UW
+                    technical_data = raw_data.get("technical", {})
+                    
+                    if technical_data:
+                        return {
+                            "rsi": technical_data.get("rsi", 0),
+                            "macd": technical_data.get("macd", 0),
+                            "macd_signal": technical_data.get("macd_signal", 0),
+                            "sma_20": technical_data.get("sma_20", 0),
+                            "sma_50": technical_data.get("sma_50", 0),
+                            "ema_12": technical_data.get("ema_12", 0),
+                            "ema_26": technical_data.get("ema_26", 0),
+                            "bb_upper": technical_data.get("bb_upper", 0),
+                            "bb_lower": technical_data.get("bb_lower", 0),
+                            "support": technical_data.get("support", 0),
+                            "resistance": technical_data.get("resistance", 0),
+                            "current_price": quote["last"],
+                            "trend_analysis": technical_data.get("trend", "Neutral"),
+                            "data_source": "Unusual Whales Enhanced",
+                            "error": None
+                        }
+            except Exception as e:
+                print(f"UW technical analysis error: {e}")
+        
+        # Try Twelve Data for comprehensive data
         if twelvedata_client:
             # Get multiple timeframes from Twelve Data
             timeframes = ["1day", "4h", "1h"]
@@ -314,7 +514,7 @@ def get_comprehensive_technical_analysis(ticker: str) -> Dict:
                         "apikey": TWELVEDATA_KEY
                     }
                     
-                    response = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=10)
+                    response = requests.get("https://api.twelvedata.com/time_series", params=params, timeout=8)
                     if response.status_code == 200:
                         data = response.json()
                         if "values" in data and len(data["values"]) > 0:
@@ -616,7 +816,7 @@ def calculate_signal_strength(df: pd.DataFrame) -> str:
         return "Unknown"
 
 # Enhanced Fundamental Analysis
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=900)  # 15 minutes cache for fundamental data
 def get_fundamental_analysis(ticker: str) -> Dict:
     """Comprehensive fundamental analysis using yfinance and external APIs"""
     try:
@@ -767,20 +967,2272 @@ def assess_valuation(fundamentals: Dict) -> str:
     else:
         return "Fairly Valued"
 
-# Enhanced Options Flow Analysis
+# Enhanced Options Flow Analysis with Unusual Whales
 def get_advanced_options_analysis(ticker: str) -> Dict:
-    """Comprehensive options analysis with order flow insights"""
+    """Comprehensive options analysis with Unusual Whales order flow insights"""
     try:
+        # Try Unusual Whales first for real options flow data
+        if unusual_whales_client:
+            try:
+                options_flow = unusual_whales_client.get_options_flow(ticker)
+                if not options_flow.get("error"):
+                    flows = options_flow.get("flows", [])
+                    summary = options_flow.get("summary", {})
+                    unusual = options_flow.get("unusual_activity", [])
+                    
+                    # Process real options flow data
+                    total_score = explosive_score + bullish_score + bearish_score
+    
+    if explosive_score >= 2:
+        return "🚀 EXPLOSIVE", min(95, 60 + explosive_score * 10)
+    elif explosive_score >= 1:
+        return "📈 Bullish", min(85, 50 + explosive_score * 15)
+    elif bearish_score >= 2:
+        return "📉 Bearish", min(80, 40 + bearish_score * 15)
+    elif bullish_score >= 2:
+        return "📈 Bullish", min(75, 35 + bullish_score * 10)
+    else:
+        return "⚪ Neutral", max(10, min(50, total_score * 5))
+
+# New function to fetch option chain data
+@st.cache_data(ttl=120)  # Faster refresh for options - 2 minutes
+def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
+    """Fetch 0DTE or nearest expiration option chain using yfinance"""
+    try:
+        stock = yf.Ticker(ticker)
+        # Get all expiration dates
+        expirations = stock.options
+        if not expirations:
+            return {"error": f"No options data available for {ticker}"}
+
+        # Find today's expiration or closest future date
+        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
+        expiration_dates = [datetime.datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
+        valid_expirations = [exp for exp in expiration_dates if exp >= today]
+        if not valid_expirations:
+            return {"error": f"No valid expirations found for {ticker}"}
+
+        # Select 0DTE or closest expiration
+        target_expiration = min(valid_expirations, key=lambda x: (x - today).days)
+        expiration_str = target_expiration.strftime('%Y-%m-%d')
+
+        # Fetch option chain
+        option_chain = stock.option_chain(expiration_str)
+        calls = option_chain.calls
+        puts = option_chain.puts
+
+        # Clean and format data
+        calls = calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        puts = puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        
+        # Determine moneyness
+        current_price = get_live_quote(ticker, tz).get('last', 0)
+        calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
+        puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
+
+        # Convert IV to percentage
+        calls['impliedVolatility'] = calls['impliedVolatility'] * 100
+        puts['impliedVolatility'] = puts['impliedVolatility'] * 100
+
+        return {
+            "calls": calls,
+            "puts": puts,
+            "expiration": expiration_str,
+            "current_price": current_price,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": f"Error fetching option chain for {ticker}: {str(e)}"}
+
+# New function to simulate order flow (placeholder for premium API integration)
+@st.cache_data(ttl=120)  # Faster options flow refresh
+def get_order_flow(ticker: str, option_chain: Dict) -> Dict:
+    """Simulate order flow by analyzing option chain volume and open interest"""
+    calls = option_chain.get('calls', pd.DataFrame())
+    puts = option_chain.get('puts', pd.DataFrame())
+    if calls.empty or puts.empty:
+        return {"error": "No option chain data for order flow analysis"}
+
+    try:
+        # Calculate put/call volume ratio
+        total_call_volume = calls['volume'].sum() if not calls.empty else 0
+        total_put_volume = puts['volume'].sum() if not puts.empty else 0
+        put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else 0
+
+        # Identify unusual activity (high volume relative to open interest)
+        calls['volume_oi_ratio'] = calls['volume'] / calls['openInterest'].replace(0, 1)
+        puts['volume_oi_ratio'] = puts['volume'] / puts['openInterest'].replace(0, 1)
+
+        # Top trades (simulated as high volume or high volume/OI ratio)
+        top_calls = calls[calls['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
+        top_puts = puts[puts['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
+
+        # Sentiment based on volume
+        sentiment = "Bullish" if total_call_volume > total_put_volume else "Bearish" if total_put_volume > total_call_volume else "Neutral"
+
+        return {
+            "put_call_ratio": put_call_ratio,
+            "top_calls": top_calls.to_dict('records'),
+            "top_puts": top_puts.to_dict('records'),
+            "sentiment": sentiment,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": f"Error analyzing order flow: {str(e)}"}
+
+# Modified get_options_data to use real data
+def get_options_data(ticker: str) -> Optional[Dict]:
+    """Fetch real options data for a ticker"""
+    option_chain = get_option_chain(ticker, st.session_state.selected_tz)
+    if option_chain.get("error"):
+        return {"error": option_chain["error"]}
+
+    calls = option_chain["calls"]
+    puts = option_chain["puts"]
+    current_price = option_chain["current_price"]
+
+    # Find high IV strike
+    high_iv_call = calls[calls['impliedVolatility'] == calls['impliedVolatility'].max()] if not calls.empty else pd.DataFrame()
+    high_iv_put = puts[puts['impliedVolatility'] == puts['impliedVolatility'].max()] if not puts.empty else pd.DataFrame()
+
+    return {
+        "iv": calls['impliedVolatility'].mean() if not calls.empty else 0,
+        "put_call_ratio": puts['volume'].sum() / calls['volume'].sum() if calls['volume'].sum() > 0 else 0,
+        "top_call_oi": calls['openInterest'].max() if not calls.empty else 0,
+        "top_call_oi_strike": calls[calls['openInterest'] == calls['openInterest'].max()]['strike'].iloc[0] if not calls.empty and calls['openInterest'].max() > 0 else 0,
+        "top_put_oi": puts['openInterest'].max() if not puts.empty else 0,
+        "top_put_oi_strike": puts[puts['openInterest'] == puts['openInterest'].max()]['strike'].iloc[0] if not puts.empty and puts['openInterest'].max() > 0 else 0,
+        "high_iv_strike": high_iv_call['strike'].iloc[0] if not high_iv_call.empty else (high_iv_put['strike'].iloc[0] if not high_iv_put.empty else 0),
+        "total_calls": calls['volume'].sum() if not calls.empty else 0,
+        "total_puts": puts['volume'].sum() if not puts.empty else 0
+    }
+
+# NEW: Enhanced earnings calendar using Trading Economics
+def get_earnings_calendar() -> List[Dict]:
+    """Get earnings calendar using Trading Economics API"""
+    if trading_economics_client:
+        try:
+            # Get economic calendar which includes earnings
+            calendar = trading_economics_client.get_economic_calendar(days=7)
+            
+            # Filter for earnings-related events
+            earnings_events = []
+            for event in calendar:
+                if any(keyword in event.get("event", "").lower() for keyword in ["earnings", "results", "report"]):
+                    earnings_events.append({
+                        "ticker": event.get("currency", "N/A"),  # May need adjustment based on API response
+                        "date": event.get("date", ""),
+                        "time": event.get("time", ""),
+                        "estimate": event.get("forecast", ""),
+                        "importance": event.get("importance", "Medium")
+                    })
+            
+            if earnings_events:
+                return earnings_events
+        except Exception as e:
+            print(f"Trading Economics earnings error: {e}")
+    
+    # Fallback to simulated data
+    today = datetime.date.today().strftime("%Y-%m-%d")
+    
+    return [
+        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50", "importance": "High"},
+        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20", "importance": "High"},
+        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75", "importance": "High"},
+    ]
+
+# Enhanced AI analysis functions
+def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
+    """Enhanced AI playbook using comprehensive technical, fundamental, and options analysis"""
+    
+    # Get comprehensive analysis data
+    with st.spinner(f"Gathering comprehensive data for {ticker}..."):
+        quote = get_live_quote(ticker, st.session_state.selected_tz)
+        technical_analysis = get_comprehensive_technical_analysis(ticker)
+        fundamental_analysis = get_fundamental_analysis(ticker)
+        options_analysis = get_advanced_options_analysis(ticker)
+        
+        # Get news context
+        news = get_finnhub_news(ticker)
+        news_context = ""
+        if news:
+            news_context = f"Recent News: {news[0].get('headline', '')[:100]}..."
+    
+    # Construct comprehensive prompt
+    comprehensive_prompt = construct_comprehensive_analysis_prompt(
+        ticker, quote, technical_analysis, fundamental_analysis, 
+        options_analysis, news_context
+    )
+    
+    if st.session_state.ai_model == "Multi-AI":
+        # Use multi-AI consensus with enhanced data
+        analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
+        if analyses:
+            result = f"## 🤖 Enhanced Multi-AI Analysis for {ticker}\n\n"
+            result += f"**Data Sources:** {quote.get('data_source', 'Yahoo Finance')} | Updated: {quote['last_updated']}\n\n"
+            
+            for model, analysis in analyses.items():
+                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+            
+            # Add synthesis
+            synthesis = multi_ai.synthesize_consensus(analyses, ticker)
+            result += f"### 🎯 AI Consensus Summary:\n{synthesis}"
+            return result
+        else:
+            return f"**{ticker} Analysis** - No AI models available for multi-AI analysis."
+    
+    elif st.session_state.ai_model == "OpenAI":
+        if not openai_client:
+            return f"**{ticker} Analysis** (OpenAI API not configured)"
+        return multi_ai.analyze_with_openai(comprehensive_prompt)
+    
+    elif st.session_state.ai_model == "Gemini":
+        if not gemini_model:
+            return f"**{ticker} Analysis** (Gemini API not configured)"
+        return multi_ai.analyze_with_gemini(comprehensive_prompt)
+    
+    elif st.session_state.ai_model == "Grok":
+        if not grok_enhanced:
+            return f"**{ticker} Analysis** (Grok API not configured)"
+        return multi_ai.analyze_with_grok(comprehensive_prompt)
+    
+    else:
+        return "No AI model selected or configured."
+
+# Enhanced auto-generation with comprehensive analysis
+def ai_auto_generate_plays_enhanced(tz: str):
+    """Enhanced auto-generation with comprehensive analysis"""
+    plays = []
+    
+    try:
+        current_watchlist = st.session_state.watchlists[st.session_state.active_watchlist]
+        scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
+        
+        # Scan for significant movers with enhanced criteria
+        candidates = []
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:  # Increased workers for speed
+            future_to_ticker = {executor.submit(get_live_quote, ticker, tz): ticker for ticker in scan_tickers}
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker = future_to_ticker[future]
+                try:
+                    quote = future.result()
+                    if not quote["error"]:
+                        # Enhanced criteria for significance
+                        volume_significant = quote["volume"] > 500000  # Lower threshold for more opportunities
+                        price_significant = abs(quote["change_percent"]) >= 1.0  # Lower threshold
+                        spread_reasonable = (quote["ask"] - quote["bid"]) / quote["last"] < 0.03  # Max 3% spread
+                        
+                        if price_significant and volume_significant and spread_reasonable:
+                            candidates.append({
+                                "ticker": ticker,
+                                "quote": quote,
+                                "significance": abs(quote["change_percent"]) * (quote["volume"] / 1000000)  # Volume-weighted significance
+                            })
+                except Exception as exc:
+                    print(f'{ticker} generated an exception: {exc}')
+        
+        # Sort by significance and take top candidates
+        candidates.sort(key=lambda x: x["significance"], reverse=True)
+        top_candidates = candidates[:8]  # Increased from 5 to 8
+        
+        # Generate enhanced plays for top candidates
+        for candidate in top_candidates:
+            ticker = candidate["ticker"]
+            quote = candidate["quote"]
+            
+            # Get comprehensive analysis data
+            technical_analysis = get_comprehensive_technical_analysis(ticker)
+            fundamental_analysis = get_fundamental_analysis(ticker)
+            options_analysis = get_advanced_options_analysis(ticker)
+            
+            # Get recent news for context
+            news = get_finnhub_news(ticker)
+            catalyst = ""
+            if news:
+                catalyst = news[0].get('headline', '')[:100] + "..."
+            
+            # Generate comprehensive analysis
+            comprehensive_prompt = construct_comprehensive_analysis_prompt(
+                ticker, quote, technical_analysis, fundamental_analysis, 
+                options_analysis, catalyst
+            )
+            
+            # Generate AI analysis using selected model
+            if st.session_state.ai_model == "Multi-AI":
+                analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
+                if analyses:
+                    play_analysis = f"## Enhanced Multi-AI Analysis\n\n"
+                    for model, analysis in analyses.items():
+                        play_analysis += f"**{model}:** {analysis[:200]}...\n\n"
+                    synthesis = multi_ai.synthesize_consensus(analyses, ticker)
+                    play_analysis += f"**Consensus:** {synthesis}"
+                else:
+                    play_analysis = f"No AI models available for {ticker} analysis"
+            else:
+                play_analysis = ai_playbook(ticker, quote["change_percent"], catalyst, options_analysis)
+
+            # Create enhanced play dictionary
+            play = {
+                "ticker": ticker,
+                "current_price": quote['last'],
+                "change_percent": quote['change_percent'],
+                "session_data": {
+                    "premarket": quote['premarket_change'],
+                    "intraday": quote['intraday_change'],
+                    "afterhours": quote['postmarket_change']
+                },
+                "catalyst": catalyst if catalyst else f"Market movement: {quote['change_percent']:+.2f}%",
+                "play_analysis": play_analysis,
+                "volume": quote['volume'],
+                "timestamp": quote['last_updated'],
+                "data_source": quote.get('data_source', 'Yahoo Finance'),
+                "technical_summary": generate_technical_summary(technical_analysis),
+                "fundamental_summary": generate_fundamental_summary(fundamental_analysis),
+                "options_summary": generate_options_summary(options_analysis),
+                "significance_score": candidate["significance"]
+            }
+            plays.append(play)
+        
+        return plays
+    except Exception as e:
+        st.error(f"Error generating enhanced auto plays: {str(e)}")
+        return []
+
+def generate_technical_summary(technical: Dict) -> str:
+    """Generate concise technical summary"""
+    if technical.get("error"):
+        return f"Technical Error: {technical['error']}"
+    
+    if "short_term" in technical:
+        rsi = technical['short_term'].get('rsi', 0)
+        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
+    elif "rsi" in technical:
+        rsi = technical.get('rsi', 0)
+        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
+    
+    return "Technical analysis pending..."
+
+def generate_fundamental_summary(fundamental: Dict) -> str:
+    """Generate concise fundamental summary"""
+    if fundamental.get("error"):
+        return f"Fundamental Error: {fundamental['error']}"
+    
+    health = fundamental.get('financial_health', 'Unknown')
+    valuation = fundamental.get('valuation_assessment', 'Unknown')
+    pe = fundamental.get('pe_ratio', 'N/A')
+    
+    return f"Health: {health}, Valuation: {valuation}, P/E: {pe}"
+
+def generate_options_summary(options: Dict) -> str:
+    """Generate concise options summary"""
+    if options.get("error"):
+        return f"Options Error: {options['error']}"
+    
+    if options.get("unusual_whales_data"):
+        return f"UW Premium: ${options.get('total_premium', 0):,.0f}, Flows: {options.get('flow_count', 0)}"
+    
+    basic = options.get('basic_metrics', {})
+    flow = options.get('flow_analysis', {})
+    
+    pc_ratio = basic.get('put_call_volume_ratio', 0)
+    pc_ratio_str = f"{pc_ratio:.2f}" if pc_ratio is not None else "N/A"
+    
+    sentiment = flow.get('flow_sentiment', 'Neutral')
+    
+    return f"P/C Ratio: {pc_ratio_str}, Flow: {sentiment}"
+
+# Enhanced market analysis
+def ai_market_analysis_enhanced(news_items: List[Dict], movers: List[Dict]) -> str:
+    """Enhanced market analysis with comprehensive data"""
+    
+    # Gather market-wide technical data
+    market_technical = {}
+    key_indices = ["SPY", "QQQ", "IWM"]
+    
+    for index in key_indices:
+        try:
+            quote = get_live_quote(index)
+            technical = get_comprehensive_technical_analysis(index)
+            market_technical[index] = {
+                "price": quote['last'],
+                "change": quote['change_percent'],
+                "technical": technical
+            }
+        except:
+            continue
+    
+    # Analyze sector rotation
+    sector_data = analyze_sector_rotation()
+    
+    # Construct enhanced market analysis prompt
+    market_context = f"""
+Market Technical Overview:
+{format_market_technical(market_technical)}
+
+Sector Analysis:
+{sector_data}
+
+Top News Headlines:
+{chr(10).join([f"- {item['title']}" for item in news_items[:5]])}
+
+Top Market Movers:
+{chr(10).join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])}
+
+Provide comprehensive market analysis covering:
+1. Overall market sentiment and direction
+2. Key technical levels for major indices
+3. Sector rotation patterns and opportunities
+4. Risk-on vs risk-off positioning
+5. Trading opportunities and strategies
+6. Key events and catalysts to watch
+
+Keep analysis under 300 words but be specific and actionable.
+"""
+    
+    # Use selected AI model for analysis
+    if st.session_state.ai_model == "Multi-AI":
+        analyses = {}
+        if openai_client:
+            analyses["OpenAI"] = multi_ai.analyze_with_openai(market_context)
+        if gemini_model:
+            analyses["Gemini"] = multi_ai.analyze_with_gemini(market_context)
+        if grok_enhanced:
+            analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
+        
+        if analyses:
+            result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
+            
+            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
+            result += f"### 🎯 Market Consensus:\n{synthesis}"
+            return result
+    else:
+        # Use individual AI model
+        return multi_ai.analyze_with_openai(market_context) if openai_client else "AI analysis not available"
+
+def format_market_technical(market_tech: Dict) -> str:
+    """Format market technical data for prompt"""
+    formatted = ""
+    for symbol, data in market_tech.items():
+        formatted += f"{symbol}: ${data['price']:.2f} ({data['change']:+.2f}%)\n"
+    return formatted
+
+def analyze_sector_rotation() -> str:
+    """Analyze sector rotation patterns"""
+    sector_etfs = ["XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"]
+    sector_performance = {}
+    
+    for etf in sector_etfs:
+        try:
+            quote = get_live_quote(etf)
+            if not quote.get("error"):
+                sector_performance[etf] = quote['change_percent']
+        except:
+            continue
+    
+    # Sort by performance
+    sorted_sectors = sorted(sector_performance.items(), key=lambda x: x[1], reverse=True)
+    
+    result = "Sector Performance Today:\n"
+    for etf, perf in sorted_sectors[:5]:
+        result += f"- {etf}: {perf:+.2f}%\n"
+    
+    return result
+
+def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
+    """Enhanced market analysis using selected AI model"""
+    return ai_market_analysis_enhanced(news_items, movers)
+
+# Function to get important economic events using AI and Trading Economics
+def get_important_events() -> List[Dict]:
+    # Try Trading Economics first
+    if trading_economics_client:
+        try:
+            calendar = trading_economics_client.get_economic_calendar(days=7)
+            
+            # Filter for high-impact events
+            important_events = []
+            for event in calendar:
+                importance = event.get("importance", "").lower()
+                if "high" in importance or event.get("event", "").lower() in [
+                    "cpi", "ppi", "gdp", "unemployment", "fed", "fomc", "nonfarm", "retail"
+                ]:
+                    important_events.append({
+                        "event": event.get("event", "Unknown Event"),
+                        "date": event.get("date", ""),
+                        "time": event.get("time", ""),
+                        "impact": event.get("importance", "High")
+                    })
+            
+            if important_events:
+                return important_events[:10]  # Return top 10
+                
+        except Exception as e:
+            print(f"Trading Economics events error: {e}")
+    
+    # Fallback to AI generation if Trading Economics not available
+    if not openai_client and not gemini_model and not grok_enhanced:
+        return []
+    
+    try:
+        prompt = f"""
+        Provide a list of the most important economic events for the current week.
+        Focus on events that are known to move the market, such as CPI, FOMC meetings,
+        Unemployment Reports, and major Fed speeches.
+        
+        Format the response as a JSON array of objects, with each object having the following keys:
+        - "event": (string) The name of the event.
+        - "date": (string) The date of the event (e.g., "Monday, June 17").
+        - "time": (string) The time of the event (e.g., "10:00 AM ET").
+        - "impact": (string) The expected market impact (e.g., "High", "Medium", "Low").
+        
+        Do not include any text, notes, or explanations outside of the JSON.
+        """
+        
+        if st.session_state.ai_model == "Multi-AI":
+            # Use first available model for events
+            if openai_client:
+                response = multi_ai.analyze_with_openai(prompt)
+            elif gemini_model:
+                response = multi_ai.analyze_with_gemini(prompt)
+            elif grok_enhanced:
+                response = multi_ai.analyze_with_grok(prompt)
+            else:
+                return []
+        elif st.session_state.ai_model == "OpenAI" and openai_client:
+            response = multi_ai.analyze_with_openai(prompt)
+        elif st.session_state.ai_model == "Gemini" and gemini_model:
+            response = multi_ai.analyze_with_gemini(prompt)
+        elif st.session_state.ai_model == "Grok" and grok_enhanced:
+            response = multi_ai.analyze_with_grok(prompt)
+        else:
+            return []
+        
+        events = json.loads(response)
+        return events
+    except Exception as e:
+        st.error(f"Error fetching economic events: {str(e)}")
+        return []
+
+# Main app
+st.title("🔥 AI Radar Pro — Live Trading Assistant")
+
+# Timezone toggle (made smaller with column and smaller font)
+col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
+with col_tz:
+    st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
+                                                label_visibility="collapsed", help="Select Timezone (ET/CT)")
+
+# Get current time in selected TZ
+tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
+current_tz = datetime.datetime.now(tz_zone)
+tz_label = st.session_state.selected_tz
+
+# Enhanced AI Settings
+st.sidebar.subheader("🤖 AI Configuration")
+available_models = ["Multi-AI"] + multi_ai.get_available_models()
+st.session_state.ai_model = st.sidebar.selectbox("AI Model", available_models, 
+                                                  index=available_models.index(st.session_state.ai_model) if st.session_state.ai_model in available_models else 0)
+
+# Show AI model status
+st.sidebar.subheader("AI Models Status")
+if openai_client:
+    st.sidebar.success("✅ OpenAI Connected")
+else:
+    st.sidebar.warning("⚠️ OpenAI Not Connected")
+
+if gemini_model:
+    st.sidebar.success("✅ Gemini Connected")
+else:
+    st.sidebar.warning("⚠️ Gemini Not Connected")
+
+if grok_enhanced:
+    st.sidebar.success("✅ Grok Connected")
+else:
+    st.sidebar.warning("⚠️ Grok Not Connected")
+
+# UPDATED: Data Source Configuration - Unusual Whales Primary
+st.sidebar.subheader("📊 Data Configuration")
+available_sources = ["Unusual Whales"]
+if alpha_vantage_client:
+    available_sources.append("Alpha Vantage")
+if twelvedata_client:
+    available_sources.append("Twelve Data")
+available_sources.append("Yahoo Finance")
+st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", available_sources, index=0)
+
+# UPDATED: Data source status with Unusual Whales and Trading Economics
+st.sidebar.subheader("Data Sources")
+
+# Debug toggle and API test
+debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
+st.session_state.debug_mode = debug_mode
+
+if debug_mode:
+    st.sidebar.subheader("🔬 Enhanced Data Debug")
+    debug_ticker = st.sidebar.selectbox("Debug Ticker", CORE_TICKERS[:10])
+    
+    if st.sidebar.button("🧪 Test Enhanced Analysis"):
+        with st.sidebar:
+            st.write("**Testing Enhanced Functions:**")
+            
+            # Test Unusual Whales
+            if unusual_whales_client:
+                uw_result = unusual_whales_client.get_quote(debug_ticker)
+                st.write(f"Unusual Whales: {'✅' if not uw_result.get('error') else '❌'}")
+            
+            # Test technical analysis
+            tech_result = get_comprehensive_technical_analysis(debug_ticker)
+            st.write(f"Technical: {'✅' if not tech_result.get('error') else '❌'}")
+            
+            # Test fundamental analysis  
+            fund_result = get_fundamental_analysis(debug_ticker)
+            st.write(f"Fundamental: {'✅' if not fund_result.get('error') else '❌'}")
+            
+            # Test options analysis
+            opt_result = get_advanced_options_analysis(debug_ticker)
+            st.write(f"Options: {'✅' if not opt_result.get('error') else '❌'}")
+            
+            if st.checkbox("Show Raw Data"):
+                st.json({"uw": uw_result if unusual_whales_client else None, 
+                        "tech": tech_result, "fund": fund_result, "opts": opt_result})
+
+if debug_mode and st.sidebar.button("🧪 Test All APIs"):
+    st.sidebar.write("**Testing Data APIs:**")
+    
+    if unusual_whales_client:
+        with st.spinner("Testing Unusual Whales API..."):
+            test_response = unusual_whales_client.get_quote("AAPL")
+            st.sidebar.json(test_response)
+    
+    if trading_economics_client:
+        with st.spinner("Testing Trading Economics API..."):
+            test_calendar = trading_economics_client.get_economic_calendar(days=1)
+            st.sidebar.write(f"Trading Economics: {len(test_calendar)} events found")
+    
+    if twelvedata_client:
+        with st.spinner("Testing Twelve Data API..."):
+            test_response = twelvedata_client.get_quote("AAPL")
+            st.sidebar.json(test_response)
+    
+    st.sidebar.write("**Testing AI APIs:**")
+    test_prompt = "Test connection - respond with 'OK'"
+    
+    if openai_client:
+        openai_test = multi_ai.analyze_with_openai(test_prompt)
+        st.sidebar.write(f"OpenAI: {openai_test[:50]}...")
+    
+    if gemini_model:
+        gemini_test = multi_ai.analyze_with_gemini(test_prompt)
+        st.sidebar.write(f"Gemini: {gemini_test[:50]}...")
+    
+    if grok_enhanced:
+        grok_test = multi_ai.analyze_with_grok(test_prompt)
+        st.sidebar.write(f"Grok: {grok_test[:50]}...")
+
+# UPDATED: Show available data sources with new APIs
+if unusual_whales_client:
+    st.sidebar.success("✅ Unusual Whales Connected (PRIMARY)")
+else:
+    st.sidebar.error("❌ Unusual Whales Not Connected")
+
+if trading_economics_client:
+    st.sidebar.success("✅ Trading Economics Connected")
+else:
+    st.sidebar.warning("⚠️ Trading Economics Not Connected")
+
+if twelvedata_client:
+    st.sidebar.success("✅ Twelve Data Connected")
+else:
+    st.sidebar.warning("⚠️ Twelve Data Not Connected")
+
+if alpha_vantage_client:
+    st.sidebar.success("✅ Alpha Vantage Connected")
+else:
+    st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
+
+st.sidebar.success("✅ Yahoo Finance Connected (Fallback)")
+
+if FINNHUB_KEY:
+    st.sidebar.success("✅ Finnhub API Connected")
+else:
+    st.sidebar.warning("⚠️ Finnhub API Not Found")
+
+if POLYGON_KEY:
+    st.sidebar.success("✅ Polygon API Connected (News)")
+else:
+    st.sidebar.warning("⚠️ Polygon API Not Found")
+
+# UPDATED: Auto-refresh controls with faster intervals
+col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
+with col1:
+    st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
+
+with col2:
+    st.session_state.refresh_interval = st.selectbox("Interval", [5, 10, 15, 30], index=1)  # Faster intervals
+
+with col3:
+    if st.button("🔄 Refresh Now"):
+        st.cache_data.clear()
+        st.rerun()
+
+with col4:
+    current_time = current_tz.strftime("%I:%M:%S %p")
+    market_open = 9 <= current_tz.hour < 16
+    status = "🟢 Open" if market_open else "🔴 Closed"
+    st.write(f"**{status}** | {current_time} {tz_label}")
+
+# Create tabs
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+
+# Global timestamp
+data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
+data_sources = []
+if unusual_whales_client:
+    data_sources.append("Unusual Whales")
+if alpha_vantage_client:
+    data_sources.append("Alpha Vantage")
+if twelvedata_client:
+    data_sources.append("Twelve Data")
+data_sources.append("Yahoo Finance")
+data_source_info = " + ".join(data_sources)
+
+# AI model info
+ai_info = f"AI: {st.session_state.ai_model}"
+if st.session_state.ai_model == "Multi-AI":
+    active_models = multi_ai.get_available_models()
+    ai_info += f" ({'+'.join(active_models)})" if active_models else " (None Available)"
+
+# TAB 1: Live Quotes - ENHANCED with Unusual Whales
+with tabs[0]:
+    st.subheader("📊 Real-Time Watchlist & Market Movers")
+    
+    # Enhanced session status showing data source priority
+    current_tz_hour = current_tz.hour
+    if 4 <= current_tz_hour < 9:
+        session_status = "🌅 Premarket"
+    elif 9 <= current_tz_hour < 16:
+        session_status = "🟢 Market Open"
+    else:
+        session_status = "🌆 After Hours"
+    
+    st.markdown(f"**Trading Session ({tz_label}):** {session_status}")
+    
+    # Show data source hierarchy
+    if unusual_whales_client:
+        st.info("🐋 **PRIMARY**: Unusual Whales → Alpha Vantage → Twelve Data → Yahoo Finance")
+    else:
+        st.warning("⚠️ **Unusual Whales not connected** - Using fallback sources")
+    
+    # Search bar for any ticker
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)", key="search_quotes").upper().strip()
+    with col2:
+        search_quotes = st.button("Get Quote", key="search_quotes_btn")
+    
+    # Search result for any ticker
+    if search_quotes and search_ticker:
+        with st.spinner(f"Getting quote for {search_ticker}..."):
+            quote = get_live_quote(search_ticker, tz_label)
+            if not quote["error"]:
+                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                col1.metric(search_ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Bid/Ask", f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+                col3.metric("Volume", f"{quote['volume']:,}")
+                
+                # Session breakdown
+                st.markdown("#### Session Performance")
+                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                # Enhanced Analysis Button with Unusual Whales data
+                if col4.button(f"📊 Enhanced Analysis", key=f"quotes_enhanced_{search_ticker}"):
+                    with st.spinner(f"Running comprehensive analysis for {search_ticker}..."):
+                        technical = get_comprehensive_technical_analysis(search_ticker)
+                        fundamental = get_fundamental_analysis(search_ticker)
+                        options = get_advanced_options_analysis(search_ticker)
+                        
+                        # Show Unusual Whales institutional data if available
+                        if unusual_whales_client:
+                            institutional = unusual_whales_client.get_institutional_activity(search_ticker)
+                            if not institutional.get("error"):
+                                st.success("🐋 Unusual Whales Institutional Activity")
+                                inst_data = institutional.get("activity", [])
+                                if inst_data:
+                                    for activity in inst_data[:3]:  # Show top 3
+                                        st.write(f"• {activity.get('type', 'Unknown')}: ${activity.get('value', 0):,.0f}")
+                        
+                        # Display technical summary
+                        if not technical.get("error"):
+                            st.success("✅ Technical Analysis Complete")
+                            tech_col1, tech_col2, tech_col3 = st.columns(3)
+                            if "short_term" in technical:
+                                tech_col1.metric("RSI", f"{technical['short_term'].get('rsi', 0):.1f}")
+                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
+                                tech_col3.metric("Signal", technical.get('signal_strength', 'Unknown'))
+                            elif "rsi" in technical:
+                                tech_col1.metric("RSI", f"{technical.get('rsi', 0):.1f}")
+                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
+                                tech_col3.metric("BB Position", f"{technical.get('bb_position', 0):.2f}")
+                        
+                        # Display fundamental summary  
+                        if not fundamental.get("error"):
+                            st.success("✅ Fundamental Analysis Complete")
+                            fund_col1, fund_col2, fund_col3 = st.columns(3)
+                            fund_col1.metric("Health", fundamental.get('financial_health', 'Unknown'))
+                            fund_col2.metric("Valuation", fundamental.get('valuation_assessment', 'Unknown'))
+                            fund_col3.metric("P/E Ratio", fundamental.get('pe_ratio', 'N/A'))
+                        
+                        # Display enhanced options summary with UW data
+                        if not options.get("error"):
+                            if options.get("unusual_whales_data"):
+                                st.success("🐋 Unusual Whales Options Flow Complete")
+                                opt_col1, opt_col2, opt_col3 = st.columns(3)
+                                opt_col1.metric("Total Premium", f"${options.get('total_premium', 0):,.0f}")
+                                opt_col2.metric("Flow Count", options.get('flow_count', 0))
+                                opt_col3.metric("Unusual Alerts", len(options.get('unusual_activity', [])))
+                            else:
+                                st.success("✅ Options Analysis Complete")
+                                opt_col1, opt_col2, opt_col3 = st.columns(3)
+                                basic = options.get('basic_metrics', {})
+                                flow = options.get('flow_analysis', {})
+                                opt_col1.metric("P/C Ratio", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                                opt_col2.metric("Flow Sentiment", flow.get('flow_sentiment', 'Neutral'))
+                                opt_col3.metric("Unusual Activity", f"{options.get('unusual_activity', {}).get('total_unusual_contracts', 0)}")
+                
+                if col4.button(f"Add {search_ticker} to Watchlist", key="quotes_add_searched_ticker"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_ticker not in current_list:
+                        current_list.append(search_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_ticker} to watchlist!")
+                        st.rerun()
+                st.divider()
+            else:
+                st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
+    
+    # Watchlist display with enhanced data
+    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+    st.markdown("### Your Watchlist")
+    if not tickers:
+        st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab or check Market Movers below.")
+    else:
+        for ticker in tickers:
+            quote = get_live_quote(ticker, tz_label)
+            if quote["error"]:
+                st.error(f"{ticker}: {quote['error']}")
+                continue
+            
+            with st.container():
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
+                
+                col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.write("**Bid/Ask**")
+                col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+                col3.write("**Volume**")
+                col3.write(f"{quote['volume']:,}")
+                col3.caption(f"Updated: {quote['last_updated']}")
+                col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
+                
+                # Show data source indicator
+                source = quote.get('data_source', 'Yahoo Finance')
+                if source == "Unusual Whales":
+                    col3.success("🐋 UW")
+                elif source in ["Alpha Vantage", "Twelve Data"]:
+                    col3.info(f"📊 {source[:2]}")
+                else:
+                    col3.warning("📈 YF")
+                
+                if abs(quote['change_percent']) >= 1.0:  # Lowered threshold
+                    if col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
+                        with st.spinner(f"Analyzing {ticker}..."):
+                            options_data = get_options_data(ticker)
+                            analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
+                            st.success(f"🤖 {ticker} Analysis")
+                            st.markdown(analysis)
+                
+                # Session data
+                sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
+                sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
+                sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
+                sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
+                
+                with st.expander(f"🔎 Expand {ticker}"):
+                    news = get_finnhub_news(ticker)
+                    if news:
+                        st.write("### 📰 Catalysts (last 24h)")
+                        for n in news:
+                            st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
+                    else:
+                        st.info("No recent news.")
+                    
+                    # Show Unusual Whales Options Flow if available
+                    if unusual_whales_client:
+                        uw_options = unusual_whales_client.get_options_flow(ticker)
+                        if not uw_options.get("error"):
+                            st.write("### 🐋 Unusual Whales Options Flow")
+                            flows = uw_options.get("flows", [])
+                            if flows:
+                                for flow in flows[:3]:  # Show top 3
+                                    sentiment = flow.get("sentiment", "neutral")
+                                    emoji = "📈" if sentiment == "bullish" else "📉" if sentiment == "bearish" else "⚪"
+                                    st.write(f"{emoji} {flow.get('type', 'Unknown')}: ${flow.get('premium', 0):,.0f}")
+                    
+                    st.markdown("### 🎯 AI Playbook")
+                    catalyst_title = news[0].get('headline', '') if news else ""
+                    options_data = get_options_data(ticker)
+                    if options_data:
+                        st.write("**Options Metrics:**")
+                        opt_col1, opt_col2, opt_col3 = st.columns(3)
+                        opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
+                        opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                        st.caption("Note: Options data from yfinance + Unusual Whales")
+                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
+                
+                st.divider()
+
+    # Top Market Movers - Enhanced with faster scanning
+    st.markdown("### 🌟 Top Market Movers")
+    st.caption("Stocks with significant intraday movement from CORE_TICKERS (Enhanced with Unusual Whales)")
+    
+    if st.button("🔄 Refresh Movers", key="refresh_movers"):
+        with st.spinner("Scanning market movers..."):
+            movers = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_ticker = {executor.submit(get_live_quote, ticker, tz_label): ticker for ticker in CORE_TICKERS[:25]}  # Increased from 20 to 25
+                for future in concurrent.futures.as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        quote = future.result()
+                        if not quote["error"]:
+                            movers.append({
+                                "ticker": ticker,
+                                "change_pct": quote["change_percent"],
+                                "price": quote["last"],
+                                "volume": quote["volume"],
+                                "data_source": quote.get("data_source", "Yahoo Finance")
+                            })
+                    except Exception as exc:
+                        print(f'{ticker} generated an exception: {exc}')
+            
+            movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+            top_movers = movers[:12]  # Show top 12 movers
+
+            for mover in top_movers:
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                    direction = "🚀" if mover["change_pct"] > 0 else "📉"
+                    col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
+                    col2.write("**Volume**")
+                    col2.write(f"{mover['volume']:,}")
+                    col3.write("**Source**")
+                    source = mover['data_source']
+                    if source == "Unusual Whales":
+                        col3.success("🐋 UW")
+                    else:
+                        col3.write(source)
+                    
+                    if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"quotes_mover_{mover['ticker']}"):
+                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                        if mover['ticker'] not in current_list:
+                            current_list.append(mover['ticker'])
+                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                            st.success(f"Added {mover['ticker']} to watchlist!")
+                            st.rerun()
+                    st.divider()
+    else:
+        st.info("Click 'Refresh Movers' to scan the market for significant moves")
+
+# TAB 2: Watchlist Manager
+with tabs[1]:
+    st.subheader("📋 Watchlist Manager")
+    
+    # Search and add
+    st.markdown("### 🔍 Search & Add Stocks")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_add_ticker = st.text_input("Search stock to add", placeholder="Enter ticker", key="search_add").upper().strip()
+    with col2:
+        if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
+            quote = get_live_quote(search_add_ticker, tz_label)
+            if not quote["error"]:
+                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                if search_add_ticker not in current_list:
+                    current_list.append(search_add_ticker)
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                    st.success(f"✅ Added {search_add_ticker}")
+                    st.rerun()
+                else:
+                    st.warning(f"{search_add_ticker} already in watchlist")
+            else:
+                st.error(f"Invalid ticker: {search_add_ticker}")
+    
+    # Watchlist management
+    st.markdown("### 📋 Manage Watchlists")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        selected_watchlist = st.selectbox("Active Watchlist", list(st.session_state.watchlists.keys()))
+        st.session_state.active_watchlist = selected_watchlist
+    
+    with col2:
+        new_watchlist = st.text_input("New Watchlist Name")
+        if st.button("Create Watchlist") and new_watchlist:
+            st.session_state.watchlists[new_watchlist] = []
+            st.session_state.active_watchlist = new_watchlist
+            st.rerun()
+    
+    current_tickers = st.session_state.watchlists[st.session_state.active_watchlist].copy()
+    
+    # Clean up any existing duplicates
+    unique_current_tickers = list(dict.fromkeys(current_tickers))
+    if len(unique_current_tickers) != len(current_tickers):
+        st.session_state.watchlists[st.session_state.active_watchlist] = unique_current_tickers
+        current_tickers = unique_current_tickers
+        st.rerun()  # Refresh to show cleaned list
+    
+    # Popular tickers
+    st.markdown("### ⭐ Popular Tickers")
+    cols = st.columns(6)
+    for i, ticker in enumerate(CORE_TICKERS):
+        with cols[i % 6]:
+            if st.button(f"+ {ticker}", key=f"watchlist_add_{ticker}"):
+                if ticker not in current_tickers:
+                    current_tickers.append(ticker)
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
+                    st.success(f"Added {ticker}")
+                    st.rerun()
+    
+    # Current watchlist
+    st.markdown("### 📊 Current Watchlist")
+    if current_tickers:
+        for i in range(0, len(current_tickers), 5):
+            cols = st.columns(5)
+            for j, ticker in enumerate(current_tickers[i:i+5]):
+                with cols[j]:
+                    st.write(f"**{ticker}**")
+                    if st.button(f"Remove", key=f"watchlist_remove_{ticker}"):
+                        current_tickers.remove(ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
+                        st.rerun()
+
+# TAB 3: Enhanced Catalyst Scanner with Unusual Whales Integration
+with tabs[2]:
+    st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
+    st.caption("Comprehensive news analysis + Unusual Whales institutional activity")
+    
+    # Show data sources status including UW
+    sources_status = []
+    if unusual_whales_client:
+        sources_status.append("✅ Unusual Whales")
+    else:
+        sources_status.append("❌ Unusual Whales")
+    if FINNHUB_KEY:
+        sources_status.append("✅ Finnhub")
+    else:
+        sources_status.append("❌ Finnhub")
+    if POLYGON_KEY:
+        sources_status.append("✅ Polygon")
+    else:
+        sources_status.append("❌ Polygon")
+    sources_status.append("✅ Yahoo Finance")
+    
+    st.info(f"**Data Sources:** {' | '.join(sources_status)}")
+    
+    # Search specific stock catalysts with UW integration
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_catalyst_ticker = st.text_input("🔍 Search catalysts for stock", placeholder="Enter ticker", key="search_catalyst").upper().strip()
+    with col2:
+        search_catalyst = st.button("🔍 Analyze Catalysts", key="search_catalyst_btn")
+    
+    if search_catalyst and search_catalyst_ticker:
+        with st.spinner(f"Searching all sources for {search_catalyst_ticker} catalysts..."):
+            # Get comprehensive catalyst analysis
+            catalyst_data = get_stock_specific_catalysts(search_catalyst_ticker)
+            quote = get_live_quote(search_catalyst_ticker, tz_label)
+            
+            # Get Unusual Whales institutional activity
+            institutional_data = None
+            if unusual_whales_client:
+                institutional_data = unusual_whales_client.get_institutional_activity(search_catalyst_ticker)
+            
+            if not quote["error"]:
+                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                
+                # Price and volume info
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Volume", f"{quote['volume']:,}")
+                col3.metric("Total Catalysts", catalyst_data["catalyst_summary"]["total_catalysts"])
+                col4.metric("Highest Impact", f"{catalyst_data['catalyst_summary']['highest_impact']}")
+                
+                # Show institutional activity if available
+                if institutional_data and not institutional_data.get("error"):
+                    st.markdown("#### 🐋 Unusual Whales Institutional Activity")
+                    inst_activity = institutional_data.get("activity", [])
+                    if inst_activity:
+                        inst_col1, inst_col2, inst_col3 = st.columns(3)
+                        for i, activity in enumerate(inst_activity[:3]):
+                            with [inst_col1, inst_col2, inst_col3][i]:
+                                st.metric(
+                                    activity.get("type", "Unknown"),
+                                    f"${activity.get('value', 0):,.0f}",
+                                    activity.get("description", "")
+                                )
+                
+                # Session breakdown
+                st.markdown("#### Session Performance")
+                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%") 
+                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                # Catalyst Summary
+                st.markdown("#### 📊 Catalyst Summary")
+                summary = catalyst_data["catalyst_summary"]
+                
+                summary_col1, summary_col2, summary_col3 = st.columns(3)
+                summary_col1.metric("Positive", summary["positive_catalysts"], help="Bullish catalysts")
+                summary_col2.metric("Negative", summary["negative_catalysts"], help="Bearish catalysts")
+                summary_col3.metric("Categories", len(summary["primary_categories"]), help="Types of catalysts found")
+                
+                # Primary Categories
+                if summary["primary_categories"]:
+                    st.write("**Main Catalyst Categories:**")
+                    for category, count in summary["primary_categories"]:
+                        st.write(f"• {category.replace('_', ' ').title()}: {count} items")
+                
+                # Trading Implications
+                if catalyst_data["trading_implications"]:
+                    st.markdown("#### 🎯 Trading Implications")
+                    st.markdown(catalyst_data["trading_implications"])
+                
+                # Individual News Items
+                if catalyst_data["news_items"]:
+                    st.markdown("#### 📰 Individual Catalysts")
+                    
+                    # Sort by catalyst strength
+                    sorted_news = sorted(catalyst_data["news_items"], 
+                                       key=lambda x: x["catalyst_analysis"]["catalyst_strength"], 
+                                       reverse=True)
+                    
+                    for i, news_item in enumerate(sorted_news[:10]):  # Show top 10
+                        analysis = news_item["catalyst_analysis"]
+                        
+                        # Create impact indicator
+                        if analysis["impact_level"] == "high":
+                            impact_emoji = "🚀"
+                        elif analysis["impact_level"] == "medium":
+                            impact_emoji = "📈"
+                        else:
+                            impact_emoji = "📊"
+                        
+                        # Sentiment indicator
+                        sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                        
+                        with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news_item['title'][:80]}... | {news_item['source']}"):
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                st.write(f"**Summary:** {news_item.get('summary', 'No summary available')}")
+                                st.write(f"**Source:** {news_item['source']} | **Provider:** {news_item.get('provider', 'Unknown')}")
+                                if news_item.get('url'):
+                                    st.markdown(f"[📖 Read Full Article]({news_item['url']})")
+                            
+                            with col2:
+                                st.metric("Impact", f"{analysis['catalyst_strength']}/100")
+                                st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
+                                st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
+                                st.write(f"**Level:** {analysis['impact_level'].title()}")
+                
+                # Add to watchlist button
+                if st.button(f"Add {search_catalyst_ticker} to Watchlist", key="catalyst_add_searched_ticker"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_catalyst_ticker not in current_list:
+                        current_list.append(search_catalyst_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_catalyst_ticker} to watchlist!")
+                        st.rerun()
+                
+                st.divider()
+            else:
+                st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
+    
+    # Main market catalyst scan
+    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
+    
+    scan_col1, scan_col2 = st.columns([2, 1])
+    with scan_col1:
+        st.caption("Scan all news sources + institutional activity for market-moving catalysts")
+    with scan_col2:
+        scan_type = st.selectbox("Scan Type", ["All Catalysts", "High Impact Only", "By Category"], key="catalyst_scan_type")
+    
+    if st.button("🔍 Scan Market Catalysts", type="primary"):
+        with st.spinner("Scanning all sources for market catalysts..."):
+            # Get market-moving news
+            market_news = get_market_moving_news()
+            
+            # Get significant movers for correlation with faster scanning
+            movers = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_ticker = {executor.submit(get_live_quote, ticker, tz_label): ticker for ticker in CORE_TICKERS[:25]}
+                for future in concurrent.futures.as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        quote = future.result()
+                        if not quote["error"] and abs(quote["change_percent"]) >= 1.0:  # Lowered threshold
+                            movers.append({
+                                "ticker": ticker,
+                                "change_pct": quote["change_percent"],
+                                "price": quote["last"],
+                                "volume": quote["volume"],
+                                "data_source": quote.get("data_source", "Yahoo Finance")
+                            })
+                    except Exception as exc:
+                        print(f'{ticker} generated an exception: {exc}')
+            
+            movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
+            
+            # Display results based on scan type
+            if scan_type == "High Impact Only":
+                filtered_news = [n for n in market_news if n["catalyst_analysis"]["impact_level"] == "high"]
+            elif scan_type == "By Category":
+                # Group by category
+                category_groups = {}
+                for n in market_news:
+                    cat = n["catalyst_analysis"]["primary_category"]
+                    if cat not in category_groups:
+                        category_groups[cat] = []
+                    category_groups[cat].append(n)
+                
+                st.markdown("### 📊 Catalysts by Category")
+                for category, news_items in category_groups.items():
+                    with st.expander(f"📂 {category.replace('_', ' ').title()} ({len(news_items)} items)"):
+                        for news in news_items[:5]:  # Show top 5 per category
+                            analysis = news["catalyst_analysis"]
+                            sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                            
+                            st.write(f"{sentiment_emoji} **{news['title']}** ({news['source']})")
+                            st.write(f"Impact: {analysis['catalyst_strength']}/100 | Sentiment: {analysis['sentiment'].title()}")
+                            if news.get('related'):
+                                st.write(f"Related: {news['related']}")
+                            st.write("---")
+                filtered_news = []  # Don't show main list for category view
+            else:
+                filtered_news = market_news
+            
+            # Display main catalyst list
+            if filtered_news:
+                st.markdown("### 🔥 Market-Moving Catalysts")
+                st.caption(f"Found {len(filtered_news)} significant catalysts from all sources")
+                
+                # Summary metrics
+                high_impact = len([n for n in filtered_news if n["catalyst_analysis"]["impact_level"] == "high"])
+                positive_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "positive"])
+                negative_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "negative"])
+                
+                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+                metric_col1.metric("Total Catalysts", len(filtered_news))
+                metric_col2.metric("High Impact", high_impact)
+                metric_col3.metric("Positive", positive_news)
+                metric_col4.metric("Negative", negative_news)
+                
+                # Display news items
+                for i, news in enumerate(filtered_news[:15]):  # Show top 15
+                    analysis = news["catalyst_analysis"]
+                    
+                    # Impact and sentiment indicators
+                    if analysis["impact_level"] == "high":
+                        impact_emoji = "🚀"
+                    elif analysis["impact_level"] == "medium":
+                        impact_emoji = "📈"
+                    else:
+                        impact_emoji = "📊"
+                    
+                    sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
+                    
+                    with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news['title'][:100]}... | {news['source']}"):
+                        col1, col2 = st.columns([3, 1])
+                        
+                        with col1:
+                            st.write(f"**Summary:** {news['summary'][:300]}{'...' if len(news['summary']) > 300 else ''}")
+                            st.write(f"**Source:** {news['source']} | **Provider:** {news.get('provider', 'Unknown')}")
+                            if news.get('related'):
+                                st.write(f"**Related Tickers:** {news['related']}")
+                            if news.get('url'):
+                                st.markdown(f"[📖 Read Full Article]({news['url']})")
+                        
+                        with col2:
+                            st.metric("Impact Score", f"{analysis['catalyst_strength']}/100")
+                            st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
+                            st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
+                            st.write(f"**Impact Level:** {analysis['impact_level'].title()}")
+                            
+                            # Category breakdown
+                            if analysis["category_scores"]:
+                                st.write("**Categories:**")
+                                for cat, score in list(analysis["category_scores"].items())[:3]:
+                                    st.write(f"• {cat}: {score}")
+            
+            # Display significant market movers with enhanced data
+            if movers:
+                st.markdown("### 📊 Significant Market Moves")
+                st.caption("Stocks with major price movements that may be catalyst-driven")
+                
+                for mover in movers[:12]:  # Increased from 10 to 12
+                    col1, col2, col3 = st.columns([2, 2, 1])
+                    with col1:
+                        direction = "🚀" if mover["change_pct"] > 0 else "📉"
+                        st.metric(
+                            f"{direction} {mover['ticker']}", 
+                            f"${mover['price']:.2f}",
+                            f"{mover['change_pct']:+.2f}%"
+                        )
+                    with col2:
+                        st.write(f"Volume: {mover['volume']:,}")
+                        source = mover.get('data_source', 'Yahoo Finance')
+                        if source == "Unusual Whales":
+                            st.success(f"🐋 {source}")
+                        else:
+                            st.caption(f"Source: {source}")
+                    with col3:
+                        if st.button(f"📰 News", key=f"catalyst_news_{mover['ticker']}"):
+                            # Quick news lookup for this ticker
+                            ticker_news = get_comprehensive_news(mover['ticker'])
+                            if ticker_news:
+                                st.write(f"**Recent news for {mover['ticker']}:**")
+                                for news in ticker_news[:3]:
+                                    st.write(f"• {news['title'][:80]}... ({news['source']})")
+                            else:
+                                st.write(f"No recent news found for {mover['ticker']}")
+                        
+                        if st.button(f"Add", key=f"catalyst_add_mover_{mover['ticker']}"):
+                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                            if mover['ticker'] not in current_list:
+                                current_list.append(mover['ticker'])
+                                st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                st.success(f"Added {mover['ticker']}")
+                                st.rerun()
+
+# TAB 4: Market Analysis - Enhanced with comprehensive data
+with tabs[3]:
+    st.subheader("📈 AI Market Analysis")
+    
+    # Search individual analysis with enhanced data sources
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_analysis_ticker = st.text_input("🔍 Analyze specific stock", placeholder="Enter ticker", key="search_analysis").upper().strip()
+    with col2:
+        search_analysis = st.button("Analyze Stock", key="search_analysis_btn")
+    
+    if search_analysis and search_analysis_ticker:
+        with st.spinner(f"AI analyzing {search_analysis_ticker}..."):
+            quote = get_live_quote(search_analysis_ticker, tz_label)
+            if not quote["error"]:
+                news = get_finnhub_news(search_analysis_ticker)
+                catalyst = news[0].get('headline', '') if news else "Recent market movement"
+                
+                # Get enhanced options data including UW flow
+                options_data = get_options_data(search_analysis_ticker)
+                
+                # Get UW institutional data if available
+                institutional_data = None
+                if unusual_whales_client:
+                    institutional_data = unusual_whales_client.get_institutional_activity(search_analysis_ticker)
+                
+                analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst, options_data)
+                
+                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Volume", f"{quote['volume']:,}")
+                col3.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                if col4.button(f"Add {search_analysis_ticker} to WL", key="analysis_add_searched_ticker"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_analysis_ticker not in current_list:
+                        current_list.append(search_analysis_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_analysis_ticker}")
+                        st.rerun()
+                
+                # Session breakdown
+                st.markdown("#### Session Performance")
+                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                # Show institutional activity if available
+                if institutional_data and not institutional_data.get("error"):
+                    st.markdown("#### 🐋 Institutional Activity")
+                    inst_activity = institutional_data.get("activity", [])
+                    if inst_activity:
+                        inst_cols = st.columns(min(3, len(inst_activity)))
+                        for i, activity in enumerate(inst_activity[:3]):
+                            with inst_cols[i]:
+                                st.metric(
+                                    activity.get("type", "Unknown"),
+                                    f"${activity.get('value', 0):,.0f}",
+                                    activity.get("description", "")
+                                )
+                
+                # Show options data if available
+                if options_data:
+                    st.markdown("#### Options Metrics")
+                    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
+                    opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
+                    opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
+                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
+                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
+                    st.caption("Options data: yfinance + Unusual Whales")
+                
+                st.markdown("### 🎯 AI Analysis")
+                st.markdown(analysis)
+                
+                if news:
+                    with st.expander(f"📰 Recent News Context"):
+                        for item in news[:3]:
+                            st.write(f"**{item.get('headline', 'No title')}**")
+                            st.write(item.get('summary', 'No summary')[:200] + "...")
+                            st.write("---")
+                
+                st.divider()
+            else:
+                st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
+    
+    # Main market analysis
+    if st.button("🤖 Generate Market Analysis", type="primary"):
+        with st.spinner("AI analyzing market conditions..."):
+            news_items = get_all_news()
+            
+            # Enhanced movers scanning with increased speed
+            movers = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_ticker = {executor.submit(get_live_quote, ticker, tz_label): ticker for ticker in CORE_TICKERS[:20]}
+                for future in concurrent.futures.as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        quote = future.result()
+                        if not quote["error"]:
+                            movers.append({
+                                "ticker": ticker,
+                                "change_pct": quote["change_percent"],
+                                "price": quote["last"],
+                                "data_source": quote.get("data_source", "Yahoo Finance")
+                            })
+                    except Exception as exc:
+                        print(f'{ticker} generated an exception: {exc}')
+            
+            analysis = ai_market_analysis(news_items, movers)
+            
+            st.success("🤖 AI Market Analysis Complete")
+            st.markdown(analysis)
+            
+            with st.expander("📊 Supporting Data"):
+                st.write("**Top Market Movers:**")
+                for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
+                    source_emoji = "🐋" if mover.get('data_source') == "Unusual Whales" else "📊"
+                    st.write(f"• {source_emoji} {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Yahoo Finance')}")
+                
+                st.write("**Key News Headlines:**")
+                for news in news_items[:3]:
+                    st.write(f"• {news['title']}")
+
+# Continue with remaining tabs...
+# TAB 5: AI Playbooks - Enhanced for 80-100% accuracy
+with tabs[4]:
+    st.subheader("🤖 AI Trading Playbooks")
+    
+    # Show current AI configuration with accuracy focus
+    st.info(f"🤖 Current AI Mode: **{st.session_state.ai_model}** | Available Models: {', '.join(multi_ai.get_available_models()) if multi_ai.get_available_models() else 'None'}")
+    st.success("🎯 **Targeting 80-100% Trading Accuracy** with enhanced data sources")
+    
+    # Auto-generated plays section - Enhanced with UW data
+    st.markdown("### 🎯 Auto-Generated High-Accuracy Trading Plays")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption("AI scans comprehensive data sources including Unusual Whales for institutional-grade trading opportunities")
+    with col2:
+        if st.button("🚀 Generate Auto Plays", type="primary"):
+            with st.spinner("AI generating high-accuracy trading plays..."):
+                auto_plays = ai_auto_generate_plays_enhanced(tz_label)
+                
+                if auto_plays:
+                    st.success(f"🤖 Generated {len(auto_plays)} High-Accuracy Trading Plays")
+                    
+                    for i, play in enumerate(auto_plays):
+                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Yahoo Finance')}"):
+                            
+                            # Display session data
+                            sess_col1, sess_col2, sess_col3 = st.columns(3)
+                            sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
+                            sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
+                            sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
+                            
+                            # Display catalyst
+                            if play['catalyst']:
+                                st.write(f"**Catalyst:** {play['catalyst']}")
+                            
+                            # Display enhanced summaries
+                            st.write(f"**Technical:** {play['technical_summary']}")
+                            st.write(f"**Fundamental:** {play['fundamental_summary']}")
+                            st.write(f"**Options:** {play['options_summary']}")
+                            st.write(f"**Significance Score:** {play['significance_score']:.2f}")
+                            
+                            # Display AI play analysis with accuracy focus
+                            st.markdown("**🎯 High-Accuracy Trading Play:**")
+                            st.markdown(play['play_analysis'])
+                            
+                            st.caption(f"Data Source: {play.get('data_source', 'Yahoo Finance')} | Updated: {play['timestamp']}")
+                            
+                            # Add to watchlist option
+                            if st.button(f"Add {play['ticker']} to Watchlist", key=f"playbook_auto_{i}_{play['ticker']}"):
+                                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                if play['ticker'] not in current_list:
+                                    current_list.append(play['ticker'])
+                                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                    st.success(f"Added {play['ticker']} to watchlist!")
+                                    st.rerun()
+                else:
+                    st.info("No high-accuracy trading opportunities detected. Market conditions may require patience.")
+    
+    st.divider()
+    
+    # Search any stock with comprehensive analysis
+    st.markdown("### 🔍 Custom Stock Analysis")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_playbook_ticker = st.text_input("🔍 Generate high-accuracy playbook for any stock", placeholder="Enter ticker", key="search_playbook").upper().strip()
+    with col2:
+        search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
+    
+    if search_playbook and search_playbook_ticker:
+        quote = get_live_quote(search_playbook_ticker, tz_label)
+        
+        if not quote["error"]:
+            with st.spinner(f"AI generating high-accuracy playbook for {search_playbook_ticker}..."):
+                news = get_finnhub_news(search_playbook_ticker)
+                catalyst = news[0].get('headline', '') if news else ""
+                
+                # Get comprehensive options data including UW
+                options_data = get_options_data(search_playbook_ticker)
+                
+                # Get institutional data if available
+                institutional_data = None
+                if unusual_whales_client:
+                    institutional_data = unusual_whales_client.get_institutional_activity(search_playbook_ticker)
+                
+                playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst, options_data)
+                
+                st.success(f"✅ {search_playbook_ticker} High-Accuracy Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                col3.metric("Volume", f"{quote['volume']:,}")
+                if col4.button(f"Add {search_playbook_ticker} to WL", key="playbook_add_searched_ticker"):
+                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                    if search_playbook_ticker not in current_list:
+                        current_list.append(search_playbook_ticker)
+                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                        st.success(f"Added {search_playbook_ticker}")
+                        st.rerun()
+                
+                # Session performance
+                st.markdown("#### Session Breakdown")
+                sess_col1, sess_col2, sess_col3 = st.columns(3)
+                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                
+                # Show institutional data if available
+                if institutional_data and not institutional_data.get("error"):
+                    st.markdown("#### 🐋 Institutional Activity")
+                    inst_activity = institutional_data.get("activity", [])
+                    if inst_activity:
+                        inst_cols = st.columns(min(3, len(inst_activity)))
+                        for i, activity in enumerate(inst_activity[:3]):
+                            with inst_cols[i]:
+                                st.metric(
+                                    activity.get("type", "Unknown"),
+                                    f"${activity.get('value', 0):,.0f}"
+                                )
+                
+                # Show options data if available
+                if options_data:
+                    st.markdown("#### Options Analysis")
+                    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
+                    opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
+                    opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
+                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
+                    st.caption("Options data: yfinance + Unusual Whales flow")
+                
+                st.markdown("### 🎯 High-Accuracy AI Trading Playbook")
+                st.markdown(playbook)
+                
+                if news:
+                    with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
+                        for item in news[:3]:
+                            st.write(f"**{item.get('headline', 'No title')}**")
+                            st.write(item.get('summary', 'No summary')[:200] + "...")
+                            st.write("---")
+                
+                st.divider()
+        else:
+            st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
+    
+    # Watchlist playbooks
+    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+    
+    if tickers:
+        st.markdown("### 📋 Watchlist Playbooks")
+        selected_ticker = st.selectbox("Select from watchlist", tickers, key="watchlist_playbook")
+        catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, etc.", key="catalyst_input")
+        
+        if st.button("🤖 Generate Watchlist Playbook", type="secondary"):
+            quote = get_live_quote(selected_ticker, tz_label)
+            
+            if not quote["error"]:
+                with st.spinner(f"AI analyzing {selected_ticker}..."):
+                    # Get comprehensive data including UW
+                    options_data = get_options_data(selected_ticker)
+                    institutional_data = None
+                    if unusual_whales_client:
+                        institutional_data = unusual_whales_client.get_institutional_activity(selected_ticker)
+                    
+                    playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input, options_data)
+                    
+                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
+                    col3.metric("Volume", f"{quote['volume']:,}")
+                    
+                    # Session performance
+                    st.markdown("#### Session Breakdown")
+                    sess_col1, sess_col2, sess_col3 = st.columns(3)
+                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
+                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
+                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
+                    
+                    # Show institutional data
+                    if institutional_data and not institutional_data.get("error"):
+                        st.markdown("#### 🐋 Institutional Activity")
+                        inst_activity = institutional_data.get("activity", [])
+                        if inst_activity:
+                            for activity in inst_activity[:2]:
+                                st.write(f"• {activity.get('type', 'Unknown')}: ${activity.get('value', 0):,.0f}")
+                    
+                    st.markdown("### 🎯 AI Analysis")
+                    st.markdown(playbook)
+                    
+                    news = get_finnhub_news(selected_ticker)
+                    if news:
+                        with st.expander(f"📰 Recent News for {selected_ticker}"):
+                            for item in news[:3]:
+                                st.write(f"**{item.get('headline', 'No title')}**")
+                                st.write(item.get('summary', 'No summary')[:200] + "...")
+                                st.write("---")
+    else:
+        st.info("Add stocks to watchlist or use search above.")
+
+# TAB 6: Sector/ETF Tracking
+with tabs[5]:
+    st.subheader("🌐 Sector/ETF Tracking")
+
+    # Add search and add functionality
+    st.markdown("### 🔍 Search & Add ETFs")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        etf_search_ticker = st.text_input("Search for an ETF to add", placeholder="Enter ticker (e.g., VOO)", key="etf_search_add").upper().strip()
+    with col2:
+        if st.button("Add ETF", key="add_etf_btn") and etf_search_ticker:
+            if etf_search_ticker not in st.session_state.etf_list:
+                quote = get_live_quote(etf_search_ticker)
+                if not quote["error"]:
+                    st.session_state.etf_list.append(etf_search_ticker)
+                    st.success(f"✅ Added {etf_search_ticker} to the list.")
+                    st.rerun()
+                else:
+                    st.error(f"Invalid ticker or ETF: {etf_search_ticker}")
+            else:
+                st.warning(f"{etf_search_ticker} is already in the list.")
+
+    st.markdown("### ETF Performance Overview")
+    
+    for ticker in st.session_state.etf_list:
+        quote = get_live_quote(ticker, tz_label)
+        if quote["error"]:
+            st.error(f"{ticker}: {quote['error']}")
+            continue
+        
+        with st.container():
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
+            
+            col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+            col2.write("**Bid/Ask**")
+            col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+            col3.write("**Volume**")
+            col3.write(f"{quote['volume']:,}")
+            col3.caption(f"Updated: {quote['last_updated']}")
+            
+            # Show data source with enhanced indicators
+            source = quote.get('data_source', 'Yahoo Finance')
+            if source == "Unusual Whales":
+                col3.success("🐋 UW")
+            elif source in ["Alpha Vantage", "Twelve Data"]:
+                col3.info(f"📊 {source}")
+            else:
+                col3.caption(f"Source: {source}")
+            
+            if col4.button(f"Add {ticker} to Watchlist", key=f"sector_etf_add_{ticker}"):
+                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                if ticker not in current_list:
+                    current_list.append(ticker)
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                    st.success(f"Added {ticker} to watchlist!")
+                    st.rerun()
+
+            st.divider()
+
+# TAB 7: 0DTE & Lottos - Enhanced with real-time options flow
+with tabs[6]:
+    st.subheader("🎲 0DTE & Lotto Plays")
+    st.markdown("**High-risk, high-reward options expiring today. Enhanced with Unusual Whales options flow.**")
+
+    # Ticker selection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected_ticker = st.selectbox("Select Ticker for 0DTE", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="0dte_ticker")
+    with col2:
+        if st.button("Analyze 0DTE", key="analyze_0dte"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # Fetch option chain and UW flow data
+    with st.spinner(f"Fetching option chain and flow data for {selected_ticker}..."):
+        option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
+        quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
+        
+        # Get UW options flow if available
+        uw_flow = None
+        if unusual_whales_client:
+            uw_flow = unusual_whales_client.get_options_flow(selected_ticker)
+
+    if option_chain.get("error"):
+        st.error(option_chain["error"])
+    else:
+        current_price = quote['last']
+        expiration = option_chain["expiration"]
+        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
+        st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
+
+        # Show UW flow data if available
+        if uw_flow and not uw_flow.get("error"):
+            st.markdown("### 🐋 Unusual Whales Options Flow")
+            flows = uw_flow.get("flows", [])
+            if flows:
+                flow_col1, flow_col2, flow_col3 = st.columns(3)
+                
+                total_premium = sum([flow.get("premium", 0) for flow in flows])
+                bullish_flows = len([f for f in flows if f.get("sentiment") == "bullish"])
+                bearish_flows = len([f for f in flows if f.get("sentiment") == "bearish"])
+                
+                flow_col1.metric("Total Premium", f"${total_premium:,.0f}")
+                flow_col2.metric("Bullish Flows", bullish_flows)
+                flow_col3.metric("Bearish Flows", bearish_flows)
+                
+                st.write("**Recent Flow Activity:**")
+                for flow in flows[:5]:  # Show top 5
+                    sentiment_emoji = "📈" if flow.get("sentiment") == "bullish" else "📉" if flow.get("sentiment") == "bearish" else "⚪"
+                    st.write(f"{sentiment_emoji} {flow.get('type', 'Unknown')}: ${flow.get('premium', 0):,.0f} premium")
+
+        # AI Analysis at the top with enhanced data
+        st.markdown("### 🤖 AI 0DTE Playbook")
+        with st.spinner("Generating high-accuracy 0DTE analysis..."):
+            tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
+            options_analysis = get_advanced_options_analysis(selected_ticker)
+            order_flow = get_order_flow(selected_ticker, option_chain)
+            
+            # Enhanced catalyst with UW flow data
+            catalyst = f"0DTE options activity. Technical: {generate_technical_summary(tech_analysis)}."
+            if uw_flow and not uw_flow.get("error"):
+                flows = uw_flow.get("flows", [])
+                if flows:
+                    total_premium = sum([flow.get("premium", 0) for flow in flows])
+                    catalyst += f" UW Flow: ${total_premium:,.0f} premium, {len(flows)} flows."
+            catalyst += f" Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, P/C Ratio: {order_flow.get('put_call_ratio', 0):.2f}."
+            
+            # Summarize option chain for AI
+            calls = option_chain["calls"]
+            puts = option_chain["puts"]
+            top_calls = calls.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
+            top_puts = puts.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
+            option_summary = f"Top Calls:\n{top_calls}\nTop Puts:\n{top_puts}"
+            catalyst += f" Option Chain: {option_summary}"
+            
+            playbook = ai_playbook(
+                selected_ticker,
+                quote["change_percent"],
+                catalyst,
+                options_analysis
+            )
+            st.markdown(playbook)
+
+        # Display option chain
+        st.markdown("### Calls")
+        calls = option_chain["calls"]
+        if not calls.empty:
+            display_calls = calls[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
+            display_calls.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
+            display_calls['IV (%)'] = display_calls['IV (%)'].map('{:.2f}'.format)
+            st.dataframe(display_calls, use_container_width=True)
+        else:
+            st.warning("No call options available.")
+
+        st.markdown("### Puts")
+        puts = option_chain["puts"]
+        if not puts.empty:
+            display_puts = puts[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
+            display_puts.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
+            display_puts['IV (%)'] = display_puts['IV (%)'].map('{:.2f}'.format)
+            st.dataframe(display_puts, use_container_width=True)
+        else:
+            st.warning("No put options available.")
+
+        # Order flow analysis
+        st.markdown("### Order Flow Analysis")
+        order_flow = get_order_flow(selected_ticker, option_chain)
+        if order_flow.get("error"):
+            st.error(order_flow["error"])
+        else:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Put/Call Volume Ratio", f"{order_flow['put_call_ratio']:.2f}")
+            col2.metric("Sentiment", order_flow["sentiment"])
+            col3.metric("Total Volume", f"{int(calls['volume'].sum() + puts['volume'].sum()):,}")
+
+            st.markdown("#### Top Trades (Unusual Activity)")
+            if order_flow["top_calls"]:
+                st.markdown("**Top Call Trades**")
+                for trade in order_flow["top_calls"]:
+                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
+            if order_flow["top_puts"]:
+                st.markdown("**Top Put Trades**")
+                for trade in order_flow["top_puts"]:
+                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
+            if not order_flow["top_calls"] and not order_flow["top_puts"]:
+                st.info("No unusual activity detected.")
+
+# TAB 8: Earnings Plays - Enhanced with Trading Economics
+with tabs[7]:
+    st.subheader("🗓️ Enhanced Earnings Plays")
+    
+    st.write("This section tracks upcoming earnings reports using Trading Economics API and provides AI analysis for potential earnings plays.")
+    
+    # Show Trading Economics status
+    if trading_economics_client:
+        st.success("✅ Trading Economics connected for enhanced earnings calendar")
+    else:
+        st.info("📊 Using simulated earnings data - connect Trading Economics API for live calendar")
+    
+    if st.button("📊 Get Today's Earnings Plays", type="primary"):
+        with st.spinner("AI analyzing earnings reports..."):
+            
+            earnings_today = get_earnings_calendar()
+            
+            if not earnings_today:
+                st.info("No earnings reports found for today.")
+            else:
+                st.markdown("### Today's Earnings Reports")
+                for report in earnings_today:
+                    ticker = report["ticker"]
+                    time_str = report["time"]
+                    importance = report.get("importance", "Medium")
+                    
+                    # Importance indicator
+                    importance_emoji = "🚀" if importance == "High" else "📈" if importance == "Medium" else "📊"
+                    
+                    st.markdown(f"{importance_emoji} **{ticker}** - Earnings **{time_str}** | Importance: **{importance}**")
+                    
+                    # Get live quote and comprehensive options data for earnings analysis
+                    quote = get_live_quote(ticker)
+                    options_analysis = get_advanced_options_analysis(ticker)
+                    
+                    # Get UW institutional data if available
+                    institutional_data = None
+                    if unusual_whales_client:
+                        institutional_data = unusual_whales_client.get_institutional_activity(ticker)
+                    
+                    if not quote.get("error"):
+                        col1, col2, col3, col4 = st.columns(4)
+                        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                        col2.metric("Volume", f"{quote['volume']:,}")
+                        
+                        # Show data source
+                        source = quote.get('data_source', 'Yahoo Finance')
+                        if source == "Unusual Whales":
+                            col3.success("🐋 UW Data")
+                        else:
+                            col3.info(f"📊 {source}")
+                        
+                        col4.metric("Estimate", report.get("estimate", "N/A"))
+                        
+                        # Show institutional activity if available
+                        if institutional_data and not institutional_data.get("error"):
+                            st.write("🐋 **Institutional Activity:**")
+                            inst_activity = institutional_data.get("activity", [])
+                            if inst_activity:
+                                inst_cols = st.columns(min(3, len(inst_activity)))
+                                for i, activity in enumerate(inst_activity[:3]):
+                                    with inst_cols[i]:
+                                        st.metric(
+                                            activity.get("type", "Unknown"),
+                                            f"${activity.get('value', 0):,.0f}"
+                                        )
+                        
+                        if not options_analysis.get("error"):
+                            st.write("**Enhanced Options Metrics:**")
+                            opt_col1, opt_col2, opt_col3 = st.columns(3)
+                            
+                            if options_analysis.get("unusual_whales_data"):
+                                # UW options data
+                                opt_col1.metric("Premium Flow", f"${options_analysis.get('total_premium', 0):,.0f}")
+                                opt_col2.metric("Flow Count", options_analysis.get('flow_count', 0))
+                                opt_col3.metric("UW Alerts", len(options_analysis.get('unusual_activity', [])))
+                            else:
+                                # Fallback options data
+                                basic = options_analysis.get('basic_metrics', {})
+                                opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
+                                opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                                opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
+                    
+                    # Generate enhanced earnings analysis
+                    if not options_analysis.get("error"):
+                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str} | Importance: {importance}", options_analysis)
+                    else:
+                        ai_analysis = f"""
+                        **Enhanced AI Analysis for {ticker} Earnings:**
+                        - **Date:** {report["date"]}
+                        - **Time:** {time_str}
+                        - **Importance:** {importance}
+                        - **Current Price:** ${quote.get('last', 0):.2f}
+                        - **Daily Change:** {quote.get('change_percent', 0):+.2f}%
+                        - **Volume:** {quote.get('volume', 0):,}
+                        - **Data Source:** {quote.get('data_source', 'Yahoo Finance')}
+                        - **Estimate:** {report.get("estimate", "N/A")}
+                        
+                        **Enhanced Trading Notes:**
+                        - Monitor for post-earnings volatility and gap moves
+                        - Consider straddle/strangle strategies for high IV
+                        - Watch for unusual options activity leading up to announcement
+                        """
+                    
+                    with st.expander(f"🔮 Enhanced AI Analysis for {ticker}"):
+                        st.markdown(ai_analysis)
+                    st.divider()
+
+# TAB 9: Important News & Economic Calendar - Enhanced with Trading Economics
+with tabs[8]:
+    st.subheader("📰 Important News & Economic Calendar")
+    
+    # Show Trading Economics integration status
+    if trading_economics_client:
+        st.success("✅ Trading Economics connected for live economic calendar")
+    else:
+        st.info("📊 Using AI-generated events - connect Trading Economics API for live data")
+
+    if st.button("📊 Get This Week's Events", type="primary"):
+        with st.spinner("Fetching important events..."):
+            important_events = get_important_events()
+
+            if not important_events:
+                st.info("No major economic events scheduled for this week.")
+            else:
+                st.markdown("### Major Market-Moving Events")
+                
+                # Sort events by impact level
+                high_impact = [e for e in important_events if e.get('impact', '').lower() == 'high']
+                medium_impact = [e for e in important_events if e.get('impact', '').lower() == 'medium']
+                low_impact = [e for e in important_events if e.get('impact', '').lower() == 'low']
+                
+                # Display high impact events first
+                if high_impact:
+                    st.markdown("#### 🚀 High Impact Events")
+                    for event in high_impact:
+                        st.markdown(f"**{event['event']}**")
+                        st.write(f"**Date:** {event['date']}")
+                        st.write(f"**Time:** {event['time']}")
+                        st.write(f"**Impact:** {event['impact']}")
+                        st.divider()
+                
+                if medium_impact:
+                    st.markdown("#### 📈 Medium Impact Events")
+                    for event in medium_impact:
+                        st.markdown(f"**{event['event']}**")
+                        st.write(f"**Date:** {event['date']}")
+                        st.write(f"**Time:** {event['time']}")
+                        st.write(f"**Impact:** {event['impact']}")
+                        st.divider()
+                
+                if low_impact:
+                    with st.expander("📊 Low Impact Events"):
+                        for event in low_impact:
+                            st.markdown(f"**{event['event']}**")
+                            st.write(f"**Date:** {event['date']}")
+                            st.write(f"**Time:** {event['time']}")
+                            st.write(f"**Impact:** {event['impact']}")
+                            st.write("---")
+
+# TAB 10: Twitter/X Market Sentiment & Rumors
+with tabs[9]:
+    st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
+
+    # Important disclaimer
+    st.warning("⚠️ **Risk Disclaimer:** Social media content includes unverified rumors and speculation. "
+               "Always verify information through official sources before making trading decisions. "
+               "GROK analysis may include both verified news and unconfirmed rumors - trade responsibly.")
+
+    if not grok_enhanced:
+        st.error("🔴 Grok API not configured. This tab requires Grok API access for Twitter/X integration.")
+        st.info("Please add your Grok API key to access real-time Twitter sentiment and social media catalysts.")
+    else:
+        st.success("✅ Grok connected for Twitter/X analysis")
+
+        # Overall Market Sentiment
+        st.markdown("### 📊 Overall Market Sentiment")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.caption("Get real-time Twitter/X sentiment analysis for the overall market")
+        with col2:
+            if st.button("🔍 Scan Market Sentiment", type="primary"):
+                with st.spinner("Grok analyzing Twitter/X market sentiment..."):
+                    market_sentiment = grok_enhanced.get_twitter_market_sentiment()
+                    st.markdown("### 🐦 Twitter/X Market Analysis")
+                    st.markdown(market_sentiment)
+                    st.caption("Analysis powered by Grok with real-time Twitter/X access")
+
+        st.divider()
+
+        # Stock-Specific Analysis
+        st.markdown("### 🎯 Stock-Specific Social Analysis")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            social_ticker = st.text_input(
+                "🔍 Analyze Twitter sentiment for stock",
+                placeholder="Enter ticker (e.g., TSLA)",
+                key="social_ticker"
+            ).upper().strip()
+        with col2:
+            analyze_social = st.button("Analyze Sentiment", key="analyze_social_btn")
+
+        if analyze_social and social_ticker:
+            with st.spinner(f"Grok analyzing Twitter/X sentiment for {social_ticker}..."):
+                try:
+                    # Get current quote for context with enhanced data
+                    quote = get_live_quote(social_ticker, tz_label)
+
+                    col1, col2, col3 = st.columns(3)
+                    if not quote.get("error"):
+                        col1.metric(f"{social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                        col2.metric("Volume", f"{quote['volume']:,}")
+                        
+                        # Enhanced data source display
+                        source = quote.get('data_source', 'Yahoo Finance')
+                        if source == "Unusual Whales":
+                            col3.success("🐋 UW Data")
+                        else:
+                            col3.info(f"📊 {source}")
+
+                    # Get Twitter sentiment
+                    sentiment_analysis = grok_enhanced.get_twitter_market_sentiment(social_ticker)
+                    st.markdown(f"### 🐦 Twitter/X Sentiment for {social_ticker}")
+                    st.markdown(sentiment_analysis)
+
+                    # Get social catalysts
+                    st.markdown(f"### 🔥 Social Media Catalysts for {social_ticker}")
+                    with st.spinner("Scanning for social catalysts..."):
+                        catalyst_analysis = grok_enhanced.analyze_social_catalyst(social_ticker)
+                        st.markdown(catalyst_analysis)
+
+                    # Add to watchlist option
+                    if st.button(f"Add {social_ticker} to Watchlist", key="twitter_add_searched_ticker"):
+                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                        if social_ticker not in current_list:
+                            current_list.append(social_ticker)
+                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                            st.success(f"Added {social_ticker} to watchlist!")
+                            st.rerun()
+
+                except Exception as e:
+                    st.error(f"Error analyzing {social_ticker}: {str(e)}")
+
+        st.divider()
+
+        # Watchlist Social Scanning
+        tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+        if tickers:
+            st.markdown("### 📋 Watchlist Social Media Scan")
+            selected_social_ticker = st.selectbox(
+                "Select from watchlist for social analysis",
+                [""] + tickers,
+                key="watchlist_social"
+            )
+
+            col1, col2 = st.columns([2, 2])
+            with col1:
+                timeframe = st.selectbox("Timeframe", ["24h", "12h", "6h", "3h"], key="social_timeframe")
+            with col2:
+                if st.button("🔍 Scan Social Media", key="scan_watchlist_social") and selected_social_ticker:
+                    with st.spinner(f"Grok scanning social media for {selected_social_ticker}..."):
+                        try:
+                            quote = get_live_quote(selected_social_ticker, tz_label)
+
+                            if not quote.get("error"):
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric(f"{selected_social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                                col2.metric("Volume", f"{quote['volume']:,}")
+                                col3.metric("Session", f"PM: {quote['premarket_change']:+.1f}% | "
+                                                       f"Day: {quote['intraday_change']:+.1f}% | "
+                                                       f"AH: {quote['postmarket_change']:+.1f}%")
+
+                            # Get comprehensive social analysis
+                            sentiment = grok_enhanced.get_twitter_market_sentiment(selected_social_ticker)
+                            catalysts = grok_enhanced.analyze_social_catalyst(selected_social_ticker, timeframe)
+
+                            st.markdown(f"### 🐦 Social Sentiment: {selected_social_ticker}")
+                            st.markdown(sentiment)
+
+                            st.markdown(f"### 🔥 Social Catalysts ({timeframe})")
+                            st.markdown(catalysts)
+
+                        except Exception as e:
+                            st.error(f"Error scanning social media for {selected_social_ticker}: {str(e)}")
+        else:
+            st.info("Add stocks to your watchlist to enable watchlist social media scanning.")
+
+        st.divider()
+
+        # Quick Social Sentiment for Popular Tickers
+        st.markdown("### ⭐ Popular Stocks Social Sentiment")
+        popular_for_social = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
+        cols = st.columns(4)
+
+        for i, ticker in enumerate(popular_for_social):
+            with cols[i % 4]:
+                if st.button(f"📊 {ticker}", key=f"twitter_quick_social_{ticker}"):
+                    with st.spinner(f"Getting {ticker} social sentiment..."):
+                        try:
+                            sentiment = grok_enhanced.get_twitter_market_sentiment(ticker)
+                            quote = get_live_quote(ticker, tz_label)
+
+                            st.markdown(f"**{ticker} Social Analysis**")
+                            if not quote.get("error"):
+                                st.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+
+                            with st.expander(f"📱 {ticker} Twitter Analysis"):
+                                st.markdown(sentiment)
+
+                        except Exception as e:
+                            st.error(f"Error getting {ticker} sentiment: {str(e)}")
+
+        with st.expander("💡 Social Media Trading Guidelines"):
+            st.markdown("""
+            **Using Social Media for Trading Research:**
+            
+            ✅ Best Practices:
+            - Verify information through multiple sources
+            - Focus on verified accounts and credible sources
+            - Look for consistent themes across multiple posts
+            - Use sentiment as one factor among many in your analysis
+            - Pay attention to unusual volume spikes mentioned on social media
+
+            ❌ Avoid:
+            - Trading based solely on rumors or unverified information
+            - Following pump and dump schemes
+            - FOMO trading based on viral posts
+            - Ignoring fundamentals in favor of sentiment
+            """)
+
+# ===== ENHANCED FOOTER =====
+st.markdown("---")
+footer_sources = []
+if unusual_whales_client:
+    footer_sources.append("🐋 Unusual Whales")
+if alpha_vantage_client:
+    footer_sources.append("Alpha Vantage")
+if twelvedata_client:
+    footer_sources.append("Twelve Data")
+footer_sources.append("Yahoo Finance")
+
+if trading_economics_client:
+    footer_sources.append("📊 Trading Economics")
+
+footer_text = " + ".join(footer_sources)
+
+available_ai_models = multi_ai.get_available_models()
+ai_footer = f"AI: {st.session_state.ai_model}"
+if st.session_state.ai_model == "Multi-AI" and available_ai_models:
+    ai_footer += f" ({'+'.join(available_ai_models)})"
+
+st.markdown(
+    f"<div style='text-align: center; color: #666;'>"
+    f"🔥 AI Radar Pro v2.0 | Data: {footer_text} | {ai_footer} | 🎯 Targeting 80-100% Accuracy"
+    "</div>",
+    unsafe_allow_html=True
+)
+
+# Auto-refresh functionality with faster intervals
+if st.session_state.auto_refresh:
+    time.sleep(st.session_state.refresh_interval)
+    st.rerun()premium = sum([flow.get("premium", 0) for flow in flows])
+                    call_flows = [f for f in flows if f.get("type") == "call"]
+                    put_flows = [f for f in flows if f.get("type") == "put"]
+                    
+                    call_premium = sum([f.get("premium", 0) for f in call_flows])
+                    put_premium = sum([f.get("premium", 0) for f in put_flows])
+                    
+                    return {
+                        "unusual_whales_data": True,
+                        "total_premium": total_premium,
+                        "call_premium": call_premium,
+                        "put_premium": put_premium,
+                        "premium_ratio": call_premium / put_premium if put_premium > 0 else float('inf'),
+                        "unusual_activity": unusual,
+                        "flow_count": len(flows),
+                        "bullish_flows": len([f for f in flows if f.get("sentiment") == "bullish"]),
+                        "bearish_flows": len([f for f in flows if f.get("sentiment") == "bearish"]),
+                        "data_source": "Unusual Whales",
+                        "error": None
+                    }
+            except Exception as e:
+                print(f"Unusual Whales options flow error: {e}")
+        
+        # Fallback to yfinance option chain analysis
         option_chain = get_option_chain(ticker, st.session_state.selected_tz)
         if option_chain.get("error"):
             return {"error": option_chain["error"]}
-        
+
         calls = option_chain["calls"]
         puts = option_chain["puts"]
         current_price = option_chain["current_price"]
-        
+
         # Advanced analysis
         analysis = {
+            "unusual_whales_data": False,
             "basic_metrics": calculate_basic_options_metrics(calls, puts),
             "flow_analysis": analyze_options_flow(calls, puts, current_price),
             "unusual_activity": detect_unusual_activity(calls, puts),
@@ -899,7 +3351,7 @@ def calculate_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict
 
 # Enhanced AI Analysis Prompt Construction
 def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical: Dict, fundamental: Dict, options: Dict, news_context: str = "") -> str:
-    """Construct comprehensive analysis prompt with all data"""
+    """Construct comprehensive analysis prompt with all data including Unusual Whales"""
     
     # Technical summary
     tech_summary = "Technical Analysis:\n"
@@ -915,7 +3367,7 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
         if "support_resistance" in technical:
             tech_summary += f"- Support: ${technical.get('support_resistance', {}).get('support', 0):.2f}\n"
             tech_summary += f"- Resistance: ${technical.get('support_resistance', {}).get('resistance', 0):.2f}\n"
-        # Enhanced technical from Twelve Data
+        # Enhanced technical from Twelve Data or Unusual Whales
         if "rsi" in technical:
             tech_summary += f"- RSI: {technical.get('rsi', 'N/A'):.1f}\n"
             tech_summary += f"- Trend: {technical.get('trend_analysis', 'Unknown')}\n"
@@ -939,22 +3391,33 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
             fund_summary += "- Revenue Growth: N/A\n"
         fund_summary += f"- Debt/Equity: {fundamental.get('debt_to_equity', 'N/A')}\n"
     
-    # Options summary
+    # Enhanced Options summary with Unusual Whales data
     options_summary = "Options Analysis:\n"
     if options.get("error"):
         options_summary += f"Options Error: {options['error']}\n"
     else:
-        basic = options.get('basic_metrics', {})
-        flow = options.get('flow_analysis', {})
-        unusual = options.get('unusual_activity', {})
-        options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
-        options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
-        options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
-        options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
-        options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
-        options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
+        if options.get("unusual_whales_data"):
+            # Real Unusual Whales data
+            options_summary += f"- Data Source: Unusual Whales (LIVE FLOW)\n"
+            options_summary += f"- Total Premium: ${options.get('total_premium', 0):,.0f}\n"
+            options_summary += f"- Call/Put Premium: ${options.get('call_premium', 0):,.0f}/${options.get('put_premium', 0):,.0f}\n"
+            options_summary += f"- Premium Ratio: {options.get('premium_ratio', 0):.2f}\n"
+            options_summary += f"- Flow Count: {options.get('flow_count', 0)}\n"
+            options_summary += f"- Bullish/Bearish Flows: {options.get('bullish_flows', 0)}/{options.get('bearish_flows', 0)}\n"
+            options_summary += f"- Unusual Activity: {len(options.get('unusual_activity', []))} alerts\n"
+        else:
+            # Fallback options data
+            basic = options.get('basic_metrics', {})
+            flow = options.get('flow_analysis', {})
+            unusual = options.get('unusual_activity', {})
+            options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
+            options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
+            options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
+            options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
+            options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
+            options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
     
-    # Session data
+    # Session data with enhanced source info
     session_summary = f"""Session Performance:
 - Current: ${quote['last']:.2f} ({quote['change_percent']:+.2f}%)
 - Premarket: {quote['premarket_change']:+.2f}%
@@ -967,7 +3430,7 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
     news_section = f"\nNews Context:\n{news_context}" if news_context else ""
     
     prompt = f"""
-Comprehensive Trading Analysis for {ticker}:
+COMPREHENSIVE HIGH-ACCURACY TRADING ANALYSIS for {ticker}:
 
 {session_summary}
 
@@ -978,7 +3441,7 @@ Comprehensive Trading Analysis for {ticker}:
 {options_summary}
 {news_section}
 
-Based on this comprehensive analysis, provide:
+**CRITICAL**: This analysis must provide 80-100% accuracy trading insights. Based on this comprehensive multi-source analysis, provide:
 
 1. **Overall Assessment** (Bullish/Bearish/Neutral) with confidence rating (1-100)
 2. **Trading Strategy** (Scalp/Day Trade/Swing/Position/Avoid) with specific timeframe
@@ -987,11 +3450,11 @@ Based on this comprehensive analysis, provide:
 5. **Risk Management**: Stop loss levels and position sizing guidance
 6. **Technical Outlook**: Key levels to watch and breakout scenarios
 7. **Fundamental Justification**: How fundamentals support the technical setup
-8. **Options Strategy**: Specific options plays if applicable
+8. **Options Strategy**: Specific options plays if applicable (use Unusual Whales data if available)
 9. **Catalyst Watch**: Events or levels that could trigger major moves
 10. **Risk Factors**: What could invalidate this analysis
 
-Keep analysis under 400 words but be specific and actionable.
+Keep analysis under 400 words but be HIGHLY SPECIFIC and ACTIONABLE for maximum trading accuracy.
 """
     
     return prompt
@@ -1025,7 +3488,7 @@ class MultiAIAnalyzer:
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
+                temperature=0.2,  # Lower temperature for higher accuracy
                 max_tokens=400
             )
             return response.choices[0].message.content
@@ -1095,7 +3558,7 @@ class MultiAIAnalyzer:
         analysis_text = "\n\n".join([f"**{model} Analysis:**\n{analysis}" for model, analysis in analyses.items()])
         
         synthesis_prompt = f"""
-        Based on the following AI analyses for {ticker}, provide a synthesized consensus view:
+        Based on the following AI analyses for {ticker}, provide a synthesized HIGH-ACCURACY consensus view:
         
         {analysis_text}
         
@@ -1106,7 +3569,7 @@ class MultiAIAnalyzer:
         4. **Risk Assessment**
         5. **Key Points of Agreement/Disagreement**
         
-        Prioritize areas where models agree and note any significant disagreements.
+        Prioritize areas where models agree and note any significant disagreements. Focus on HIGHEST PROBABILITY trades.
         """
         
         # Use the first available model for synthesis
@@ -1122,16 +3585,26 @@ class MultiAIAnalyzer:
 # Initialize Multi-AI Analyzer
 multi_ai = MultiAIAnalyzer()
 
-# Enhanced primary data function - Alpha Vantage/Twelve Data first, Yahoo Finance fallback
-@st.cache_data(ttl=60)  # Cache for 60 seconds
+# UPDATED: Enhanced primary data function - Unusual Whales FIRST, then fallbacks
+@st.cache_data(ttl=15)  # MUCH faster refresh - 15 seconds instead of 60
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Get live stock quote using Alpha Vantage/Twelve Data first, then Yahoo Finance fallback
+    Get live stock quote using Unusual Whales FIRST, then fallbacks
     """
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
     
-    # Try Alpha Vantage first (if available)
+    # Try Unusual Whales FIRST (Primary source)
+    if unusual_whales_client:
+        try:
+            uw_quote = unusual_whales_client.get_quote(ticker)
+            if not uw_quote.get("error") and uw_quote.get("last", 0) > 0:
+                uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                return uw_quote
+        except Exception as e:
+            print(f"Unusual Whales error for {ticker}: {str(e)}")
+    
+    # Try Alpha Vantage second (if available)
     if alpha_vantage_client:
         try:
             alpha_quote = alpha_vantage_client.get_quote(ticker)
@@ -1141,7 +3614,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         except Exception as e:
             print(f"Alpha Vantage error for {ticker}: {str(e)}")
     
-    # Try Twelve Data second (if available)
+    # Try Twelve Data third (if available)
     if twelvedata_client:
         try:
             twelve_quote = twelvedata_client.get_quote(ticker)
@@ -1151,7 +3624,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         except Exception as e:
             print(f"Twelve Data error for {ticker}: {str(e)}")
     
-    # Fall back to Yahoo Finance
+    # Final fallback to Yahoo Finance
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
@@ -1247,7 +3720,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "data_source": "Yahoo Finance"
         }
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)  # 5 minutes for news
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
     if not FINNHUB_KEY:
         return []
@@ -1266,7 +3739,7 @@ def get_finnhub_news(symbol: str = None) -> List[Dict]:
     
     return []
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)
 def get_polygon_news() -> List[Dict]:
     if not POLYGON_KEY:
         return []
@@ -1680,1846 +4153,4 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     bullish_score = sum(1 for word in bullish_keywords if word in text)
     bearish_score = sum(1 for word in bearish_keywords if word in text)
     
-    total_score = explosive_score + bullish_score + bearish_score
-    
-    if explosive_score >= 2:
-        return "🚀 EXPLOSIVE", min(95, 60 + explosive_score * 10)
-    elif explosive_score >= 1:
-        return "📈 Bullish", min(85, 50 + explosive_score * 15)
-    elif bearish_score >= 2:
-        return "📉 Bearish", min(80, 40 + bearish_score * 15)
-    elif bullish_score >= 2:
-        return "📈 Bullish", min(75, 35 + bullish_score * 10)
-    else:
-        return "⚪ Neutral", max(10, min(50, total_score * 5))
-
-# New function to fetch option chain data
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
-    """Fetch 0DTE or nearest expiration option chain using yfinance"""
-    try:
-        stock = yf.Ticker(ticker)
-        # Get all expiration dates
-        expirations = stock.options
-        if not expirations:
-            return {"error": f"No options data available for {ticker}"}
-
-        # Find today's expiration or closest future date
-        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
-        expiration_dates = [datetime.datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
-        valid_expirations = [exp for exp in expiration_dates if exp >= today]
-        if not valid_expirations:
-            return {"error": f"No valid expirations found for {ticker}"}
-
-        # Select 0DTE or closest expiration
-        target_expiration = min(valid_expirations, key=lambda x: (x - today).days)
-        expiration_str = target_expiration.strftime('%Y-%m-%d')
-
-        # Fetch option chain
-        option_chain = stock.option_chain(expiration_str)
-        calls = option_chain.calls
-        puts = option_chain.puts
-
-        # Clean and format data
-        calls = calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
-        puts = puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
-        
-        # Determine moneyness
-        current_price = get_live_quote(ticker, tz).get('last', 0)
-        calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
-        puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
-
-        # Convert IV to percentage
-        calls['impliedVolatility'] = calls['impliedVolatility'] * 100
-        puts['impliedVolatility'] = puts['impliedVolatility'] * 100
-
-        return {
-            "calls": calls,
-            "puts": puts,
-            "expiration": expiration_str,
-            "current_price": current_price,
-            "error": None
-        }
-    except Exception as e:
-        return {"error": f"Error fetching option chain for {ticker}: {str(e)}"}
-
-# New function to simulate order flow (placeholder for premium API integration)
-@st.cache_data(ttl=300)
-def get_order_flow(ticker: str, option_chain: Dict) -> Dict:
-    """Simulate order flow by analyzing option chain volume and open interest"""
-    calls = option_chain.get('calls', pd.DataFrame())
-    puts = option_chain.get('puts', pd.DataFrame())
-    if calls.empty or puts.empty:
-        return {"error": "No option chain data for order flow analysis"}
-
-    try:
-        # Calculate put/call volume ratio
-        total_call_volume = calls['volume'].sum() if not calls.empty else 0
-        total_put_volume = puts['volume'].sum() if not puts.empty else 0
-        put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else 0
-
-        # Identify unusual activity (high volume relative to open interest)
-        calls['volume_oi_ratio'] = calls['volume'] / calls['openInterest'].replace(0, 1)
-        puts['volume_oi_ratio'] = puts['volume'] / puts['openInterest'].replace(0, 1)
-
-        # Top trades (simulated as high volume or high volume/OI ratio)
-        top_calls = calls[calls['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
-        top_puts = puts[puts['volume_oi_ratio'] > 1.5][['contractSymbol', 'strike', 'lastPrice', 'volume', 'moneyness']].head(3)
-
-        # Sentiment based on volume
-        sentiment = "Bullish" if total_call_volume > total_put_volume else "Bearish" if total_put_volume > total_call_volume else "Neutral"
-
-        return {
-            "put_call_ratio": put_call_ratio,
-            "top_calls": top_calls.to_dict('records'),
-            "top_puts": top_puts.to_dict('records'),
-            "sentiment": sentiment,
-            "error": None
-        }
-    except Exception as e:
-        return {"error": f"Error analyzing order flow: {str(e)}"}
-
-# Modified get_options_data to use real data
-def get_options_data(ticker: str) -> Optional[Dict]:
-    """Fetch real options data for a ticker"""
-    option_chain = get_option_chain(ticker, st.session_state.selected_tz)
-    if option_chain.get("error"):
-        return {"error": option_chain["error"]}
-
-    calls = option_chain["calls"]
-    puts = option_chain["puts"]
-    current_price = option_chain["current_price"]
-
-    # Find high IV strike
-    high_iv_call = calls[calls['impliedVolatility'] == calls['impliedVolatility'].max()] if not calls.empty else pd.DataFrame()
-    high_iv_put = puts[puts['impliedVolatility'] == puts['impliedVolatility'].max()] if not puts.empty else pd.DataFrame()
-
-    return {
-        "iv": calls['impliedVolatility'].mean() if not calls.empty else 0,
-        "put_call_ratio": puts['volume'].sum() / calls['volume'].sum() if calls['volume'].sum() > 0 else 0,
-        "top_call_oi": calls['openInterest'].max() if not calls.empty else 0,
-        "top_call_oi_strike": calls[calls['openInterest'] == calls['openInterest'].max()]['strike'].iloc[0] if not calls.empty and calls['openInterest'].max() > 0 else 0,
-        "top_put_oi": puts['openInterest'].max() if not puts.empty else 0,
-        "top_put_oi_strike": puts[puts['openInterest'] == puts['openInterest'].max()]['strike'].iloc[0] if not puts.empty and puts['openInterest'].max() > 0 else 0,
-        "high_iv_strike": high_iv_call['strike'].iloc[0] if not high_iv_call.empty else (high_iv_put['strike'].iloc[0] if not high_iv_put.empty else 0),
-        "total_calls": calls['volume'].sum() if not calls.empty else 0,
-        "total_puts": puts['volume'].sum() if not puts.empty else 0
-    }
-
-def get_earnings_calendar() -> List[Dict]:
-    """
-    Placeholder function for earnings calendar
-    """
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    
-    return [
-        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50"},
-        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20"},
-        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
-    ]
-
-# Enhanced AI analysis functions
-def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
-    """Enhanced AI playbook using comprehensive technical, fundamental, and options analysis"""
-    
-    # Get comprehensive analysis data
-    with st.spinner(f"Gathering comprehensive data for {ticker}..."):
-        quote = get_live_quote(ticker, st.session_state.selected_tz)
-        technical_analysis = get_comprehensive_technical_analysis(ticker)
-        fundamental_analysis = get_fundamental_analysis(ticker)
-        options_analysis = get_advanced_options_analysis(ticker)
-        
-        # Get news context
-        news = get_finnhub_news(ticker)
-        news_context = ""
-        if news:
-            news_context = f"Recent News: {news[0].get('headline', '')[:100]}..."
-    
-    # Construct comprehensive prompt
-    comprehensive_prompt = construct_comprehensive_analysis_prompt(
-        ticker, quote, technical_analysis, fundamental_analysis, 
-        options_analysis, news_context
-    )
-    
-    if st.session_state.ai_model == "Multi-AI":
-        # Use multi-AI consensus with enhanced data
-        analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
-        if analyses:
-            result = f"## 🤖 Enhanced Multi-AI Analysis for {ticker}\n\n"
-            result += f"**Data Sources:** {quote.get('data_source', 'Yahoo Finance')} | Updated: {quote['last_updated']}\n\n"
-            
-            for model, analysis in analyses.items():
-                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
-            
-            # Add synthesis
-            synthesis = multi_ai.synthesize_consensus(analyses, ticker)
-            result += f"### 🎯 AI Consensus Summary:\n{synthesis}"
-            return result
-        else:
-            return f"**{ticker} Analysis** - No AI models available for multi-AI analysis."
-    
-    elif st.session_state.ai_model == "OpenAI":
-        if not openai_client:
-            return f"**{ticker} Analysis** (OpenAI API not configured)"
-        return multi_ai.analyze_with_openai(comprehensive_prompt)
-    
-    elif st.session_state.ai_model == "Gemini":
-        if not gemini_model:
-            return f"**{ticker} Analysis** (Gemini API not configured)"
-        return multi_ai.analyze_with_gemini(comprehensive_prompt)
-    
-    elif st.session_state.ai_model == "Grok":
-        if not grok_enhanced:
-            return f"**{ticker} Analysis** (Grok API not configured)"
-        return multi_ai.analyze_with_grok(comprehensive_prompt)
-    
-    else:
-        return "No AI model selected or configured."
-
-# Enhanced auto-generation with comprehensive analysis
-def ai_auto_generate_plays_enhanced(tz: str):
-    """Enhanced auto-generation with comprehensive analysis"""
-    plays = []
-    
-    try:
-        current_watchlist = st.session_state.watchlists[st.session_state.active_watchlist]
-        scan_tickers = list(set(current_watchlist + CORE_TICKERS[:30]))
-        
-        # Scan for significant movers with enhanced criteria
-        candidates = []
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_ticker = {executor.submit(get_live_quote, ticker, tz): ticker for ticker in scan_tickers}
-            for future in concurrent.futures.as_completed(future_to_ticker):
-                ticker = future_to_ticker[future]
-                try:
-                    quote = future.result()
-                    if not quote["error"]:
-                        # Enhanced criteria for significance
-                        volume_significant = quote["volume"] > 1000000  # Minimum volume threshold
-                        price_significant = abs(quote["change_percent"]) >= 1.5
-                        spread_reasonable = (quote["ask"] - quote["bid"]) / quote["last"] < 0.02  # Max 2% spread
-                        
-                        if price_significant and volume_significant and spread_reasonable:
-                            candidates.append({
-                                "ticker": ticker,
-                                "quote": quote,
-                                "significance": abs(quote["change_percent"]) * (quote["volume"] / 1000000)  # Volume-weighted significance
-                            })
-                except Exception as exc:
-                    print(f'{ticker} generated an exception: {exc}')
-        
-        # Sort by significance and take top candidates
-        candidates.sort(key=lambda x: x["significance"], reverse=True)
-        top_candidates = candidates[:5]
-        
-        # Generate enhanced plays for top candidates
-        for candidate in top_candidates:
-            ticker = candidate["ticker"]
-            quote = candidate["quote"]
-            
-            # Get comprehensive analysis data
-            technical_analysis = get_comprehensive_technical_analysis(ticker)
-            fundamental_analysis = get_fundamental_analysis(ticker)
-            options_analysis = get_advanced_options_analysis(ticker)
-            
-            # Get recent news for context
-            news = get_finnhub_news(ticker)
-            catalyst = ""
-            if news:
-                catalyst = news[0].get('headline', '')[:100] + "..."
-            
-            # Generate comprehensive analysis
-            comprehensive_prompt = construct_comprehensive_analysis_prompt(
-                ticker, quote, technical_analysis, fundamental_analysis, 
-                options_analysis, catalyst
-            )
-            
-            # Generate AI analysis using selected model
-            if st.session_state.ai_model == "Multi-AI":
-                analyses = multi_ai.multi_ai_consensus_enhanced(comprehensive_prompt)
-                if analyses:
-                    play_analysis = f"## Enhanced Multi-AI Analysis\n\n"
-                    for model, analysis in analyses.items():
-                        play_analysis += f"**{model}:** {analysis[:200]}...\n\n"
-                    synthesis = multi_ai.synthesize_consensus(analyses, ticker)
-                    play_analysis += f"**Consensus:** {synthesis}"
-                else:
-                    play_analysis = f"No AI models available for {ticker} analysis"
-            else:
-                play_analysis = ai_playbook(ticker, quote["change_percent"], catalyst, options_analysis)
-
-            # Create enhanced play dictionary
-            play = {
-                "ticker": ticker,
-                "current_price": quote['last'],
-                "change_percent": quote['change_percent'],
-                "session_data": {
-                    "premarket": quote['premarket_change'],
-                    "intraday": quote['intraday_change'],
-                    "afterhours": quote['postmarket_change']
-                },
-                "catalyst": catalyst if catalyst else f"Market movement: {quote['change_percent']:+.2f}%",
-                "play_analysis": play_analysis,
-                "volume": quote['volume'],
-                "timestamp": quote['last_updated'],
-                "data_source": quote.get('data_source', 'Yahoo Finance'),
-                "technical_summary": generate_technical_summary(technical_analysis),
-                "fundamental_summary": generate_fundamental_summary(fundamental_analysis),
-                "options_summary": generate_options_summary(options_analysis),
-                "significance_score": candidate["significance"]
-            }
-            plays.append(play)
-        
-        return plays
-    except Exception as e:
-        st.error(f"Error generating enhanced auto plays: {str(e)}")
-        return []
-
-def generate_technical_summary(technical: Dict) -> str:
-    """Generate concise technical summary"""
-    if technical.get("error"):
-        return f"Technical Error: {technical['error']}"
-    
-    if "short_term" in technical:
-        rsi = technical['short_term'].get('rsi', 0)
-        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
-        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
-    elif "rsi" in technical:
-        rsi = technical.get('rsi', 0)
-        rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
-        return f"RSI: {rsi:.1f} ({rsi_status}), Trend: {technical.get('trend_analysis', 'Unknown')}"
-    
-    return "Technical analysis pending..."
-
-def generate_fundamental_summary(fundamental: Dict) -> str:
-    """Generate concise fundamental summary"""
-    if fundamental.get("error"):
-        return f"Fundamental Error: {fundamental['error']}"
-    
-    health = fundamental.get('financial_health', 'Unknown')
-    valuation = fundamental.get('valuation_assessment', 'Unknown')
-    pe = fundamental.get('pe_ratio', 'N/A')
-    
-    return f"Health: {health}, Valuation: {valuation}, P/E: {pe}"
-
-def generate_options_summary(options: Dict) -> str:
-    """Generate concise options summary"""
-    if options.get("error"):
-        return f"Options Error: {options['error']}"
-    
-    basic = options.get('basic_metrics', {})
-    flow = options.get('flow_analysis', {})
-    
-    pc_ratio = basic.get('put_call_volume_ratio', 0)
-    pc_ratio_str = f"{pc_ratio:.2f}" if pc_ratio is not None else "N/A"
-    
-    sentiment = flow.get('flow_sentiment', 'Neutral')
-    
-    return f"P/C Ratio: {pc_ratio_str}, Flow: {sentiment}"
-
-# Enhanced market analysis
-def ai_market_analysis_enhanced(news_items: List[Dict], movers: List[Dict]) -> str:
-    """Enhanced market analysis with comprehensive data"""
-    
-    # Gather market-wide technical data
-    market_technical = {}
-    key_indices = ["SPY", "QQQ", "IWM"]
-    
-    for index in key_indices:
-        try:
-            quote = get_live_quote(index)
-            technical = get_comprehensive_technical_analysis(index)
-            market_technical[index] = {
-                "price": quote['last'],
-                "change": quote['change_percent'],
-                "technical": technical
-            }
-        except:
-            continue
-    
-    # Analyze sector rotation
-    sector_data = analyze_sector_rotation()
-    
-    # Construct enhanced market analysis prompt
-    market_context = f"""
-Market Technical Overview:
-{format_market_technical(market_technical)}
-
-Sector Analysis:
-{sector_data}
-
-Top News Headlines:
-{chr(10).join([f"- {item['title']}" for item in news_items[:5]])}
-
-Top Market Movers:
-{chr(10).join([f"- {m['ticker']}: {m['change_pct']:+.2f}%" for m in movers[:5]])}
-
-Provide comprehensive market analysis covering:
-1. Overall market sentiment and direction
-2. Key technical levels for major indices
-3. Sector rotation patterns and opportunities
-4. Risk-on vs risk-off positioning
-5. Trading opportunities and strategies
-6. Key events and catalysts to watch
-
-Keep analysis under 300 words but be specific and actionable.
-"""
-    
-    # Use selected AI model for analysis
-    if st.session_state.ai_model == "Multi-AI":
-        analyses = {}
-        if openai_client:
-            analyses["OpenAI"] = multi_ai.analyze_with_openai(market_context)
-        if gemini_model:
-            analyses["Gemini"] = multi_ai.analyze_with_gemini(market_context)
-        if grok_enhanced:
-            analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
-        
-        if analyses:
-            result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
-            for model, analysis in analyses.items():
-                result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
-            
-            synthesis = multi_ai.synthesize_consensus(analyses, "Market")
-            result += f"### 🎯 Market Consensus:\n{synthesis}"
-            return result
-    else:
-        # Use individual AI model
-        return multi_ai.analyze_with_openai(market_context) if openai_client else "AI analysis not available"
-
-def format_market_technical(market_tech: Dict) -> str:
-    """Format market technical data for prompt"""
-    formatted = ""
-    for symbol, data in market_tech.items():
-        formatted += f"{symbol}: ${data['price']:.2f} ({data['change']:+.2f}%)\n"
-    return formatted
-
-def analyze_sector_rotation() -> str:
-    """Analyze sector rotation patterns"""
-    sector_etfs = ["XLF", "XLE", "XLK", "XLV", "XLY", "XLI", "XLP", "XLU", "XLB", "XLC"]
-    sector_performance = {}
-    
-    for etf in sector_etfs:
-        try:
-            quote = get_live_quote(etf)
-            if not quote.get("error"):
-                sector_performance[etf] = quote['change_percent']
-        except:
-            continue
-    
-    # Sort by performance
-    sorted_sectors = sorted(sector_performance.items(), key=lambda x: x[1], reverse=True)
-    
-    result = "Sector Performance Today:\n"
-    for etf, perf in sorted_sectors[:5]:
-        result += f"- {etf}: {perf:+.2f}%\n"
-    
-    return result
-
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    """Enhanced market analysis using selected AI model"""
-    return ai_market_analysis_enhanced(news_items, movers)
-
-# Function to get important economic events using AI
-def get_important_events() -> List[Dict]:
-    if not openai_client and not gemini_model and not grok_enhanced:
-        return []
-    
-    try:
-        prompt = f"""
-        Provide a list of the most important economic events for the current week.
-        Focus on events that are known to move the market, such as CPI, FOMC meetings,
-        Unemployment Reports, and major Fed speeches.
-        
-        Format the response as a JSON array of objects, with each object having the following keys:
-        - "event": (string) The name of the event.
-        - "date": (string) The date of the event (e.g., "Monday, June 17").
-        - "time": (string) The time of the event (e.g., "10:00 AM ET").
-        - "impact": (string) The expected market impact (e.g., "High", "Medium", "Low").
-        
-        Do not include any text, notes, or explanations outside of the JSON.
-        """
-        
-        if st.session_state.ai_model == "Multi-AI":
-            # Use first available model for events
-            if openai_client:
-                response = multi_ai.analyze_with_openai(prompt)
-            elif gemini_model:
-                response = multi_ai.analyze_with_gemini(prompt)
-            elif grok_enhanced:
-                response = multi_ai.analyze_with_grok(prompt)
-            else:
-                return []
-        elif st.session_state.ai_model == "OpenAI" and openai_client:
-            response = multi_ai.analyze_with_openai(prompt)
-        elif st.session_state.ai_model == "Gemini" and gemini_model:
-            response = multi_ai.analyze_with_gemini(prompt)
-        elif st.session_state.ai_model == "Grok" and grok_enhanced:
-            response = multi_ai.analyze_with_grok(prompt)
-        else:
-            return []
-        
-        events = json.loads(response)
-        return events
-    except Exception as e:
-        st.error(f"Error fetching economic events: {str(e)}")
-        return []
-
-# Main app
-st.title("🔥 AI Radar Pro — Live Trading Assistant")
-
-# Timezone toggle (made smaller with column and smaller font)
-col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
-with col_tz:
-    st.session_state.selected_tz = st.selectbox("TZ:", ["ET", "CT"], index=0 if st.session_state.selected_tz == "ET" else 1, 
-                                                label_visibility="collapsed", help="Select Timezone (ET/CT)")
-
-# Get current time in selected TZ
-tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
-current_tz = datetime.datetime.now(tz_zone)
-tz_label = st.session_state.selected_tz
-
-# Enhanced AI Settings
-st.sidebar.subheader("🤖 AI Configuration")
-available_models = ["Multi-AI"] + multi_ai.get_available_models()
-st.session_state.ai_model = st.sidebar.selectbox("AI Model", available_models, 
-                                                  index=available_models.index(st.session_state.ai_model) if st.session_state.ai_model in available_models else 0)
-
-# Show AI model status
-st.sidebar.subheader("AI Models Status")
-if openai_client:
-    st.sidebar.success("✅ OpenAI Connected")
-else:
-    st.sidebar.warning("⚠️ OpenAI Not Connected")
-
-if gemini_model:
-    st.sidebar.success("✅ Gemini Connected")
-else:
-    st.sidebar.warning("⚠️ Gemini Not Connected")
-
-if grok_enhanced:
-    st.sidebar.success("✅ Grok Connected")
-else:
-    st.sidebar.warning("⚠️ Grok Not Connected")
-
-# Data Source Toggle
-st.sidebar.subheader("📊 Data Configuration")
-available_sources = ["Yahoo Finance"]
-if alpha_vantage_client:
-    available_sources.append("Alpha Vantage")
-if twelvedata_client:
-    available_sources.append("Twelve Data")
-st.session_state.data_source = st.sidebar.selectbox("Select Data Source", available_sources, index=available_sources.index(st.session_state.data_source))
-
-# Data source status
-st.sidebar.subheader("Data Sources")
-
-# Debug toggle and API test
-debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
-st.session_state.debug_mode = debug_mode
-
-if debug_mode:
-    st.sidebar.subheader("🔬 Enhanced Data Debug")
-    debug_ticker = st.sidebar.selectbox("Debug Ticker", CORE_TICKERS[:10])
-    
-    if st.sidebar.button("🧪 Test Enhanced Analysis"):
-        with st.sidebar:
-            st.write("**Testing Enhanced Functions:**")
-            
-            # Test technical analysis
-            tech_result = get_comprehensive_technical_analysis(debug_ticker)
-            st.write(f"Technical: {'✅' if not tech_result.get('error') else '❌'}")
-            
-            # Test fundamental analysis  
-            fund_result = get_fundamental_analysis(debug_ticker)
-            st.write(f"Fundamental: {'✅' if not fund_result.get('error') else '❌'}")
-            
-            # Test options analysis
-            opt_result = get_advanced_options_analysis(debug_ticker)
-            st.write(f"Options: {'✅' if not opt_result.get('error') else '❌'}")
-            
-            if st.checkbox("Show Raw Data"):
-                st.json({"tech": tech_result, "fund": fund_result, "opts": opt_result})
-
-if debug_mode and st.sidebar.button("🧪 Test All APIs"):
-    st.sidebar.write("**Testing Data APIs:**")
-    if twelvedata_client:
-        with st.spinner("Testing Twelve Data API..."):
-            test_response = twelvedata_client.get_quote("AAPL")
-            st.sidebar.json(test_response)
-    
-    st.sidebar.write("**Testing AI APIs:**")
-    test_prompt = "Test connection - respond with 'OK'"
-    
-    if openai_client:
-        openai_test = multi_ai.analyze_with_openai(test_prompt)
-        st.sidebar.write(f"OpenAI: {openai_test[:50]}...")
-    
-    if gemini_model:
-        gemini_test = multi_ai.analyze_with_gemini(test_prompt)
-        st.sidebar.write(f"Gemini: {gemini_test[:50]}...")
-    
-    if grok_enhanced:
-        grok_test = multi_ai.analyze_with_grok(test_prompt)
-        st.sidebar.write(f"Grok: {grok_test[:50]}...")
-
-# Show available data sources
-if twelvedata_client:
-    st.sidebar.success("✅ Twelve Data Connected (Primary)")
-else:
-    st.sidebar.warning("⚠️ Twelve Data Not Connected")
-
-if alpha_vantage_client:
-    st.sidebar.success("✅ Alpha Vantage Connected")
-else:
-    st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
-
-st.sidebar.success("✅ Yahoo Finance Connected")
-
-if FINNHUB_KEY:
-    st.sidebar.success("✅ Finnhub API Connected")
-else:
-    st.sidebar.warning("⚠️ Finnhub API Not Found")
-
-if POLYGON_KEY:
-    st.sidebar.success("✅ Polygon API Connected (News)")
-else:
-    st.sidebar.warning("⚠️ Polygon API Not Found")
-
-# Auto-refresh controls
-col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
-with col1:
-    st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
-
-with col2:
-    st.session_state.refresh_interval = st.selectbox("Interval", [10, 30, 60], index=1)
-
-with col3:
-    if st.button("🔄 Refresh Now"):
-        st.cache_data.clear()
-        st.rerun()
-
-with col4:
-    current_time = current_tz.strftime("%I:%M:%S %p")
-    market_open = 9 <= current_tz.hour < 16
-    status = "🟢 Open" if market_open else "🔴 Closed"
-    st.write(f"**{status}** | {current_time} {tz_label}")
-
-# Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
-
-# Global timestamp
-data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
-data_sources = []
-if alpha_vantage_client:
-    data_sources.append("Alpha Vantage")
-if twelvedata_client:
-    data_sources.append("Twelve Data")
-data_sources.append("Yahoo Finance")
-data_source_info = " + ".join(data_sources)
-
-# AI model info
-ai_info = f"AI: {st.session_state.ai_model}"
-if st.session_state.ai_model == "Multi-AI":
-    active_models = multi_ai.get_available_models()
-    ai_info += f" ({'+'.join(active_models)})" if active_models else " (None Available)"
-
-# TAB 1: Live Quotes
-with tabs[0]:
-    st.subheader("📊 Real-Time Watchlist & Market Movers")
-    
-    # Session status (using selected TZ)
-    current_tz_hour = current_tz.hour
-    if 4 <= current_tz_hour < 9:
-        session_status = "🌅 Premarket"
-    elif 9 <= current_tz_hour < 16:
-        session_status = "🟢 Market Open"
-    else:
-        session_status = "🌆 After Hours"
-    
-    st.markdown(f"**Trading Session ({tz_label}):** {session_status}")
-    
-    # Search bar for any ticker
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)", key="search_quotes").upper().strip()
-    with col2:
-        search_quotes = st.button("Get Quote", key="search_quotes_btn")
-    
-    # Search result for any ticker
-    if search_quotes and search_ticker:
-        with st.spinner(f"Getting quote for {search_ticker}..."):
-            quote = get_live_quote(search_ticker, tz_label)
-            if not quote["error"]:
-                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
-                
-                col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-                col1.metric(search_ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Bid/Ask", f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
-                col3.metric("Volume", f"{quote['volume']:,}")
-                
-                # Session breakdown
-                st.markdown("#### Session Performance")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                # Enhanced Analysis Button
-                if col4.button(f"📊 Enhanced Analysis", key=f"quotes_enhanced_{search_ticker}"):
-                    with st.spinner(f"Running comprehensive analysis for {search_ticker}..."):
-                        technical = get_comprehensive_technical_analysis(search_ticker)
-                        fundamental = get_fundamental_analysis(search_ticker)
-                        options = get_advanced_options_analysis(search_ticker)
-                        
-                        # Display technical summary
-                        if not technical.get("error"):
-                            st.success("✅ Technical Analysis Complete")
-                            tech_col1, tech_col2, tech_col3 = st.columns(3)
-                            if "short_term" in technical:
-                                tech_col1.metric("RSI", f"{technical['short_term'].get('rsi', 0):.1f}")
-                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
-                                tech_col3.metric("Signal", technical.get('signal_strength', 'Unknown'))
-                            elif "rsi" in technical:
-                                tech_col1.metric("RSI", f"{technical.get('rsi', 0):.1f}")
-                                tech_col2.metric("Trend", technical.get('trend_analysis', 'Unknown'))
-                                tech_col3.metric("BB Position", f"{technical.get('bb_position', 0):.2f}")
-                        
-                        # Display fundamental summary  
-                        if not fundamental.get("error"):
-                            st.success("✅ Fundamental Analysis Complete")
-                            fund_col1, fund_col2, fund_col3 = st.columns(3)
-                            fund_col1.metric("Health", fundamental.get('financial_health', 'Unknown'))
-                            fund_col2.metric("Valuation", fundamental.get('valuation_assessment', 'Unknown'))
-                            fund_col3.metric("P/E Ratio", fundamental.get('pe_ratio', 'N/A'))
-                        
-                        # Display options summary
-                        if not options.get("error"):
-                            st.success("✅ Options Analysis Complete")
-                            opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            basic = options.get('basic_metrics', {})
-                            flow = options.get('flow_analysis', {})
-                            opt_col1.metric("P/C Ratio", f"{basic.get('put_call_volume_ratio', 0):.2f}")
-                            opt_col2.metric("Flow Sentiment", flow.get('flow_sentiment', 'Neutral'))
-                            opt_col3.metric("Unusual Activity", f"{options.get('unusual_activity', {}).get('total_unusual_contracts', 0)}")
-                
-                if col4.button(f"Add {search_ticker} to Watchlist", key="quotes_add_searched_ticker"):
-                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                    if search_ticker not in current_list:
-                        current_list.append(search_ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                        st.success(f"Added {search_ticker} to watchlist!")
-                        st.rerun()
-                st.divider()
-            else:
-                st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
-    
-    # Watchlist display
-    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-    st.markdown("### Your Watchlist")
-    if not tickers:
-        st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab or check Market Movers below.")
-    else:
-        for ticker in tickers:
-            quote = get_live_quote(ticker, tz_label)
-            if quote["error"]:
-                st.error(f"{ticker}: {quote['error']}")
-                continue
-            
-            with st.container():
-                col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
-                
-                col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.write("**Bid/Ask**")
-                col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
-                col3.write("**Volume**")
-                col3.write(f"{quote['volume']:,}")
-                col3.caption(f"Updated: {quote['last_updated']}")
-                col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
-                
-                if abs(quote['change_percent']) >= 2.0:
-                    if col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
-                        with st.spinner(f"Analyzing {ticker}..."):
-                            options_data = get_options_data(ticker)
-                            analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
-                            st.success(f"🤖 {ticker} Analysis")
-                            st.markdown(analysis)
-                
-                # Session data
-                sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
-                sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
-                sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
-                sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
-                
-                with st.expander(f"🔎 Expand {ticker}"):
-                    news = get_finnhub_news(ticker)
-                    if news:
-                        st.write("### 📰 Catalysts (last 24h)")
-                        for n in news:
-                            st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
-                    else:
-                        st.info("No recent news.")
-                    
-                    st.markdown("### 🎯 AI Playbook")
-                    catalyst_title = news[0].get('headline', '') if news else ""
-                    options_data = get_options_data(ticker)
-                    if options_data:
-                        st.write("**Options Metrics:**")
-                        opt_col1, opt_col2, opt_col3 = st.columns(3)
-                        opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                        opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                        opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                        st.caption("Note: Options data is real from yfinance")
-                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
-                
-                st.divider()
-
-    # Top Market Movers
-    st.markdown("### 🌟 Top Market Movers")
-    st.caption("Stocks with significant intraday movement from CORE_TICKERS")
-    movers = []
-    for ticker in CORE_TICKERS[:20]:  # Limit to top 20 for performance
-        quote = get_live_quote(ticker, tz_label)
-        if not quote["error"]:
-            movers.append({
-                "ticker": ticker,
-                "change_pct": quote["change_percent"],
-                "price": quote["last"],
-                "volume": quote["volume"],
-                "data_source": quote.get("data_source", "Yahoo Finance")
-            })
-    movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
-    top_movers = movers[:10]  # Show top 10 movers
-
-    for mover in top_movers:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-            direction = "🚀" if mover["change_pct"] > 0 else "📉"
-            col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
-            col2.write("**Bid/Ask**")
-            col2.write(f"N/A")  # Movers don't include bid/ask in this view
-            col3.write("**Volume**")
-            col3.write(f"{mover['volume']:,}")
-            col3.caption(f"Source: {mover['data_source']}")
-            if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"quotes_mover_{mover['ticker']}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if mover['ticker'] not in current_list:
-                    current_list.append(mover['ticker'])
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {mover['ticker']} to watchlist!")
-                    st.rerun()
-            st.divider()
-
-# TAB 2: Watchlist Manager
-with tabs[1]:
-    st.subheader("📋 Watchlist Manager")
-    
-    # Search and add
-    st.markdown("### 🔍 Search & Add Stocks")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_add_ticker = st.text_input("Search stock to add", placeholder="Enter ticker", key="search_add").upper().strip()
-    with col2:
-        if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
-            quote = get_live_quote(search_add_ticker, tz_label)
-            if not quote["error"]:
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if search_add_ticker not in current_list:
-                    current_list.append(search_add_ticker)
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"✅ Added {search_add_ticker}")
-                    st.rerun()
-                else:
-                    st.warning(f"{search_add_ticker} already in watchlist")
-            else:
-                st.error(f"Invalid ticker: {search_add_ticker}")
-    
-    # Watchlist management
-    st.markdown("### 📋 Manage Watchlists")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        selected_watchlist = st.selectbox("Active Watchlist", list(st.session_state.watchlists.keys()))
-        st.session_state.active_watchlist = selected_watchlist
-    
-    with col2:
-        new_watchlist = st.text_input("New Watchlist Name")
-        if st.button("Create Watchlist") and new_watchlist:
-            st.session_state.watchlists[new_watchlist] = []
-            st.session_state.active_watchlist = new_watchlist
-            st.rerun()
-    
-    current_tickers = st.session_state.watchlists[st.session_state.active_watchlist].copy()
-    
-    # Clean up any existing duplicates
-    unique_current_tickers = list(dict.fromkeys(current_tickers))
-    if len(unique_current_tickers) != len(current_tickers):
-        st.session_state.watchlists[st.session_state.active_watchlist] = unique_current_tickers
-        current_tickers = unique_current_tickers
-        st.rerun()  # Refresh to show cleaned list
-    
-    # Popular tickers
-    st.markdown("### ⭐ Popular Tickers")
-    cols = st.columns(6)
-    for i, ticker in enumerate(CORE_TICKERS):
-        with cols[i % 6]:
-            if st.button(f"+ {ticker}", key=f"watchlist_add_{ticker}"):
-                if ticker not in current_tickers:
-                    current_tickers.append(ticker)
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
-                    st.success(f"Added {ticker}")
-                    st.rerun()
-    
-    # Current watchlist
-    st.markdown("### 📊 Current Watchlist")
-    if current_tickers:
-        for i in range(0, len(current_tickers), 5):
-            cols = st.columns(5)
-            for j, ticker in enumerate(current_tickers[i:i+5]):
-                with cols[j]:
-                    st.write(f"**{ticker}**")
-                    if st.button(f"Remove", key=f"watchlist_remove_{ticker}"):
-                        current_tickers.remove(ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
-                        st.rerun()
-# TAB 3: Enhanced Catalyst Scanner
-with tabs[2]:
-    st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
-    st.caption("Comprehensive news analysis from Finnhub, Polygon, and Yahoo Finance")
-    
-    # Show data sources status
-    sources_status = []
-    if FINNHUB_KEY:
-        sources_status.append("✅ Finnhub")
-    else:
-        sources_status.append("❌ Finnhub")
-    if POLYGON_KEY:
-        sources_status.append("✅ Polygon")
-    else:
-        sources_status.append("❌ Polygon")
-    sources_status.append("✅ Yahoo Finance")
-    
-    st.info(f"**News Sources:** {' | '.join(sources_status)}")
-    
-    # Search specific stock catalysts
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_catalyst_ticker = st.text_input("🔍 Search catalysts for stock", placeholder="Enter ticker", key="search_catalyst").upper().strip()
-    with col2:
-        search_catalyst = st.button("🔍 Analyze Catalysts", key="search_catalyst_btn")
-    
-    if search_catalyst and search_catalyst_ticker:
-        with st.spinner(f"Searching all news sources for {search_catalyst_ticker} catalysts..."):
-            # Get comprehensive catalyst analysis
-            catalyst_data = get_stock_specific_catalysts(search_catalyst_ticker)
-            quote = get_live_quote(search_catalyst_ticker, tz_label)
-            
-            if not quote["error"]:
-                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
-                
-                # Price and volume info
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Volume", f"{quote['volume']:,}")
-                col3.metric("Total Catalysts", catalyst_data["catalyst_summary"]["total_catalysts"])
-                col4.metric("Highest Impact", f"{catalyst_data['catalyst_summary']['highest_impact']}")
-                
-                # Session breakdown
-                st.markdown("#### Session Performance")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%") 
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                # Catalyst Summary
-                st.markdown("#### 📊 Catalyst Summary")
-                summary = catalyst_data["catalyst_summary"]
-                
-                summary_col1, summary_col2, summary_col3 = st.columns(3)
-                summary_col1.metric("Positive", summary["positive_catalysts"], help="Bullish catalysts")
-                summary_col2.metric("Negative", summary["negative_catalysts"], help="Bearish catalysts")
-                summary_col3.metric("Categories", len(summary["primary_categories"]), help="Types of catalysts found")
-                
-                # Primary Categories
-                if summary["primary_categories"]:
-                    st.write("**Main Catalyst Categories:**")
-                    for category, count in summary["primary_categories"]:
-                        st.write(f"• {category.replace('_', ' ').title()}: {count} items")
-                
-                # Trading Implications
-                if catalyst_data["trading_implications"]:
-                    st.markdown("#### 🎯 Trading Implications")
-                    st.markdown(catalyst_data["trading_implications"])
-                
-                # Individual News Items
-                if catalyst_data["news_items"]:
-                    st.markdown("#### 📰 Individual Catalysts")
-                    
-                    # Sort by catalyst strength
-                    sorted_news = sorted(catalyst_data["news_items"], 
-                                       key=lambda x: x["catalyst_analysis"]["catalyst_strength"], 
-                                       reverse=True)
-                    
-                    for i, news_item in enumerate(sorted_news[:10]):  # Show top 10
-                        analysis = news_item["catalyst_analysis"]
-                        
-                        # Create impact indicator
-                        if analysis["impact_level"] == "high":
-                            impact_emoji = "🚀"
-                        elif analysis["impact_level"] == "medium":
-                            impact_emoji = "📈"
-                        else:
-                            impact_emoji = "📊"
-                        
-                        # Sentiment indicator
-                        sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
-                        
-                        with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news_item['title'][:80]}... | {news_item['source']}"):
-                            col1, col2 = st.columns([3, 1])
-                            
-                            with col1:
-                                st.write(f"**Summary:** {news_item.get('summary', 'No summary available')}")
-                                st.write(f"**Source:** {news_item['source']} | **Provider:** {news_item.get('provider', 'Unknown')}")
-                                if news_item.get('url'):
-                                    st.markdown(f"[📖 Read Full Article]({news_item['url']})")
-                            
-                            with col2:
-                                st.metric("Impact", f"{analysis['catalyst_strength']}/100")
-                                st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
-                                st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
-                                st.write(f"**Level:** {analysis['impact_level'].title()}")
-                
-                # Add to watchlist button
-                if st.button(f"Add {search_catalyst_ticker} to Watchlist", key="catalyst_add_searched_ticker"):
-                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                    if search_catalyst_ticker not in current_list:
-                        current_list.append(search_catalyst_ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                        st.success(f"Added {search_catalyst_ticker} to watchlist!")
-                        st.rerun()
-                
-                st.divider()
-            else:
-                st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
-    
-    # Main market catalyst scan
-    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
-    
-    scan_col1, scan_col2 = st.columns([2, 1])
-    with scan_col1:
-        st.caption("Scan all news sources for market-moving catalysts")
-    with scan_col2:
-        scan_type = st.selectbox("Scan Type", ["All Catalysts", "High Impact Only", "By Category"], key="catalyst_scan_type")
-    
-    if st.button("🔍 Scan Market Catalysts", type="primary"):
-        with st.spinner("Scanning all news sources for market catalysts..."):
-            # Get market-moving news
-            market_news = get_market_moving_news()
-            
-            # Get significant movers for correlation
-            movers = []
-            for ticker in CORE_TICKERS[:20]:
-                quote = get_live_quote(ticker, tz_label)
-                if not quote["error"] and abs(quote["change_percent"]) >= 1.5:
-                    movers.append({
-                        "ticker": ticker,
-                        "change_pct": quote["change_percent"],
-                        "price": quote["last"],
-                        "volume": quote["volume"],
-                        "data_source": quote.get("data_source", "Yahoo Finance")
-                    })
-            
-            movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
-            
-            # Display results based on scan type
-            if scan_type == "High Impact Only":
-                filtered_news = [n for n in market_news if n["catalyst_analysis"]["impact_level"] == "high"]
-            elif scan_type == "By Category":
-                # Group by category
-                category_groups = {}
-                for n in market_news:
-                    cat = n["catalyst_analysis"]["primary_category"]
-                    if cat not in category_groups:
-                        category_groups[cat] = []
-                    category_groups[cat].append(n)
-                
-                st.markdown("### 📊 Catalysts by Category")
-                for category, news_items in category_groups.items():
-                    with st.expander(f"📂 {category.replace('_', ' ').title()} ({len(news_items)} items)"):
-                        for news in news_items[:5]:  # Show top 5 per category
-                            analysis = news["catalyst_analysis"]
-                            sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
-                            
-                            st.write(f"{sentiment_emoji} **{news['title']}** ({news['source']})")
-                            st.write(f"Impact: {analysis['catalyst_strength']}/100 | Sentiment: {analysis['sentiment'].title()}")
-                            if news.get('related'):
-                                st.write(f"Related: {news['related']}")
-                            st.write("---")
-                filtered_news = []  # Don't show main list for category view
-            else:
-                filtered_news = market_news
-            
-            # Display main catalyst list
-            if filtered_news:
-                st.markdown("### 🔥 Market-Moving Catalysts")
-                st.caption(f"Found {len(filtered_news)} significant catalysts from all news sources")
-                
-                # Summary metrics
-                high_impact = len([n for n in filtered_news if n["catalyst_analysis"]["impact_level"] == "high"])
-                positive_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "positive"])
-                negative_news = len([n for n in filtered_news if n["catalyst_analysis"]["sentiment"] == "negative"])
-                
-                metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-                metric_col1.metric("Total Catalysts", len(filtered_news))
-                metric_col2.metric("High Impact", high_impact)
-                metric_col3.metric("Positive", positive_news)
-                metric_col4.metric("Negative", negative_news)
-                
-                # Display news items
-                for i, news in enumerate(filtered_news[:15]):  # Show top 15
-                    analysis = news["catalyst_analysis"]
-                    
-                    # Impact and sentiment indicators
-                    if analysis["impact_level"] == "high":
-                        impact_emoji = "🚀"
-                    elif analysis["impact_level"] == "medium":
-                        impact_emoji = "📈"
-                    else:
-                        impact_emoji = "📊"
-                    
-                    sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
-                    
-                    with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news['title'][:100]}... | {news['source']}"):
-                        col1, col2 = st.columns([3, 1])
-                        
-                        with col1:
-                            st.write(f"**Summary:** {news['summary'][:300]}{'...' if len(news['summary']) > 300 else ''}")
-                            st.write(f"**Source:** {news['source']} | **Provider:** {news.get('provider', 'Unknown')}")
-                            if news.get('related'):
-                                st.write(f"**Related Tickers:** {news['related']}")
-                            if news.get('url'):
-                                st.markdown(f"[📖 Read Full Article]({news['url']})")
-                        
-                        with col2:
-                            st.metric("Impact Score", f"{analysis['catalyst_strength']}/100")
-                            st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
-                            st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
-                            st.write(f"**Impact Level:** {analysis['impact_level'].title()}")
-                            
-                            # Category breakdown
-                            if analysis["category_scores"]:
-                                st.write("**Categories:**")
-                                for cat, score in list(analysis["category_scores"].items())[:3]:
-                                    st.write(f"• {cat}: {score}")
-            
-            # Display significant market movers
-            if movers:
-                st.markdown("### 📊 Significant Market Moves")
-                st.caption("Stocks with major price movements that may be catalyst-driven")
-                
-                for mover in movers[:10]:
-                    col1, col2, col3 = st.columns([2, 2, 1])
-                    with col1:
-                        direction = "🚀" if mover["change_pct"] > 0 else "📉"
-                        st.metric(
-                            f"{direction} {mover['ticker']}", 
-                            f"${mover['price']:.2f}",
-                            f"{mover['change_pct']:+.2f}%"
-                        )
-                    with col2:
-                        st.write(f"Volume: {mover['volume']:,}")
-                        st.caption(f"Source: {mover.get('data_source', 'Yahoo Finance')}")
-                    with col3:
-                        if st.button(f"📰 News", key=f"catalyst_news_{mover['ticker']}"):
-                            # Quick news lookup for this ticker
-                            ticker_news = get_comprehensive_news(mover['ticker'])
-                            if ticker_news:
-                                st.write(f"**Recent news for {mover['ticker']}:**")
-                                for news in ticker_news[:3]:
-                                    st.write(f"• {news['title'][:80]}... ({news['source']})")
-                            else:
-                                st.write(f"No recent news found for {mover['ticker']}")
-                        
-                        if st.button(f"Add", key=f"catalyst_add_mover_{mover['ticker']}"):
-                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                            if mover['ticker'] not in current_list:
-                                current_list.append(mover['ticker'])
-                                st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                                st.success(f"Added {mover['ticker']}")
-                                st.rerun()
-
-# TAB 4: Market Analysis
-with tabs[3]:
-    st.subheader("📈 AI Market Analysis")
-    
-    # Search individual analysis
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_analysis_ticker = st.text_input("🔍 Analyze specific stock", placeholder="Enter ticker", key="search_analysis").upper().strip()
-    with col2:
-        search_analysis = st.button("Analyze Stock", key="search_analysis_btn")
-    
-    if search_analysis and search_analysis_ticker:
-        with st.spinner(f"AI analyzing {search_analysis_ticker}..."):
-            quote = get_live_quote(search_analysis_ticker, tz_label)
-            if not quote["error"]:
-                news = get_finnhub_news(search_analysis_ticker)
-                catalyst = news[0].get('headline', '') if news else "Recent market movement"
-                
-                # Get options data for enhanced analysis
-                options_data = get_options_data(search_analysis_ticker)
-                analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst, options_data)
-                
-                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Volume", f"{quote['volume']:,}")
-                col3.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                if col4.button(f"Add {search_analysis_ticker} to WL", key="analysis_add_searched_ticker"):
-                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                    if search_analysis_ticker not in current_list:
-                        current_list.append(search_analysis_ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                        st.success(f"Added {search_analysis_ticker}")
-                        st.rerun()
-                
-                # Session breakdown
-                st.markdown("#### Session Performance")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                # Show options data if available
-                if options_data:
-                    st.markdown("#### Options Metrics")
-                    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
-                    opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
-                    opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
-                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
-                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
-                    st.caption("Note: Options data is real from yfinance")
-                
-                st.markdown("### 🎯 AI Analysis")
-                st.markdown(analysis)
-                
-                if news:
-                    with st.expander(f"📰 Recent News Context"):
-                        for item in news[:3]:
-                            st.write(f"**{item.get('headline', 'No title')}**")
-                            st.write(item.get('summary', 'No summary')[:200] + "...")
-                            st.write("---")
-                
-                st.divider()
-            else:
-                st.error(f"Could not analyze {search_analysis_ticker}: {quote['error']}")
-    
-    # Main market analysis
-    if st.button("🤖 Generate Market Analysis", type="primary"):
-        with st.spinner("AI analyzing market conditions..."):
-            news_items = get_all_news()
-            
-            movers = []
-            for ticker in CORE_TICKERS[:15]:
-                quote = get_live_quote(ticker, tz_label)
-                if not quote["error"]:
-                    movers.append({
-                        "ticker": ticker,
-                        "change_pct": quote["change_percent"],
-                        "price": quote["last"],
-                        "data_source": quote.get("data_source", "Yahoo Finance")
-                    })
-            
-            analysis = ai_market_analysis(news_items, movers)
-            
-            st.success("🤖 AI Market Analysis Complete")
-            st.markdown(analysis)
-            
-            with st.expander("📊 Supporting Data"):
-                st.write("**Top Market Movers:**")
-                for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
-                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Yahoo Finance')}")
-                
-                st.write("**Key News Headlines:**")
-                for news in news_items[:3]:
-                    st.write(f"• {news['title']}")
-
-# TAB 5: AI Playbooks
-with tabs[4]:
-    st.subheader("🤖 AI Trading Playbooks")
-    
-    # Show current AI configuration
-    st.info(f"🤖 Current AI Mode: **{st.session_state.ai_model}** | Available Models: {', '.join(multi_ai.get_available_models()) if multi_ai.get_available_models() else 'None'}")
-    
-    # Auto-generated plays section
-    st.markdown("### 🎯 Auto-Generated Trading Plays")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.caption("AI automatically scans your watchlist and market movers to suggest trading opportunities")
-    with col2:
-        if st.button("🚀 Generate Auto Plays", type="primary"):
-            with st.spinner("AI generating trading plays from market scan..."):
-                auto_plays = ai_auto_generate_plays_enhanced(tz_label)
-                
-                if auto_plays:
-                    st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
-                    
-                    for i, play in enumerate(auto_plays):
-                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Yahoo Finance')}"):
-                            
-                            # Display session data
-                            sess_col1, sess_col2, sess_col3 = st.columns(3)
-                            sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
-                            sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
-                            sess_col3.metric("After Hours", f"{play['session_data']['afterhours']:+.2f}%")
-                            
-                            # Display catalyst
-                            if play['catalyst']:
-                                st.write(f"**Catalyst:** {play['catalyst']}")
-                            
-                            # Display enhanced summaries
-                            st.write(f"**Technical:** {play['technical_summary']}")
-                            st.write(f"**Fundamental:** {play['fundamental_summary']}")
-                            st.write(f"**Options:** {play['options_summary']}")
-                            st.write(f"**Significance Score:** {play['significance_score']:.2f}")
-                            
-                            # Display AI play analysis
-                            st.markdown("**AI Trading Play:**")
-                            st.markdown(play['play_analysis'])
-                            
-                            st.caption(f"Data Source: {play.get('data_source', 'Yahoo Finance')} | Updated: {play['timestamp']}")
-                            
-                            # Add to watchlist option
-                            if st.button(f"Add {play['ticker']} to Watchlist", key=f"playbook_auto_{i}_{play['ticker']}"):
-                                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                                if play['ticker'] not in current_list:
-                                    current_list.append(play['ticker'])
-                                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                                    st.success(f"Added {play['ticker']} to watchlist!")
-                                    st.rerun()
-                else:
-                    st.info("No significant trading opportunities detected at this time. Market conditions may be consolidating.")
-    
-    st.divider()
-    
-    # Search any stock
-    st.markdown("### 🔍 Custom Stock Analysis")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search_playbook_ticker = st.text_input("🔍 Generate playbook for any stock", placeholder="Enter ticker", key="search_playbook").upper().strip()
-    with col2:
-        search_playbook = st.button("Generate Playbook", key="search_playbook_btn")
-    
-    if search_playbook and search_playbook_ticker:
-        quote = get_live_quote(search_playbook_ticker, tz_label)
-        
-        if not quote["error"]:
-            with st.spinner(f"AI generating playbook for {search_playbook_ticker}..."):
-                news = get_finnhub_news(search_playbook_ticker)
-                catalyst = news[0].get('headline', '') if news else ""
-                
-                # Get options data for enhanced playbook
-                options_data = get_options_data(search_playbook_ticker)
-                playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst, options_data)
-                
-                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                col3.metric("Volume", f"{quote['volume']:,}")
-                if col4.button(f"Add {search_playbook_ticker} to WL", key="playbook_add_searched_ticker"):
-                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                    if search_playbook_ticker not in current_list:
-                        current_list.append(search_playbook_ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                        st.success(f"Added {search_playbook_ticker}")
-                        st.rerun()
-                
-                # Session performance
-                st.markdown("#### Session Breakdown")
-                sess_col1, sess_col2, sess_col3 = st.columns(3)
-                sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                
-                # Show options data if available
-                if options_data:
-                    st.markdown("#### Options Analysis")
-                    opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
-                    opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                    opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
-                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
-                    st.caption("Note: Options data is real from yfinance")
-                
-                st.markdown("### 🎯 AI Trading Playbook")
-                st.markdown(playbook)
-                
-                if news:
-                    with st.expander(f"📰 Recent News for {search_playbook_ticker}"):
-                        for item in news[:3]:
-                            st.write(f"**{item.get('headline', 'No title')}**")
-                            st.write(item.get('summary', 'No summary')[:200] + "...")
-                            st.write("---")
-                
-                st.divider()
-        else:
-            st.error(f"Could not get data for {search_playbook_ticker}: {quote['error']}")
-    
-    # Watchlist playbooks
-    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-    
-    if tickers:
-        st.markdown("### 📋 Watchlist Playbooks")
-        selected_ticker = st.selectbox("Select from watchlist", tickers, key="watchlist_playbook")
-        catalyst_input = st.text_input("Catalyst (optional)", placeholder="News event, etc.", key="catalyst_input")
-        
-        if st.button("🤖 Generate Watchlist Playbook", type="secondary"):
-            quote = get_live_quote(selected_ticker, tz_label)
-            
-            if not quote["error"]:
-                with st.spinner(f"AI analyzing {selected_ticker}..."):
-                    # Get options data for enhanced analysis
-                    options_data = get_options_data(selected_ticker)
-                    playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input, options_data)
-                    
-                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                    col2.metric("Spread", f"${quote['ask'] - quote['bid']:.3f}")
-                    col3.metric("Volume", f"{quote['volume']:,}")
-                    
-                    # Session performance
-                    st.markdown("#### Session Breakdown")
-                    sess_col1, sess_col2, sess_col3 = st.columns(3)
-                    sess_col1.metric("Premarket", f"{quote['premarket_change']:+.2f}%")
-                    sess_col2.metric("Intraday", f"{quote['intraday_change']:+.2f}%")
-                    sess_col3.metric("After Hours", f"{quote['postmarket_change']:+.2f}%")
-                    
-                    st.markdown("### 🎯 AI Analysis")
-                    st.markdown(playbook)
-                    
-                    news = get_finnhub_news(selected_ticker)
-                    if news:
-                        with st.expander(f"📰 Recent News for {selected_ticker}"):
-                            for item in news[:3]:
-                                st.write(f"**{item.get('headline', 'No title')}**")
-                                st.write(item.get('summary', 'No summary')[:200] + "...")
-                                st.write("---")
-    else:
-        st.info("Add stocks to watchlist or use search above.")
-
-# TAB 6: Sector/ETF Tracking
-with tabs[5]:
-    st.subheader("🌐 Sector/ETF Tracking")
-
-    # Add search and add functionality
-    st.markdown("### 🔍 Search & Add ETFs")
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        etf_search_ticker = st.text_input("Search for an ETF to add", placeholder="Enter ticker (e.g., VOO)", key="etf_search_add").upper().strip()
-    with col2:
-        if st.button("Add ETF", key="add_etf_btn") and etf_search_ticker:
-            if etf_search_ticker not in st.session_state.etf_list:
-                quote = get_live_quote(etf_search_ticker)
-                if not quote["error"]:
-                    st.session_state.etf_list.append(etf_search_ticker)
-                    st.success(f"✅ Added {etf_search_ticker} to the list.")
-                    st.rerun()
-                else:
-                    st.error(f"Invalid ticker or ETF: {etf_search_ticker}")
-            else:
-                st.warning(f"{etf_search_ticker} is already in the list.")
-
-    st.markdown("### ETF Performance Overview")
-    
-    for ticker in st.session_state.etf_list:
-        quote = get_live_quote(ticker, tz_label)
-        if quote["error"]:
-            st.error(f"{ticker}: {quote['error']}")
-            continue
-        
-        with st.container():
-            col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
-            
-            col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-            col2.write("**Bid/Ask**")
-            col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
-            col3.write("**Volume**")
-            col3.write(f"{quote['volume']:,}")
-            col3.caption(f"Updated: {quote['last_updated']}")
-            col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
-            
-            if col4.button(f"Add {ticker} to Watchlist", key=f"sector_etf_add_{ticker}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if ticker not in current_list:
-                    current_list.append(ticker)
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {ticker} to watchlist!")
-                    st.rerun()
-
-            st.divider()
-
-# TAB 7: 0DTE & Lottos
-with tabs[6]:
-    st.subheader("🎲 0DTE & Lotto Plays")
-    st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
-
-    # Ticker selection
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        selected_ticker = st.selectbox("Select Ticker for 0DTE", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="0dte_ticker")
-    with col2:
-        if st.button("Analyze 0DTE", key="analyze_0dte"):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Fetch option chain
-    with st.spinner(f"Fetching option chain for {selected_ticker}..."):
-        option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
-        quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
-
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
-    else:
-        current_price = quote['last']  # Use from quote, which prefers Twelve Data
-        expiration = option_chain["expiration"]
-        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
-        st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
-        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
-
-        # AI Analysis at the top
-        st.markdown("### 🤖 AI 0DTE Playbook")
-        with st.spinner("Generating AI analysis..."):
-            tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
-            options_analysis = get_advanced_options_analysis(selected_ticker)
-            order_flow = get_order_flow(selected_ticker, option_chain)
-            # Summarize option chain
-            calls = option_chain["calls"]
-            puts = option_chain["puts"]
-            top_calls = calls.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            top_puts = puts.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            option_summary = f"Top Calls:\n{top_calls}\nTop Puts:\n{top_puts}"
-            
-            # Enhanced prompt for high confidence 0DTE play
-            tech_summary = generate_technical_summary(tech_analysis)
-            catalyst = f"0DTE options activity. Technical Analysis: {tech_summary}. Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, Put/Call Ratio: {order_flow.get('put_call_ratio', 0):.2f}. Option Chain Summary: {option_summary}"
-            playbook = ai_playbook(
-                selected_ticker,
-                quote["change_percent"],
-                catalyst,
-                options_analysis
-            )
-            st.markdown(playbook)
-
-        # Display option chain
-        st.markdown("### Calls")
-        calls = option_chain["calls"]
-        if not calls.empty:
-            display_calls = calls[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
-            display_calls.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
-            display_calls['IV (%)'] = display_calls['IV (%)'].map('{:.2f}'.format)
-            st.dataframe(display_calls, use_container_width=True)
-        else:
-            st.warning("No call options available.")
-
-        st.markdown("### Puts")
-        puts = option_chain["puts"]
-        if not puts.empty:
-            display_puts = puts[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
-            display_puts.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
-            display_puts['IV (%)'] = display_puts['IV (%)'].map('{:.2f}'.format)
-            st.dataframe(display_puts, use_container_width=True)
-        else:
-            st.warning("No put options available.")
-
-        # Order flow analysis
-        st.markdown("### Order Flow Analysis")
-        order_flow = get_order_flow(selected_ticker, option_chain)
-        if order_flow.get("error"):
-            st.error(order_flow["error"])
-        else:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Put/Call Volume Ratio", f"{order_flow['put_call_ratio']:.2f}")
-            col2.metric("Sentiment", order_flow["sentiment"])
-            col3.metric("Total Volume", f"{int(calls['volume'].sum() + puts['volume'].sum()):,}")
-
-            st.markdown("#### Top Trades (Unusual Activity)")
-            if order_flow["top_calls"]:
-                st.markdown("**Top Call Trades**")
-                for trade in order_flow["top_calls"]:
-                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
-            if order_flow["top_puts"]:
-                st.markdown("**Top Put Trades**")
-                for trade in order_flow["top_puts"]:
-                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
-            if not order_flow["top_calls"] and not order_flow["top_puts"]:
-                st.info("No unusual activity detected.")
-
-# TAB 8: Earnings Plays
-with tabs[7]:
-    st.subheader("🗓️ Top Earnings Plays")
-    
-    st.write("This section tracks upcoming earnings reports and provides AI analysis for potential earnings plays.")
-    st.info("Note: Earnings data is simulated for demonstration. For live earnings calendar, consider integrating a financial calendar API.")
-    
-    if st.button("📊 Get Today's Earnings Plays", type="primary"):
-        with st.spinner("AI analyzing earnings reports..."):
-            
-            earnings_today = get_earnings_calendar()
-            
-            if not earnings_today:
-                st.info("No earnings reports found for today.")
-            else:
-                st.markdown("### Today's Earnings Reports")
-                for report in earnings_today:
-                    ticker = report["ticker"]
-                    time_str = report["time"]
-                    
-                    st.markdown(f"**{ticker}** - Earnings **{time_str}**")
-                    
-                    # Get live quote and options data for earnings analysis
-                    quote = get_live_quote(ticker)
-                    options_analysis = get_advanced_options_analysis(ticker)
-                    
-                    if not quote.get("error"):
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                        col2.metric("Volume", f"{quote['volume']:,}")
-                        col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
-                        
-                        if not options_analysis.get("error"):
-                            st.write("**Options Metrics:**")
-                            opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            basic = options_analysis.get('basic_metrics', {})
-                            opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
-                            opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
-                            opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
-                    
-                    if not options_analysis.get("error"):
-                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str}", options_analysis)
-                    else:
-                        ai_analysis = f"""
-                        **AI Analysis for {ticker} Earnings:**
-                        - **Date:** {report["date"]}
-                        - **Time:** {time_str}
-                        - **Current Price:** ${quote.get('last', 0):.2f}
-                        - **Daily Change:** {quote.get('change_percent', 0):+.2f}%
-                        - **Volume:** {quote.get('volume', 0):,}
-                        - **Data Source:** {quote.get('data_source', 'Yahoo Finance')}
-                        
-                        **Note:** Monitor for post-earnings volatility. Consider both upside and downside scenarios.
-                        """
-                    
-                    with st.expander(f"🔮 AI Analysis for {ticker}"):
-                        st.markdown(ai_analysis)
-                    st.divider()
-
-# TAB 9: Important News & Economic Calendar
-with tabs[8]:
-    st.subheader("📰 Important News & Economic Calendar")
-
-    if st.button("📊 Get This Week's Events", type="primary"):
-        with st.spinner("Fetching important events..."):
-            important_events = get_important_events()
-
-            if not important_events:
-                st.info("No major economic events scheduled for this week.")
-            else:
-                st.markdown("### Major Market-Moving Events")
-
-                for event in sorted(important_events, key=lambda x: x['date']):
-                    st.markdown(f"**{event['event']}**")
-                    st.write(f"**Date:** {event['date']}")
-                    st.write(f"**Time:** {event['time']}")
-                    st.write(f"**Impact:** {event['impact']}")
-                    st.divider()
-
-# TAB 10: Twitter/X Market Sentiment & Rumors
-with tabs[9]:
-    st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
-
-    # Important disclaimer
-    st.warning("⚠️ **Risk Disclaimer:** Social media content includes unverified rumors and speculation. "
-               "Always verify information through official sources before making trading decisions. "
-               "GROK analysis may include both verified news and unconfirmed rumors - trade responsibly.")
-
-    if not grok_enhanced:
-        st.error("🔴 Grok API not configured. This tab requires Grok API access for Twitter/X integration.")
-        st.info("Please add your Grok API key to access real-time Twitter sentiment and social media catalysts.")
-    else:
-        st.success("✅ Grok connected for Twitter/X analysis")
-
-        # Overall Market Sentiment
-        st.markdown("### 📊 Overall Market Sentiment")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.caption("Get real-time Twitter/X sentiment analysis for the overall market")
-        with col2:
-            if st.button("🔍 Scan Market Sentiment", type="primary"):
-                with st.spinner("Grok analyzing Twitter/X market sentiment..."):
-                    market_sentiment = grok_enhanced.get_twitter_market_sentiment()
-                    st.markdown("### 🐦 Twitter/X Market Analysis")
-                    st.markdown(market_sentiment)
-                    st.caption("Analysis powered by Grok with real-time Twitter/X access")
-
-        st.divider()
-
-        # Stock-Specific Analysis
-        st.markdown("### 🎯 Stock-Specific Social Analysis")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            social_ticker = st.text_input(
-                "🔍 Analyze Twitter sentiment for stock",
-                placeholder="Enter ticker (e.g., TSLA)",
-                key="social_ticker"
-            ).upper().strip()
-        with col2:
-            analyze_social = st.button("Analyze Sentiment", key="analyze_social_btn")
-
-        if analyze_social and social_ticker:
-            with st.spinner(f"Grok analyzing Twitter/X sentiment for {social_ticker}..."):
-                try:
-                    # Get current quote for context
-                    quote = get_live_quote(social_ticker, tz_label)
-
-                    col1, col2, col3 = st.columns(3)
-                    if not quote.get("error"):
-                        col1.metric(f"{social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                        col2.metric("Volume", f"{quote['volume']:,}")
-                        col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
-
-                    # Get Twitter sentiment
-                    sentiment_analysis = grok_enhanced.get_twitter_market_sentiment(social_ticker)
-                    st.markdown(f"### 🐦 Twitter/X Sentiment for {social_ticker}")
-                    st.markdown(sentiment_analysis)
-
-                    # Get social catalysts
-                    st.markdown(f"### 🔥 Social Media Catalysts for {social_ticker}")
-                    with st.spinner("Scanning for social catalysts..."):
-                        catalyst_analysis = grok_enhanced.analyze_social_catalyst(social_ticker)
-                        st.markdown(catalyst_analysis)
-
-                    # Add to watchlist option
-                    if st.button(f"Add {social_ticker} to Watchlist", key="twitter_add_searched_ticker"):
-                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                        if social_ticker not in current_list:
-                            current_list.append(social_ticker)
-                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                            st.success(f"Added {social_ticker} to watchlist!")
-                            st.rerun()
-
-                except Exception as e:
-                    st.error(f"Error analyzing {social_ticker}: {str(e)}")
-
-        st.divider()
-
-        # Watchlist Social Scanning
-        tickers = st.session_state.watchlists[st.session_state.active_watchlist]
-        if tickers:
-            st.markdown("### 📋 Watchlist Social Media Scan")
-            selected_social_ticker = st.selectbox(
-                "Select from watchlist for social analysis",
-                [""] + tickers,
-                key="watchlist_social"
-            )
-
-            col1, col2 = st.columns([2, 2])
-            with col1:
-                timeframe = st.selectbox("Timeframe", ["24h", "12h", "6h", "3h"], key="social_timeframe")
-            with col2:
-                if st.button("🔍 Scan Social Media", key="scan_watchlist_social") and selected_social_ticker:
-                    with st.spinner(f"Grok scanning social media for {selected_social_ticker}..."):
-                        try:
-                            quote = get_live_quote(selected_social_ticker, tz_label)
-
-                            if not quote.get("error"):
-                                col1, col2, col3 = st.columns(3)
-                                col1.metric(f"{selected_social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                                col2.metric("Volume", f"{quote['volume']:,}")
-                                col3.metric("Session", f"PM: {quote['premarket_change']:+.1f}% | "
-                                                       f"Day: {quote['intraday_change']:+.1f}% | "
-                                                       f"AH: {quote['postmarket_change']:+.1f}%")
-
-                            # Get comprehensive social analysis
-                            sentiment = grok_enhanced.get_twitter_market_sentiment(selected_social_ticker)
-                            catalysts = grok_enhanced.analyze_social_catalyst(selected_social_ticker, timeframe)
-
-                            st.markdown(f"### 🐦 Social Sentiment: {selected_social_ticker}")
-                            st.markdown(sentiment)
-
-                            st.markdown(f"### 🔥 Social Catalysts ({timeframe})")
-                            st.markdown(catalysts)
-
-                        except Exception as e:
-                            st.error(f"Error scanning social media for {selected_social_ticker}: {str(e)}")
-        else:
-            st.info("Add stocks to your watchlist to enable watchlist social media scanning.")
-
-        st.divider()
-
-        # Quick Social Sentiment for Popular Tickers
-        st.markdown("### ⭐ Popular Stocks Social Sentiment")
-        popular_for_social = ["TSLA", "NVDA", "AAPL", "SPY", "QQQ", "MSFT", "META", "AMD"]
-        cols = st.columns(4)
-
-        for i, ticker in enumerate(popular_for_social):
-            with cols[i % 4]:
-                if st.button(f"📊 {ticker}", key=f"twitter_quick_social_{ticker}"):
-                    with st.spinner(f"Getting {ticker} social sentiment..."):
-                        try:
-                            sentiment = grok_enhanced.get_twitter_market_sentiment(ticker)
-                            quote = get_live_quote(ticker, tz_label)
-
-                            st.markdown(f"**{ticker} Social Analysis**")
-                            if not quote.get("error"):
-                                st.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-
-                            with st.expander(f"📱 {ticker} Twitter Analysis"):
-                                st.markdown(sentiment)
-
-                        except Exception as e:
-                            st.error(f"Error getting {ticker} sentiment: {str(e)}")
-
-        with st.expander("💡 Social Media Trading Guidelines"):
-            st.markdown("""
-            **Using Social Media for Trading Research:**
-            
-            ✅ Best Practices:
-            - Verify information through multiple sources
-            - Focus on verified accounts and credible sources
-            - Look for consistent themes across multiple posts
-            - Use sentiment as one factor among many in your analysis
-            - Pay attention to unusual volume spikes mentioned on social media
-
-            ❌ Avoid:
-            - Trading based solely on rumors or unverified information
-            - Following pump and dump schemes
-            - FOMO trading based on viral posts
-            - Ignoring fundamentals in favor of sentiment
-            """)
-
-# ===== FOOTER (only once, outside all tabs) =====
-st.markdown("---")
-footer_sources = []
-if alpha_vantage_client:
-    footer_sources.append("Alpha Vantage")
-if twelvedata_client:
-    footer_sources.append("Twelve Data")
-footer_sources.append("Yahoo Finance")
-footer_text = " + ".join(footer_sources)
-
-available_ai_models = multi_ai.get_available_models()
-ai_footer = f"AI: {st.session_state.ai_model}"
-if st.session_state.ai_model == "Multi-AI" and available_ai_models:
-    ai_footer += f" ({'+'.join(available_ai_models)})"
-
-st.markdown(
-    f"<div style='text-align: center; color: #666;'>"
-    f"🔥 AI Radar Pro | Data: {footer_text} | {ai_footer}"
-    "</div>",
-    unsafe_allow_html=True
-)
+    total_
