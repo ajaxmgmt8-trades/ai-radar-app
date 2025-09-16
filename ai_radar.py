@@ -1,22 +1,21 @@
 import requests
-import datetime
 import streamlit as st
 
-# Load key
+# Load Unusual Whales API Key securely from secrets
 UW_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
 
 def get_unusual_whales_flow(ticker: str, limit: int = 20):
     """
-    Fetch options flow from Unusual Whales
+    Fetch options flow data from Unusual Whales API
     """
     if not UW_KEY:
-        return {"error": "Unusual Whales API key not found in st.secrets"}
+        return {"error": "❌ API key not found in st.secrets. Check your secrets configuration."}
 
-    url = f"https://api.unusualwhales.com/api/historic_chains/{ticker}"
+    url = f"https://api.unusualwhales.com/api/historic_chains/{ticker.upper()}"
     params = {
         "limit": limit,
-        "direction": "all",   # "call", "put", or "all"
-        "order": "desc"       # most recent first
+        "direction": "all",  # can be "call", "put", or "all"
+        "order": "desc"
     }
     headers = {
         "Authorization": f"Bearer {UW_KEY}",
@@ -24,25 +23,55 @@ def get_unusual_whales_flow(ticker: str, limit: int = 20):
     }
 
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-        if r.status_code != 200:
-            return {"error": f"API Error {r.status_code}: {r.text}"}
-        data = r.json()
-        return data.get("chains", [])  # UW wraps results under 'chains'
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        st.write(f"Status Code: {response.status_code}")
+
+        try:
+            data = response.json()
+            st.subheader("🔍 Raw API Response")
+            st.json(data)
+        except Exception as json_error:
+            return {"error": f"Failed to parse JSON: {json_error}"}
+
+        if response.status_code != 200:
+            return {"error": f"API Error {response.status_code}: {data.get('detail', response.text)}"}
+
+        # Adjust this if structure is different
+        return data.get("chains", [])
+
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Request failed: {str(e)}"}
 
-# Example Streamlit UI
-st.subheader("🐋 Unusual Whales Options Flow")
 
-ticker = st.text_input("Enter ticker", "AAPL").upper().strip()
+# ----- Streamlit UI -----
+
+st.title("🐋 Unusual Whales Options Flow Viewer")
+
+ticker = st.text_input("Enter Stock Ticker Symbol", value="AAPL").strip().upper()
+
 if st.button("Fetch Flow"):
-    with st.spinner(f"Fetching Unusual Whales flow for {ticker}..."):
-        flow = get_unusual_whales_flow(ticker, 10)
-        if isinstance(flow, dict) and flow.get("error"):
-            st.error(flow["error"])
-        elif flow:
-            for f in flow:
-                st.write(f"**{f.get('symbol')}** | {f.get('type')} | Strike: {f.get('strike')} | Exp: {f.get('expiration')} | Prem: {f.get('premium')}")
-        else:
-            st.info("No flow data found.")
+    if not ticker:
+        st.warning("Please enter a ticker symbol.")
+    else:
+        with st.spinner(f"Fetching options flow for {ticker}..."):
+            flow = get_unusual_whales_flow(ticker, limit=10)
+
+            if isinstance(flow, dict) and flow.get("error"):
+                st.error(flow["error"])
+            elif not flow:
+                st.info("No flow data found for this ticker.")
+            else:
+                st.success(f"Showing top {len(flow)} flow entries for {ticker}")
+                for idx, f in enumerate(flow, 1):
+                    st.markdown(
+                        f"""
+                        **{idx}. {f.get('symbol', 'N/A')}**  
+                        • Type: `{f.get('type', 'N/A')}`  
+                        • Strike: `{f.get('strike', 'N/A')}`  
+                        • Expiration: `{f.get('expiration', 'N/A')}`  
+                        • Premium: `${f.get('premium', 0):,.2f}`  
+                        • Side: `{f.get('side', 'N/A')}`  
+                        • Timestamp: `{f.get('timestamp', 'N/A')}`
+                        ---
+                        """
+                    )
