@@ -3136,9 +3136,10 @@ with tabs[0]:
         st.warning("⚠️ **Unusual Whales not connected** - Using fallback sources")
     
     # Search bar for any ticker
-    col1, col2 = st.columns([3, 1])
-    with col1:
-search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)")
+col1, col2 = st.columns([3, 1])
+with col1:
+    with st.container():
+        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)")
 
 
 tab0, tab1, tab2 = st.tabs(["0DTE", "Swing", "LEAPS"])
@@ -3170,8 +3171,8 @@ with tab2:
     else:
         st.info("No LEAPS found.")
 search_quotes = st.text_input("🔍 Search Quotes", key="search_quotes").upper().strip()
-    with col2:
-        search_quotes = st.button("Get Quote", key="search_quotes_btn")
+with col2:
+    search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
     # Search result for any ticker
     if search_quotes and search_ticker:
@@ -3457,9 +3458,9 @@ with tab2:
         st.dataframe(filtered_leaps)
     else:
         st.info("No LEAPS found.")
-.upper().strip()
-    with col2:
-        if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
+search_add_ticker = st.text_input("🔍 Search & Add to Watchlist", key="search_add").upper().strip()
+with col2:
+    if st.button("Search & Add", key="search_add_btn") and search_add_ticker:
             quote = get_live_quote(search_add_ticker, tz_label)
             if not quote["error"]:
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
