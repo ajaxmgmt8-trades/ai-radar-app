@@ -3138,8 +3138,7 @@ with tabs[0]:
     # Search bar for any ticker
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)
-
+        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)")
 
 tab0, tab1, tab2 = st.tabs(["0DTE", "Swing", "LEAPS"])
 
