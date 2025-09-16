@@ -1217,7 +1217,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         # Total change
         total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
         change_dollar = current_price - previous_close if previous_close else 0
-
+        
         return {
             "last": float(current_price),
             "bid": float(info.get('bid', current_price - 0.01)),
@@ -1670,7 +1670,6 @@ def generate_trading_implications_text(ticker: str, news_items: List[Dict],
     return implications.strip()
 
 def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
-    """Analyze news sentiment with emoji indicators"""
     text = (title + " " + summary).lower()
     
     explosive_keywords = ["surge", "soars", "jumps", "rocket", "breakthrough", "beats", "record", "acquisition", "merger"]
@@ -1684,15 +1683,15 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     total_score = explosive_score + bullish_score + bearish_score
     
     if explosive_score >= 2:
-        return ("🚀 EXPLOSIVE", min(95, 60 + explosive_score * 10))
+        return "🚀 EXPLOSIVE", min(95, 60 + explosive_score * 10)
     elif explosive_score >= 1:
-        return ("📈 Bullish", min(85, 50 + explosive_score * 15))
+        return "📈 Bullish", min(85, 50 + explosive_score * 15)
     elif bearish_score >= 2:
-        return ("📉 Bearish", min(80, 40 + bearish_score * 15))
+        return "📉 Bearish", min(80, 40 + bearish_score * 15)
     elif bullish_score >= 2:
-        return ("📈 Bullish", min(75, 35 + bullish_score * 10))
+        return "📈 Bullish", min(75, 35 + bullish_score * 10)
     else:
-        return ("⚪ Neutral", max(10, min(50, total_score * 5)))
+        return "⚪ Neutral", max(10, min(50, total_score * 5))
 
 # New function to fetch option chain data
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -2067,6 +2066,7 @@ Provide comprehensive market analysis covering:
 Keep analysis under 300 words but be specific and actionable.
 """
     
+    # Use selected AI model for analysis
     if st.session_state.ai_model == "Multi-AI":
         analyses = {}
         if openai_client:
@@ -2214,27 +2214,6 @@ st.session_state.data_source = st.sidebar.selectbox("Select Data Source", availa
 
 # Data source status
 st.sidebar.subheader("Data Sources")
-if twelvedata_client:
-    st.sidebar.success("✅ Twelve Data Connected (Primary)")
-else:
-    st.sidebar.warning("⚠️ Twelve Data Not Connected")
-
-if alpha_vantage_client:
-    st.sidebar.success("✅ Alpha Vantage Connected")
-else:
-    st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
-
-st.sidebar.success("✅ Yahoo Finance Connected")
-
-if FINNHUB_KEY:
-    st.sidebar.success("✅ Finnhub API Connected")
-else:
-    st.sidebar.warning("⚠️ Finnhub API Not Found")
-
-if POLYGON_KEY:
-    st.sidebar.success("✅ Polygon API Connected (News)")
-else:
-    st.sidebar.warning("⚠️ Polygon API Not Found")
 
 # Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
@@ -2269,10 +2248,6 @@ if debug_mode and st.sidebar.button("🧪 Test All APIs"):
         with st.spinner("Testing Twelve Data API..."):
             test_response = twelvedata_client.get_quote("AAPL")
             st.sidebar.json(test_response)
-    if alpha_vantage_client:
-        with st.spinner("Testing Alpha Vantage API..."):
-            test_response = alpha_vantage_client.get_quote("AAPL")
-            st.sidebar.json(test_response)
     
     st.sidebar.write("**Testing AI APIs:**")
     test_prompt = "Test connection - respond with 'OK'"
@@ -2289,13 +2264,36 @@ if debug_mode and st.sidebar.button("🧪 Test All APIs"):
         grok_test = multi_ai.analyze_with_grok(test_prompt)
         st.sidebar.write(f"Grok: {grok_test[:50]}...")
 
+# Show available data sources
+if twelvedata_client:
+    st.sidebar.success("✅ Twelve Data Connected (Primary)")
+else:
+    st.sidebar.warning("⚠️ Twelve Data Not Connected")
+
+if alpha_vantage_client:
+    st.sidebar.success("✅ Alpha Vantage Connected")
+else:
+    st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
+
+st.sidebar.success("✅ Yahoo Finance Connected")
+
+if FINNHUB_KEY:
+    st.sidebar.success("✅ Finnhub API Connected")
+else:
+    st.sidebar.warning("⚠️ Finnhub API Not Found")
+
+if POLYGON_KEY:
+    st.sidebar.success("✅ Polygon API Connected (News)")
+else:
+    st.sidebar.warning("⚠️ Polygon API Not Found")
+
 # Auto-refresh controls
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
 with col1:
     st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
 
 with col2:
-    st.session_state.refresh_interval = st.selectbox("Interval", [10, 30, 60], index=[10, 30, 60].index(st.session_state.refresh_interval) if st.session_state.refresh_interval in [10, 30, 60] else 1)
+    st.session_state.refresh_interval = st.selectbox("Interval", [10, 30, 60], index=1)
 
 with col3:
     if st.button("🔄 Refresh Now"):
@@ -2309,22 +2307,23 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News", "🐦 Twitter/X Market Sentiment & Rumors"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
-data_sources = ["Yahoo Finance"]
+data_sources = []
 if alpha_vantage_client:
     data_sources.append("Alpha Vantage")
 if twelvedata_client:
     data_sources.append("Twelve Data")
+data_sources.append("Yahoo Finance")
 data_source_info = " + ".join(data_sources)
 
+# AI model info
 ai_info = f"AI: {st.session_state.ai_model}"
 if st.session_state.ai_model == "Multi-AI":
     active_models = multi_ai.get_available_models()
     ai_info += f" ({'+'.join(active_models)})" if active_models else " (None Available)"
-st.markdown(f"<div style='text-align: center; color: #666; font-size: 12px;'>Last Updated: {data_timestamp} | Data: {data_source_info} | {ai_info}</div>", unsafe_allow_html=True)
 
 # TAB 1: Live Quotes
 with tabs[0]:
@@ -2412,6 +2411,7 @@ with tabs[0]:
                         st.session_state.watchlists[st.session_state.active_watchlist] = current_list
                         st.success(f"Added {search_ticker} to watchlist!")
                         st.rerun()
+                st.divider()
             else:
                 st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
     
@@ -2435,14 +2435,16 @@ with tabs[0]:
                 col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
                 col3.write("**Volume**")
                 col3.write(f"{quote['volume']:,}")
-                col3.caption(f"Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+                col3.caption(f"Updated: {quote['last_updated']}")
+                col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
-                if abs(quote['change_percent']) >= 2.0 and col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
-                    with st.spinner(f"Analyzing {ticker}..."):
-                        options_data = get_options_data(ticker)
-                        analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
-                        st.success(f"🤖 {ticker} Analysis")
-                        st.markdown(analysis)
+                if abs(quote['change_percent']) >= 2.0:
+                    if col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
+                        with st.spinner(f"Analyzing {ticker}..."):
+                            options_data = get_options_data(ticker)
+                            analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
+                            st.success(f"🤖 {ticker} Analysis")
+                            st.markdown(analysis)
                 
                 # Session data
                 sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
@@ -2454,7 +2456,7 @@ with tabs[0]:
                     news = get_finnhub_news(ticker)
                     if news:
                         st.write("### 📰 Catalysts (last 24h)")
-                        for n in news[:3]:
+                        for n in news:
                             st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
                     else:
                         st.info("No recent news.")
@@ -2496,7 +2498,7 @@ with tabs[0]:
             direction = "🚀" if mover["change_pct"] > 0 else "📉"
             col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
             col2.write("**Bid/Ask**")
-            col2.write("N/A")  # Movers don't include bid/ask in this view
+            col2.write(f"N/A")  # Movers don't include bid/ask in this view
             col3.write("**Volume**")
             col3.write(f"{mover['volume']:,}")
             col3.caption(f"Source: {mover['data_source']}")
@@ -2559,7 +2561,7 @@ with tabs[1]:
     # Popular tickers
     st.markdown("### ⭐ Popular Tickers")
     cols = st.columns(6)
-    for i, ticker in enumerate(CORE_TICKERS[:6]):
+    for i, ticker in enumerate(CORE_TICKERS):
         with cols[i % 6]:
             if st.button(f"+ {ticker}", key=f"watchlist_add_{ticker}"):
                 if ticker not in current_tickers:
@@ -2580,9 +2582,6 @@ with tabs[1]:
                         current_tickers.remove(ticker)
                         st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
                         st.rerun()
-    else:
-        st.info("Watchlist is empty. Search for stocks above or add popular tickers.")
-
 # TAB 3: Enhanced Catalyst Scanner
 with tabs[2]:
     st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
@@ -2847,6 +2846,7 @@ with tabs[2]:
                                 current_list.append(mover['ticker'])
                                 st.session_state.watchlists[st.session_state.active_watchlist] = current_list
                                 st.success(f"Added {mover['ticker']}")
+                                st.rerun()
 
 # TAB 4: Market Analysis
 with tabs[3]:
@@ -3130,8 +3130,8 @@ with tabs[5]:
                     st.success(f"✅ Added {etf_search_ticker} to the list.")
                     st.rerun()
                 else:
-                    st.error(f"Invalid ticker or ETF: {etf_search_ticker}
-                            else:
+                    st.error(f"Invalid ticker or ETF: {etf_search_ticker}")
+            else:
                 st.warning(f"{etf_search_ticker} is already in the list.")
 
     st.markdown("### ETF Performance Overview")
@@ -3150,7 +3150,8 @@ with tabs[5]:
             col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
             col3.write("**Volume**")
             col3.write(f"{quote['volume']:,}")
-            col3.caption(f"Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
+            col3.caption(f"Updated: {quote['last_updated']}")
+            col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
             
             if col4.button(f"Add {ticker} to Watchlist", key=f"sector_etf_add_{ticker}"):
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -3184,7 +3185,7 @@ with tabs[6]:
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
-        current_price = quote['last']
+        current_price = quote['last']  # Use from quote, which prefers Twelve Data
         expiration = option_chain["expiration"]
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
@@ -3336,30 +3337,6 @@ with tabs[8]:
                     st.write(f"**Time:** {event['time']}")
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
-
-    # Market-moving catalysts
-    st.markdown("### 🔥 Market-Moving Catalysts")
-    if st.button("🔍 Scan Market News", type="secondary"):
-        with st.spinner("Scanning for market-moving news..."):
-            market_news = get_market_moving_news()
-            if market_news:
-                st.success(f"Found {len(market_news)} significant catalysts")
-                for i, news in enumerate(market_news[:10]):
-                    analysis = news["catalyst_analysis"]
-                    impact_emoji = "🚀" if analysis["impact_level"] == "high" else "📈" if analysis["impact_level"] == "medium" else "📊"
-                    sentiment_emoji = "📈" if analysis["sentiment"] == "positive" else "📉" if analysis["sentiment"] == "negative" else "⚪"
-                    with st.expander(f"{impact_emoji} {sentiment_emoji} {analysis['catalyst_strength']}/100 - {news['title'][:100]}... | {news['source']}"):
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.write(f"**Summary:** {news['summary'][:300]}{'...' if len(news['summary']) > 300 else ''}")
-                            st.write(f"**Source:** {news['source']} | **Provider:** {news.get('provider', 'Unknown')}")
-                            if news.get('related'): st.write(f"**Related Tickers:** {news['related']}")
-                            if news.get('url'): st.markdown(f"[📖 Read Full Article]({news['url']})")
-                        with col2:
-                            st.metric("Impact Score", f"{analysis['catalyst_strength']}/100")
-                            st.write(f"**Category:** {analysis['primary_category'].replace('_', ' ').title()}")
-                            st.write(f"**Sentiment:** {analysis['sentiment'].title()}")
-                            st.write(f"**Impact Level:** {analysis['impact_level'].title()}")
 
 # TAB 10: Twitter/X Market Sentiment & Rumors
 with tabs[9]:
@@ -3527,11 +3504,12 @@ with tabs[9]:
 
 # ===== FOOTER (only once, outside all tabs) =====
 st.markdown("---")
-footer_sources = ["Yahoo Finance"]
+footer_sources = []
 if alpha_vantage_client:
     footer_sources.append("Alpha Vantage")
 if twelvedata_client:
     footer_sources.append("Twelve Data")
+footer_sources.append("Yahoo Finance")
 footer_text = " + ".join(footer_sources)
 
 available_ai_models = multi_ai.get_available_models()
@@ -3544,4 +3522,4 @@ st.markdown(
     f"🔥 AI Radar Pro | Data: {footer_text} | {ai_footer}"
     "</div>",
     unsafe_allow_html=True
-)    
+)
