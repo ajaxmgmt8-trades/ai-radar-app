@@ -3168,7 +3168,7 @@ with tab2:
         st.dataframe(filtered_leaps)
     else:
         st.info("No LEAPS found.")
-", key="search_quotes").upper().strip()
+search_quotes = st.text_input("🔍 Search Quotes", key="search_quotes").upper().strip()
     with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
