@@ -3138,7 +3138,8 @@ with tabs[0]:
     # Search bar for any ticker
     col1, col2 = st.columns([3, 1])
     with col1:
-        search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)")
+search_ticker = st.text_input("🔍 Search Any Stock", placeholder="Enter any ticker (e.g., AAPL, SPY, GME)")
+
 
 tab0, tab1, tab2 = st.tabs(["0DTE", "Swing", "LEAPS"])
 
@@ -3169,7 +3170,7 @@ with tab2:
     else:
         st.info("No LEAPS found.")
 search_quotes = st.text_input("🔍 Search Quotes", key="search_quotes").upper().strip()
-with col2:
+    with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
     # Search result for any ticker
@@ -3632,4 +3633,3 @@ def filter_by_expiration(data, mode="0DTE"):
         if (mode == "0DTE" and delta == 0) or            (mode == "SWING" and 3 <= delta <= 14) or            (mode == "LEAPS" and delta >= 90):
             contracts.append(contract)
     return contracts
-
