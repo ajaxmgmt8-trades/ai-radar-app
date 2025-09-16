@@ -6,15 +6,15 @@ UW_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
 
 def get_unusual_whales_flow(ticker: str, limit: int = 20):
     """
-    Fetch options flow data from Unusual Whales API
+    Fetch options flow data from Unusual Whales API (/v2/historic_chains)
     """
     if not UW_KEY:
         return {"error": "❌ API key not found in st.secrets. Check your secrets configuration."}
 
-    url = f"https://api.unusualwhales.com/v2/option/historic_chains/{ticker.upper()}"
+    url = f"https://api.unusualwhales.com/v2/historic_chains/{ticker.upper()}"
     params = {
         "limit": limit,
-        "direction": "all",  # can be "call", "put", or "all"
+        "direction": "all",
         "order": "desc"
     }
     headers = {
@@ -26,15 +26,16 @@ def get_unusual_whales_flow(ticker: str, limit: int = 20):
         response = requests.get(url, headers=headers, params=params, timeout=10)
         st.write(f"Status Code: {response.status_code}")
 
+        # Return error if not successful
         if response.status_code != 200:
-            st.text(f"Raw response:\n{response.text}")
             return {"error": f"API Error {response.status_code}: {response.text}"}
 
+        # Parse and return JSON data
         data = response.json()
         return data.get("chains", [])
 
     except ValueError:
-        return {"error": f"Failed to parse JSON. Response was:\n{response.text}"}
+        return {"error": f"Failed to parse JSON. Raw response:\n{response.text}"}
     except Exception as e:
         return {"error": f"Request failed: {str(e)}"}
 
