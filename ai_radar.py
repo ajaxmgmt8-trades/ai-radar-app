@@ -92,260 +92,294 @@ except Exception as e:
     gemini_model = None
     grok_client = None
 
-# FIXED: Unusual Whales API Client using ACTUAL API endpoints
+# ENHANCED: Unusual Whales API Client using ACTUAL API endpoints
 class UnusualWhalesClient:
-    """Primary API client for Unusual Whales using real API endpoints"""
+    """Enhanced Unusual Whales API client using documented endpoints"""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        # Try different base URLs based on common patterns
-        self.base_urls_to_try = [
-            "https://api.unusualwhales.com",
-            "https://unusualwhales.com/api",
-            "https://api.unusualwhales.com/v1",
-        ]
+        self.base_url = "https://api.unusualwhales.com"  # Primary API endpoint
         self.session = requests.Session()
-        # Try multiple authentication methods
         self.session.headers.update({
             "Authorization": f"Bearer {api_key}",
-            "X-API-Key": api_key,  # Alternative auth method
-            "apikey": api_key,     # Another common pattern
             "Accept": "application/json",
             "User-Agent": "AI-Radar-Pro/2.0",
             "Content-Type": "application/json"
         })
     
+    def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
+        """Make authenticated request to UW API"""
+        try:
+            url = f"{self.base_url}{endpoint}"
+            
+            # Add API key to params as well for redundancy
+            if params is None:
+                params = {}
+            params['apikey'] = self.api_key
+            
+            response = self.session.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                return {
+                    "data": response.json(),
+                    "error": None,
+                    "status_code": response.status_code
+                }
+            elif response.status_code == 401:
+                return {"error": "Unauthorized - Invalid API key", "status_code": 401}
+            elif response.status_code == 403:
+                return {"error": "Forbidden - Insufficient permissions", "status_code": 403}
+            elif response.status_code == 429:
+                return {"error": "Rate limit exceeded", "status_code": 429}
+            else:
+                return {"error": f"API error: {response.status_code}", "status_code": response.status_code}
+                
+        except requests.exceptions.Timeout:
+            return {"error": "Request timeout", "status_code": None}
+        except requests.exceptions.ConnectionError:
+            return {"error": "Connection error", "status_code": None}
+        except Exception as e:
+            return {"error": f"Request failed: {str(e)}", "status_code": None}
+    
     def get_quote(self, symbol: str) -> Dict:
-        """Get stock data from Unusual Whales - try multiple endpoints"""
-        endpoints_to_try = [
-            f"/api/stock/{symbol}",
-            f"/api/v1/stock/{symbol}",
-            f"/stock/{symbol}",
-            f"/api/stocks/{symbol}",
+        """Get stock quote using UW stock API"""
+        try:
+            # Use documented stock endpoint
+            result = self._make_request(f"/api/stock/{symbol}")
+            
+            if result.get("error"):
+                return {"error": result["error"], "data_source": "Unusual Whales"}
+            
+            data = result["data"]
+            
+            # Parse UW stock data structure
+            if isinstance(data, dict):
+                # Extract price data with flexible field mapping
+                current_price = self._extract_price(data)
+                prev_close = self._extract_prev_close(data)
+                volume = self._extract_volume(data)
+                
+                if current_price > 0:
+                    change = current_price - prev_close if prev_close > 0 else 0
+                    change_percent = (change / prev_close * 100) if prev_close > 0 else 0
+                    
+                    return {
+                        "last": current_price,
+                        "bid": float(data.get("bid", data.get("bidPrice", current_price - 0.01))),
+                        "ask": float(data.get("ask", data.get("askPrice", current_price + 0.01))),
+                        "volume": volume,
+                        "change": change,
+                        "change_percent": change_percent,
+                        "premarket_change": self._extract_premarket_change(data),
+                        "intraday_change": change_percent,
+                        "postmarket_change": self._extract_postmarket_change(data),
+                        "previous_close": prev_close,
+                        "market_open": float(data.get("open", data.get("openPrice", current_price))),
+                        "last_updated": datetime.datetime.now().isoformat(),
+                        "data_source": "Unusual Whales",
+                        "error": None,
+                        "raw_data": data
+                    }
+            
+            return {"error": "Invalid data format from UW API", "data_source": "Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW quote error: {str(e)}", "data_source": "Unusual Whales"}
+    
+    def _extract_price(self, data: Dict) -> float:
+        """Extract current price from various possible field names"""
+        price_fields = [
+            "price", "lastPrice", "last_price", "currentPrice", "current_price",
+            "close", "closePrice", "last", "mark"
         ]
         
-        for base_url in self.base_urls_to_try:
-            for endpoint in endpoints_to_try:
+        for field in price_fields:
+            if field in data and data[field] is not None:
                 try:
-                    full_url = f"{base_url}{endpoint}"
-                    # Try both header auth and query param auth
-                    urls_to_try = [
-                        full_url,  # Header auth
-                        f"{full_url}?api_key={self.api_key}",  # Query param auth
-                        f"{full_url}?apikey={self.api_key}",   # Alternative query param
-                    ]
-                    
-                    for test_url in urls_to_try:
-                        print(f"Trying UW URL: {test_url}")
-                        
-                        response = self.session.get(test_url, timeout=8)
-                        
-                        print(f"UW API Response Status: {response.status_code}")
-                        print(f"UW API Response Headers: {dict(response.headers)}")
-                        print(f"UW API Response Text: {response.text[:500]}")
-                        
-                        if response.status_code == 200:
-                        try:
-                            data = response.json()
-                            print(f"UW API JSON Data Keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-                            
-                            # Try to extract price data - be flexible about field names
-                            price = 0
-                            prev_close = 0
-                            volume = 0
-                            
-                            # Try different field name patterns
-                            price_fields = ["last_price", "price", "close", "last", "current_price"]
-                            for field in price_fields:
-                                if field in data and data[field]:
-                                    price = float(data[field])
-                                    break
-                            
-                            prev_close_fields = ["prev_close", "previous_close", "previousClose", "yesterday_close"]
-                            for field in prev_close_fields:
-                                if field in data and data[field]:
-                                    prev_close = float(data[field])
-                                    break
-                            
-                            volume_fields = ["volume", "total_volume", "day_volume"]
-                            for field in volume_fields:
-                                if field in data and data[field]:
-                                    volume = int(data[field])
-                                    break
-                            
-                            if price > 0:  # We got valid data
-                                # Calculate changes
-                                change = price - prev_close if prev_close > 0 else 0
-                                change_percent = (change / prev_close * 100) if prev_close > 0 else 0
-                                
-                                # Get bid/ask if available
-                                bid = float(data.get("bid", price - 0.01))
-                                ask = float(data.get("ask", price + 0.01))
-                                
-                                return {
-                                    "last": price,
-                                    "bid": bid,
-                                    "ask": ask,
-                                    "volume": volume,
-                                    "change": change,
-                                    "change_percent": change_percent,
-                                    "premarket_change": 0,
-                                    "intraday_change": change_percent,
-                                    "postmarket_change": 0,
-                                    "previous_close": prev_close,
-                                    "market_open": float(data.get("open", price)),
-                                    "last_updated": datetime.datetime.now().isoformat(),
-                                    "data_source": "Unusual Whales",
-                                    "error": None,
-                                    "raw_data": data
-                                }
-                        except Exception as json_error:
-                            print(f"UW JSON parsing error: {json_error}")
-                            continue
-                    elif response.status_code == 401:
-                        return {"error": "UW API: Unauthorized - Check API key", "data_source": "Unusual Whales"}
-                    elif response.status_code == 403:
-                        return {"error": "UW API: Forbidden - Check API permissions", "data_source": "Unusual Whales"}
-                    elif response.status_code == 404:
-                        print(f"UW 404 for: {full_url}")
-                        continue  # Try next endpoint
-                        
-                except requests.exceptions.ConnectionError:
-                    print(f"UW Connection failed for: {base_url}")
-                    continue  # Try next base URL
-                except requests.exceptions.Timeout:
-                    print(f"UW Timeout for: {base_url}")
+                    return float(data[field])
+                except (ValueError, TypeError):
                     continue
-                except Exception as e:
-                    print(f"UW Error for {base_url}{endpoint}: {str(e)}")
-                    continue
+        return 0.0
+    
+    def _extract_prev_close(self, data: Dict) -> float:
+        """Extract previous close price"""
+        prev_fields = [
+            "previousClose", "prev_close", "prevClose", "yesterday_close",
+            "prior_close", "lastClose"
+        ]
         
-        # If we get here, all attempts failed
-        return {"error": "UW API: All endpoints failed - check API documentation", "data_source": "Unusual Whales"}
+        for field in prev_fields:
+            if field in data and data[field] is not None:
+                try:
+                    return float(data[field])
+                except (ValueError, TypeError):
+                    continue
+        return 0.0
+    
+    def _extract_volume(self, data: Dict) -> int:
+        """Extract volume from various possible field names"""
+        volume_fields = [
+            "volume", "totalVolume", "total_volume", "dayVolume", "day_volume"
+        ]
+        
+        for field in volume_fields:
+            if field in data and data[field] is not None:
+                try:
+                    return int(data[field])
+                except (ValueError, TypeError):
+                    continue
+        return 0
+    
+    def _extract_premarket_change(self, data: Dict) -> float:
+        """Extract premarket change if available"""
+        pm_fields = [
+            "premarket_change", "preMarketChange", "premarket_change_percent",
+            "preMarketChangePercent", "pm_change", "pmChange"
+        ]
+        
+        for field in pm_fields:
+            if field in data and data[field] is not None:
+                try:
+                    return float(data[field])
+                except (ValueError, TypeError):
+                    continue
+        return 0.0
+    
+    def _extract_postmarket_change(self, data: Dict) -> float:
+        """Extract after hours change if available"""
+        ah_fields = [
+            "afterhours_change", "afterHoursChange", "aftermarket_change",
+            "postmarket_change", "ah_change", "ahChange"
+        ]
+        
+        for field in ah_fields:
+            if field in data and data[field] is not None:
+                try:
+                    return float(data[field])
+                except (ValueError, TypeError):
+                    continue
+        return 0.0
     
     def get_options_volume(self, symbol: str) -> Dict:
-        """Get options volume data using /api/stock/{ticker}/options-volume"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/stock/{symbol}/options-volume",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "options_volume": data,
-                    "data_source": "Unusual Whales",
-                    "error": None
-                }
-            else:
-                return {"error": f"Options volume error: {response.status_code}", "data_source": "Unusual Whales"}
-                
-        except Exception as e:
-            return {"error": f"Options volume error: {str(e)}", "data_source": "Unusual Whales"}
+        """Get options volume data using documented endpoint"""
+        result = self._make_request(f"/api/stock/{symbol}/options-volume")
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "options_volume": result["data"],
+            "data_source": "Unusual Whales",
+            "error": None
+        }
     
     def get_flow_alerts(self, symbol: str) -> Dict:
-        """Get unusual options flow alerts using /api/stock/{ticker}/flow-alerts"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/stock/{symbol}/flow-alerts",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "flow_alerts": data,
-                    "data_source": "Unusual Whales",
-                    "error": None
-                }
-            else:
-                return {"error": f"Flow alerts error: {response.status_code}", "data_source": "Unusual Whales"}
-                
-        except Exception as e:
-            return {"error": f"Flow alerts error: {str(e)}", "data_source": "Unusual Whales"}
+        """Get options flow alerts using documented endpoint"""
+        result = self._make_request(f"/api/stock/{symbol}/flow-alerts")
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "flow_alerts": result["data"],
+            "data_source": "Unusual Whales", 
+            "error": None
+        }
     
     def get_greek_exposure(self, symbol: str) -> Dict:
-        """Get Greek exposure data using /api/stock/{ticker}/greek-exposure"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/stock/{symbol}/greek-exposure",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "greek_exposure": data,
-                    "data_source": "Unusual Whales",
-                    "error": None
-                }
-            else:
-                return {"error": f"Greek exposure error: {response.status_code}", "data_source": "Unusual Whales"}
-                
-        except Exception as e:
-            return {"error": f"Greek exposure error: {str(e)}", "data_source": "Unusual Whales"}
+        """Get Greek exposure data using documented endpoint"""
+        result = self._make_request(f"/api/stock/{symbol}/greek-exposure")
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "greek_exposure": result["data"],
+            "data_source": "Unusual Whales",
+            "error": None
+        }
     
     def get_market_tide(self) -> Dict:
-        """Get overall market sentiment using /api/market/market-tide"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/market/market-tide",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "market_tide": data,
-                    "data_source": "Unusual Whales",
-                    "error": None
-                }
-            else:
-                return {"error": f"Market tide error: {response.status_code}", "data_source": "Unusual Whales"}
-                
-        except Exception as e:
-            return {"error": f"Market tide error: {str(e)}", "data_source": "Unusual Whales"}
+        """Get overall market sentiment using documented endpoint"""
+        result = self._make_request("/api/market/market-tide")
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "market_tide": result["data"],
+            "data_source": "Unusual Whales",
+            "error": None
+        }
     
     def get_institutional_activity(self, symbol: str) -> Dict:
-        """Get institutional activity - try multiple endpoints"""
-        # Try congressional trading data
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/congress/{symbol}",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "institutional_data": data,
-                    "data_type": "congressional",
-                    "data_source": "Unusual Whales",
-                    "error": None
-                }
-        except Exception:
-            pass
+        """Get institutional activity using documented endpoints"""
+        # Try congress endpoint first
+        result = self._make_request(f"/api/congress/{symbol}")
         
-        # Try insider trading data as fallback
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/insider/{symbol}",
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                return {
-                    "institutional_data": data,
-                    "data_type": "insider",
-                    "data_source": "Unusual Whales", 
-                    "error": None
-                }
-        except Exception:
-            pass
+        if not result.get("error"):
+            return {
+                "institutional_data": result["data"],
+                "data_type": "congressional",
+                "data_source": "Unusual Whales",
+                "error": None
+            }
+        
+        # Try insider endpoint as fallback
+        result = self._make_request(f"/api/insider/{symbol}")
+        
+        if not result.get("error"):
+            return {
+                "institutional_data": result["data"],
+                "data_type": "insider",
+                "data_source": "Unusual Whales",
+                "error": None
+            }
         
         return {"error": "No institutional data available", "data_source": "Unusual Whales"}
+    
+    def get_options_screener(self, params: Dict = None) -> Dict:
+        """Get options screener data"""
+        if params is None:
+            params = {}
+        
+        result = self._make_request("/api/screener/options", params)
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "screener_data": result["data"],
+            "data_source": "Unusual Whales",
+            "error": None
+        }
+    
+    def get_darkpool_flow(self, symbol: str) -> Dict:
+        """Get dark pool flow data if available"""
+        result = self._make_request(f"/api/darkpool/{symbol}")
+        
+        if result.get("error"):
+            return {"error": result["error"], "data_source": "Unusual Whales"}
+        
+        return {
+            "darkpool_data": result["data"],
+            "data_source": "Unusual Whales",
+            "error": None
+        }
+    
+    def test_connection(self) -> Dict:
+        """Test API connection and permissions"""
+        result = self._make_request("/api/test")  # Assuming there's a test endpoint
+        
+        if result.get("error"):
+            # Try a simple stock quote as connection test
+            test_result = self._make_request("/api/stock/AAPL")
+            if test_result.get("error"):
+                return {"connected": False, "error": test_result["error"]}
+            else:
+                return {"connected": True, "message": "API connection successful"}
+        
+        return {"connected": True, "message": "API connection successful"}
 
 # Trading Economics API Client
 class TradingEconomicsClient:
@@ -1255,184 +1289,420 @@ def assess_valuation(fundamentals: Dict) -> str:
     else:
         return "Fairly Valued"
 
-# Enhanced Options Flow Analysis with Unusual Whales REAL API
-def get_advanced_options_analysis(ticker: str) -> Dict:
-    """Comprehensive options analysis with Unusual Whales REAL API data"""
-    try:
-        # Try Unusual Whales first using REAL API endpoints
-        if unusual_whales_client:
-            try:
-                # Get options volume data
-                options_volume = unusual_whales_client.get_options_volume(ticker)
-                flow_alerts = unusual_whales_client.get_flow_alerts(ticker)
-                greek_exposure = unusual_whales_client.get_greek_exposure(ticker)
-                
-                # Process UW data if any endpoint succeeds
-                if not options_volume.get("error") or not flow_alerts.get("error") or not greek_exposure.get("error"):
-                    uw_data = {
-                        "unusual_whales_data": True,
-                        "options_volume": options_volume.get("options_volume", {}),
-                        "flow_alerts": flow_alerts.get("flow_alerts", {}), 
-                        "greek_exposure": greek_exposure.get("greek_exposure", {}),
-                        "data_source": "Unusual Whales",
-                        "error": None
-                    }
-                    
-                    # Calculate summary metrics from UW data
-                    volume_data = options_volume.get("options_volume", {})
-                    alerts_data = flow_alerts.get("flow_alerts", {})
-                    
-                    if isinstance(volume_data, dict):
-                        total_premium = volume_data.get("total_premium", 0)
-                        call_volume = volume_data.get("call_volume", 0)
-                        put_volume = volume_data.get("put_volume", 0)
-                        
-                        uw_data.update({
-                            "total_premium": total_premium,
-                            "call_volume": call_volume,
-                            "put_volume": put_volume,
-                            "put_call_ratio": put_volume / call_volume if call_volume > 0 else 0
-                        })
-                    
-                    if isinstance(alerts_data, list):
-                        uw_data["flow_count"] = len(alerts_data)
-                        uw_data["unusual_activity"] = alerts_data
-                    elif isinstance(alerts_data, dict):
-                        uw_data["flow_count"] = len(alerts_data.get("alerts", []))
-                        uw_data["unusual_activity"] = alerts_data.get("alerts", [])
-                    
-                    return uw_data
-                    
-            except Exception as e:
-                print(f"UW options analysis error: {e}")
-        
-        # Fallback to yfinance option chain analysis
-        option_chain = get_option_chain(ticker, st.session_state.selected_tz)
-        if option_chain.get("error"):
-            return {"error": option_chain["error"]}
-
-        calls = option_chain["calls"]
-        puts = option_chain["puts"]
-        current_price = option_chain["current_price"]
-
-        # Advanced analysis using yfinance data
-        analysis = {
-            "unusual_whales_data": False,
-            "basic_metrics": calculate_basic_options_metrics(calls, puts),
-            "flow_analysis": analyze_options_flow(calls, puts, current_price),
-            "unusual_activity": detect_unusual_activity(calls, puts),
-            "gamma_levels": calculate_gamma_levels(calls, puts, current_price),
-            "sentiment_indicators": calculate_options_sentiment(calls, puts),
-            "expiration": option_chain["expiration"],
-            "current_price": current_price
+# ENHANCED: Options Flow Analysis with UW Integration
+def process_uw_volume_data(volume_data: Dict) -> Dict:
+    """Process Unusual Whales volume data"""
+    if not isinstance(volume_data, dict):
+        return {}
+    
+    return {
+        "uw_volume_metrics": {
+            "total_call_volume": volume_data.get("call_volume", 0),
+            "total_put_volume": volume_data.get("put_volume", 0), 
+            "total_call_premium": volume_data.get("call_premium", 0),
+            "total_put_premium": volume_data.get("put_premium", 0),
+            "total_premium": volume_data.get("total_premium", 0),
+            "volume_ratio": volume_data.get("put_volume", 0) / max(volume_data.get("call_volume", 1), 1),
+            "premium_ratio": volume_data.get("put_premium", 0) / max(volume_data.get("call_premium", 1), 1),
+            "net_premium_flow": volume_data.get("call_premium", 0) - volume_data.get("put_premium", 0)
         }
-        
-        return analysis
-        
-    except Exception as e:
-        return {"error": f"Advanced options analysis error: {str(e)}"}
+    }
 
-def calculate_basic_options_metrics(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
-    """Calculate basic options metrics"""
+def process_uw_flow_alerts(alerts_data: List) -> Dict:
+    """Process Unusual Whales flow alerts"""
+    if not isinstance(alerts_data, list):
+        alerts_data = []
+    
+    # Analyze flow alerts
+    bullish_flows = []
+    bearish_flows = []
+    large_flows = []
+    
+    for alert in alerts_data:
+        if isinstance(alert, dict):
+            flow_type = alert.get("type", "").lower()
+            size = alert.get("size", 0)
+            premium = alert.get("premium", 0)
+            
+            if "call" in flow_type or "bullish" in flow_type:
+                bullish_flows.append(alert)
+            elif "put" in flow_type or "bearish" in flow_type:
+                bearish_flows.append(alert)
+            
+            if size > 100 or premium > 50000:  # Large flow thresholds
+                large_flows.append(alert)
+    
+    return {
+        "uw_flow_analysis": {
+            "total_flows": len(alerts_data),
+            "bullish_flows": len(bullish_flows),
+            "bearish_flows": len(bearish_flows),
+            "large_flows": len(large_flows),
+            "flow_sentiment": "Bullish" if len(bullish_flows) > len(bearish_flows) else "Bearish" if len(bearish_flows) > len(bullish_flows) else "Neutral",
+            "recent_alerts": alerts_data[:5],  # Most recent 5 alerts
+            "flow_bias": (len(bullish_flows) - len(bearish_flows)) / max(len(alerts_data), 1)
+        }
+    }
+
+def process_uw_greeks_data(greeks_data: Dict) -> Dict:
+    """Process Unusual Whales Greek exposure data"""
+    if not isinstance(greeks_data, dict):
+        return {}
+    
+    return {
+        "uw_greeks_analysis": {
+            "total_gamma": greeks_data.get("total_gamma", 0),
+            "total_delta": greeks_data.get("total_delta", 0),
+            "call_gamma": greeks_data.get("call_gamma", 0),
+            "put_gamma": greeks_data.get("put_gamma", 0),
+            "gamma_exposure": greeks_data.get("gamma_exposure", 0),
+            "vanna_exposure": greeks_data.get("vanna", 0),
+            "charm_exposure": greeks_data.get("charm", 0),
+            "dealer_positioning": analyze_dealer_positioning(greeks_data)
+        }
+    }
+
+def process_uw_darkpool_data(darkpool_data: Dict) -> Dict:
+    """Process Unusual Whales dark pool data"""
+    if not isinstance(darkpool_data, dict):
+        return {}
+    
+    return {
+        "uw_darkpool_analysis": {
+            "darkpool_volume": darkpool_data.get("volume", 0),
+            "darkpool_percentage": darkpool_data.get("percentage", 0),
+            "lit_volume": darkpool_data.get("lit_volume", 0),
+            "darkpool_sentiment": darkpool_data.get("sentiment", "Neutral"),
+            "institutional_flow": darkpool_data.get("institutional_flow", 0)
+        }
+    }
+
+def analyze_dealer_positioning(greeks_data: Dict) -> str:
+    """Analyze market maker/dealer positioning from Greeks"""
+    total_gamma = greeks_data.get("total_gamma", 0)
+    call_gamma = greeks_data.get("call_gamma", 0)
+    put_gamma = greeks_data.get("put_gamma", 0)
+    
+    if total_gamma > 1000000:  # High gamma environment
+        if call_gamma > put_gamma:
+            return "Short Gamma (Suppressive)"
+        else:
+            return "Long Gamma (Supportive)"
+    elif total_gamma < -1000000:
+        return "Negative Gamma (Volatile)"
+    else:
+        return "Neutral Gamma"
+
+def calculate_enhanced_options_metrics(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Enhanced options metrics calculation"""
+    if calls.empty or puts.empty:
+        return {"error": "No options data"}
+    
+    # Volume metrics
     total_call_volume = calls['volume'].sum()
     total_put_volume = puts['volume'].sum()
     total_call_oi = calls['openInterest'].sum()
     total_put_oi = puts['openInterest'].sum()
+    
+    # Premium calculations
+    call_premium = (calls['volume'] * calls['lastPrice']).sum()
+    put_premium = (puts['volume'] * puts['lastPrice']).sum()
+    
+    # Advanced ratios
+    volume_weighted_iv_calls = (calls['volume'] * calls['impliedVolatility']).sum() / max(total_call_volume, 1)
+    volume_weighted_iv_puts = (puts['volume'] * puts['impliedVolatility']).sum() / max(total_put_volume, 1)
     
     return {
         "total_call_volume": total_call_volume,
         "total_put_volume": total_put_volume,
         "total_call_oi": total_call_oi,
         "total_put_oi": total_put_oi,
-        "put_call_volume_ratio": total_put_volume / total_call_volume if total_call_volume > 0 else 0,
-        "put_call_oi_ratio": total_put_oi / total_call_oi if total_call_oi > 0 else 0,
+        "call_premium": call_premium,
+        "put_premium": put_premium,
+        "put_call_volume_ratio": total_put_volume / max(total_call_volume, 1),
+        "put_call_oi_ratio": total_put_oi / max(total_call_oi, 1),
+        "put_call_premium_ratio": put_premium / max(call_premium, 1),
         "avg_call_iv": calls['impliedVolatility'].mean(),
         "avg_put_iv": puts['impliedVolatility'].mean(),
-        "iv_skew": puts['impliedVolatility'].mean() - calls['impliedVolatility'].mean()
+        "volume_weighted_iv_calls": volume_weighted_iv_calls,
+        "volume_weighted_iv_puts": volume_weighted_iv_puts,
+        "iv_skew": puts['impliedVolatility'].mean() - calls['impliedVolatility'].mean(),
+        "total_notional": call_premium + put_premium
     }
 
-def analyze_options_flow(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
-    """Analyze options order flow"""
-    # Volume/OI ratios indicate new positions
+def analyze_enhanced_options_flow(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
+    """Enhanced options flow analysis"""
+    # Volume to OI ratios for new vs existing positions
     calls['vol_oi_ratio'] = calls['volume'] / calls['openInterest'].replace(0, 1)
     puts['vol_oi_ratio'] = puts['volume'] / puts['openInterest'].replace(0, 1)
     
-    # ITM vs OTM analysis
-    itm_calls = calls[calls['strike'] < current_price]
-    otm_calls = calls[calls['strike'] >= current_price]
-    itm_puts = puts[puts['strike'] > current_price]
-    otm_puts = puts[puts['strike'] <= current_price]
+    # Moneyness analysis
+    atm_strikes = calls[(calls['strike'] >= current_price * 0.95) & (calls['strike'] <= current_price * 1.05)]
+    otm_calls = calls[calls['strike'] > current_price * 1.05]
+    itm_calls = calls[calls['strike'] < current_price * 0.95]
+    otm_puts = puts[puts['strike'] < current_price * 0.95]
+    itm_puts = puts[puts['strike'] > current_price * 1.05]
+    
+    # Aggressive vs defensive positioning
+    aggressive_call_buying = otm_calls[otm_calls['vol_oi_ratio'] > 1]['volume'].sum()
+    defensive_put_buying = otm_puts[otm_puts['vol_oi_ratio'] > 1]['volume'].sum()
     
     return {
-        "itm_call_volume": itm_calls['volume'].sum(),
+        "atm_volume": atm_strikes['volume'].sum() if not atm_strikes.empty else 0,
         "otm_call_volume": otm_calls['volume'].sum(),
-        "itm_put_volume": itm_puts['volume'].sum(),
+        "itm_call_volume": itm_calls['volume'].sum(),
         "otm_put_volume": otm_puts['volume'].sum(),
-        "net_call_bias": otm_calls['volume'].sum() - itm_calls['volume'].sum(),
-        "net_put_bias": itm_puts['volume'].sum() - otm_puts['volume'].sum(),
-        "flow_sentiment": "Bullish" if otm_calls['volume'].sum() > itm_puts['volume'].sum() else "Bearish"
+        "itm_put_volume": itm_puts['volume'].sum(),
+        "aggressive_call_buying": aggressive_call_buying,
+        "defensive_put_buying": defensive_put_buying,
+        "net_call_bias": otm_calls['volume'].sum() - itm_puts['volume'].sum(),
+        "net_put_bias": itm_puts['volume'].sum() - otm_calls['volume'].sum(),
+        "flow_sentiment": determine_enhanced_flow_sentiment(aggressive_call_buying, defensive_put_buying),
+        "new_position_ratio": ((calls['vol_oi_ratio'] > 1).sum() + (puts['vol_oi_ratio'] > 1).sum()) / len(calls.index + puts.index)
     }
 
-def detect_unusual_activity(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
-    """Detect unusual options activity"""
-    # High volume relative to OI
-    calls_unusual = calls[calls['volume'] > calls['openInterest'] * 2]
-    puts_unusual = puts[puts['volume'] > puts['openInterest'] * 2]
+def determine_enhanced_flow_sentiment(aggressive_calls: int, defensive_puts: int) -> str:
+    """Determine flow sentiment based on aggressive positioning"""
+    if aggressive_calls > defensive_puts * 1.5:
+        return "Strongly Bullish"
+    elif aggressive_calls > defensive_puts:
+        return "Bullish"
+    elif defensive_puts > aggressive_calls * 1.5:
+        return "Strongly Bearish"
+    elif defensive_puts > aggressive_calls:
+        return "Bearish"
+    else:
+        return "Neutral"
+
+def detect_enhanced_unusual_activity(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Enhanced unusual activity detection"""
+    # Dynamic thresholds based on average activity
+    avg_call_volume = calls['volume'].mean()
+    avg_put_volume = puts['volume'].mean()
     
-    # High volume absolute
-    high_vol_threshold = max(calls['volume'].quantile(0.8), puts['volume'].quantile(0.8))
-    calls_high_vol = calls[calls['volume'] >= high_vol_threshold]
-    puts_high_vol = puts[puts['volume'] >= high_vol_threshold]
+    high_vol_threshold_calls = max(avg_call_volume * 3, calls['volume'].quantile(0.8))
+    high_vol_threshold_puts = max(avg_put_volume * 3, puts['volume'].quantile(0.8))
+    
+    # Unusual volume relative to OI
+    calls_unusual_vol = calls[calls['volume'] > calls['openInterest'] * 2]
+    puts_unusual_vol = puts[puts['volume'] > puts['openInterest'] * 2]
+    
+    # High absolute volume
+    calls_high_vol = calls[calls['volume'] >= high_vol_threshold_calls]
+    puts_high_vol = puts[puts['volume'] >= high_vol_threshold_puts]
+    
+    # Large premium trades
+    calls['premium_value'] = calls['volume'] * calls['lastPrice'] * 100  # Contract multiplier
+    puts['premium_value'] = puts['volume'] * puts['lastPrice'] * 100
+    
+    large_call_premium = calls[calls['premium_value'] > 100000]  # >$100k
+    large_put_premium = puts[puts['premium_value'] > 100000]
     
     return {
-        "unusual_calls": calls_unusual[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
-        "unusual_puts": puts_unusual[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
+        "unusual_volume_calls": calls_unusual_vol[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
+        "unusual_volume_puts": puts_unusual_vol[['strike', 'volume', 'openInterest', 'lastPrice']].to_dict('records'),
         "high_volume_calls": calls_high_vol[['strike', 'volume', 'lastPrice']].to_dict('records'),
         "high_volume_puts": puts_high_vol[['strike', 'volume', 'lastPrice']].to_dict('records'),
-        "total_unusual_contracts": len(calls_unusual) + len(puts_unusual)
+        "large_premium_calls": large_call_premium[['strike', 'volume', 'lastPrice', 'premium_value']].to_dict('records'),
+        "large_premium_puts": large_put_premium[['strike', 'volume', 'lastPrice', 'premium_value']].to_dict('records'),
+        "total_unusual_contracts": len(calls_unusual_vol) + len(puts_unusual_vol),
+        "total_large_premium_trades": len(large_call_premium) + len(large_put_premium)
     }
 
-def calculate_gamma_levels(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
-    """Calculate gamma exposure levels (simplified)"""
-    # Approximate gamma calculation
-    calls['approx_gamma'] = calls['openInterest'] * 0.01  # Simplified
-    puts['approx_gamma'] = puts['openInterest'] * -0.01  # Simplified
+def calculate_enhanced_gamma_levels(calls: pd.DataFrame, puts: pd.DataFrame, current_price: float) -> Dict:
+    """Enhanced gamma exposure calculation"""
+    # Simplified gamma calculation (would need Black-Scholes for accuracy)
+    calls['est_gamma'] = calls['openInterest'] * 0.01 * (calls['strike'] / current_price)
+    puts['est_gamma'] = puts['openInterest'] * -0.01 * (current_price / puts['strike'])
     
-    # Find strikes with highest gamma exposure
-    all_strikes = pd.concat([
-        calls[['strike', 'approx_gamma', 'openInterest']].assign(type='call'),
-        puts[['strike', 'approx_gamma', 'openInterest']].assign(type='put')
+    # Combine and group by strike
+    all_options = pd.concat([
+        calls[['strike', 'est_gamma', 'openInterest']].assign(type='call'),
+        puts[['strike', 'est_gamma', 'openInterest']].assign(type='put')
     ])
     
-    gamma_by_strike = all_strikes.groupby('strike')['approx_gamma'].sum().sort_values(ascending=False)
+    gamma_by_strike = all_options.groupby('strike').agg({
+        'est_gamma': 'sum',
+        'openInterest': 'sum'
+    }).sort_values('est_gamma', ascending=False)
+    
+    # Find key gamma levels
+    positive_gamma = gamma_by_strike[gamma_by_strike['est_gamma'] > 0]
+    negative_gamma = gamma_by_strike[gamma_by_strike['est_gamma'] < 0]
     
     return {
         "max_gamma_strike": gamma_by_strike.index[0] if len(gamma_by_strike) > 0 else current_price,
-        "max_gamma_level": gamma_by_strike.iloc[0] if len(gamma_by_strike) > 0 else 0,
-        "gamma_strikes": gamma_by_strike.head(5).to_dict()
+        "max_gamma_level": gamma_by_strike['est_gamma'].iloc[0] if len(gamma_by_strike) > 0 else 0,
+        "total_positive_gamma": positive_gamma['est_gamma'].sum(),
+        "total_negative_gamma": negative_gamma['est_gamma'].sum(),
+        "net_gamma": gamma_by_strike['est_gamma'].sum(),
+        "gamma_strikes": gamma_by_strike.head(10).to_dict('index'),
+        "support_levels": positive_gamma.head(3).index.tolist(),
+        "resistance_levels": negative_gamma.tail(3).index.tolist()
     }
 
-def calculate_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
-    """Calculate options-based sentiment indicators"""
-    # Premium analysis
-    call_premium = (calls['volume'] * calls['lastPrice']).sum()
-    put_premium = (puts['volume'] * puts['lastPrice']).sum()
+def calculate_enhanced_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Enhanced options sentiment calculation"""
+    # Premium-weighted sentiment
+    call_premium_volume = (calls['volume'] * calls['lastPrice']).sum()
+    put_premium_volume = (puts['volume'] * puts['lastPrice']).sum()
     
-    # Aggressive vs defensive positioning
-    aggressive_calls = calls[calls['volume'] > calls['volume'].quantile(0.7)]['volume'].sum()
-    defensive_puts = puts[puts['volume'] > puts['volume'].quantile(0.7)]['volume'].sum()
+    # Volume-weighted IV
+    total_call_volume = calls['volume'].sum()
+    total_put_volume = puts['volume'].sum()
     
-    sentiment_score = (call_premium - put_premium) / (call_premium + put_premium) if (call_premium + put_premium) > 0 else 0
+    vw_call_iv = (calls['volume'] * calls['impliedVolatility']).sum() / max(total_call_volume, 1)
+    vw_put_iv = (puts['volume'] * puts['impliedVolatility']).sum() / max(total_put_volume, 1)
+    
+    # Sentiment score (-1 to 1)
+    premium_sentiment = (call_premium_volume - put_premium_volume) / max(call_premium_volume + put_premium_volume, 1)
+    volume_sentiment = (total_call_volume - total_put_volume) / max(total_call_volume + total_put_volume, 1)
+    
+    combined_sentiment = (premium_sentiment + volume_sentiment) / 2
+    
+    # Risk appetite (based on OTM activity)
+    current_price = calls['strike'].median()  # Approximate current price
+    otm_call_volume = calls[calls['strike'] > current_price * 1.1]['volume'].sum()
+    otm_put_volume = puts[puts['strike'] < current_price * 0.9]['volume'].sum()
+    
+    risk_appetite = (otm_call_volume - otm_put_volume) / max(otm_call_volume + otm_put_volume, 1)
     
     return {
-        "call_premium": call_premium,
-        "put_premium": put_premium,
-        "premium_ratio": call_premium / put_premium if put_premium > 0 else float('inf'),
-        "sentiment_score": sentiment_score,
-        "aggressive_positioning": aggressive_calls,
-        "defensive_positioning": defensive_puts,
-        "overall_sentiment": "Bullish" if sentiment_score > 0.1 else "Bearish" if sentiment_score < -0.1 else "Neutral"
+        "call_premium_volume": call_premium_volume,
+        "put_premium_volume": put_premium_volume,
+        "premium_ratio": call_premium_volume / max(put_premium_volume, 1),
+        "volume_weighted_call_iv": vw_call_iv,
+        "volume_weighted_put_iv": vw_put_iv,
+        "iv_term_structure": vw_put_iv - vw_call_iv,
+        "premium_sentiment_score": premium_sentiment,
+        "volume_sentiment_score": volume_sentiment,
+        "combined_sentiment_score": combined_sentiment,
+        "risk_appetite": risk_appetite,
+        "overall_sentiment": determine_sentiment_label(combined_sentiment),
+        "risk_level": "High" if abs(risk_appetite) > 0.3 else "Medium" if abs(risk_appetite) > 0.1 else "Low"
     }
+
+def determine_sentiment_label(sentiment_score: float) -> str:
+    """Convert sentiment score to label"""
+    if sentiment_score > 0.3:
+        return "Strongly Bullish"
+    elif sentiment_score > 0.1:
+        return "Bullish"
+    elif sentiment_score < -0.3:
+        return "Strongly Bearish"
+    elif sentiment_score < -0.1:
+        return "Bearish"
+    else:
+        return "Neutral"
+
+def calculate_options_volatility_analysis(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
+    """Calculate options volatility analysis"""
+    if calls.empty or puts.empty:
+        return {"error": "No options data for volatility analysis"}
+    
+    # Volume-weighted IV
+    call_vw_iv = (calls['volume'] * calls['impliedVolatility']).sum() / max(calls['volume'].sum(), 1)
+    put_vw_iv = (puts['volume'] * puts['impliedVolatility']).sum() / max(puts['volume'].sum(), 1)
+    
+    # IV percentiles
+    all_ivs = pd.concat([calls['impliedVolatility'], puts['impliedVolatility']])
+    iv_percentiles = all_ivs.quantile([0.1, 0.25, 0.5, 0.75, 0.9]).to_dict()
+    
+    return {
+        "volume_weighted_iv": (call_vw_iv + put_vw_iv) / 2,
+        "call_vw_iv": call_vw_iv,
+        "put_vw_iv": put_vw_iv,
+        "iv_skew": put_vw_iv - call_vw_iv,
+        "iv_percentiles": iv_percentiles,
+        "high_iv_threshold": iv_percentiles[0.75],
+        "low_iv_threshold": iv_percentiles[0.25],
+        "iv_environment": "High" if call_vw_iv > iv_percentiles[0.75] else "Low" if call_vw_iv < iv_percentiles[0.25] else "Medium"
+    }
+
+# ENHANCED: Main options analysis function
+def get_enhanced_options_analysis(ticker: str) -> Dict:
+    """Comprehensive options analysis leveraging Unusual Whales real-time flow data"""
+    try:
+        analysis_result = {
+            "ticker": ticker,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "data_sources": [],
+            "unusual_whales_data": False,
+            "error": None
+        }
+        
+        # Try Unusual Whales first for premium options flow data
+        if unusual_whales_client:
+            try:
+                # Get comprehensive UW options data
+                uw_volume = unusual_whales_client.get_options_volume(ticker)
+                uw_alerts = unusual_whales_client.get_flow_alerts(ticker)
+                uw_greeks = unusual_whales_client.get_greek_exposure(ticker)
+                uw_darkpool = unusual_whales_client.get_darkpool_flow(ticker)
+                
+                # Process UW data if any endpoint succeeds
+                if any(not result.get("error") for result in [uw_volume, uw_alerts, uw_greeks, uw_darkpool]):
+                    analysis_result["unusual_whales_data"] = True
+                    analysis_result["data_sources"].append("Unusual Whales")
+                    
+                    # Process options volume data
+                    if not uw_volume.get("error"):
+                        volume_data = uw_volume.get("options_volume", {})
+                        analysis_result.update(process_uw_volume_data(volume_data))
+                    
+                    # Process flow alerts
+                    if not uw_alerts.get("error"):
+                        alerts_data = uw_alerts.get("flow_alerts", [])
+                        analysis_result.update(process_uw_flow_alerts(alerts_data))
+                    
+                    # Process Greek exposure
+                    if not uw_greeks.get("error"):
+                        greeks_data = uw_greeks.get("greek_exposure", {})
+                        analysis_result.update(process_uw_greeks_data(greeks_data))
+                    
+                    # Process dark pool data
+                    if not uw_darkpool.get("error"):
+                        darkpool_data = uw_darkpool.get("darkpool_data", {})
+                        analysis_result.update(process_uw_darkpool_data(darkpool_data))
+                    
+                    return analysis_result
+                    
+            except Exception as e:
+                print(f"UW options analysis error: {e}")
+        
+        # Fallback to yfinance option chain analysis
+        analysis_result["data_sources"].append("Yahoo Finance")
+        option_chain = get_option_chain(ticker, st.session_state.selected_tz)
+        
+        if option_chain.get("error"):
+            analysis_result["error"] = option_chain["error"]
+            return analysis_result
+
+        calls = option_chain["calls"]
+        puts = option_chain["puts"]
+        current_price = option_chain["current_price"]
+
+        # Enhanced yfinance analysis
+        analysis_result.update({
+            "basic_metrics": calculate_enhanced_options_metrics(calls, puts),
+            "flow_analysis": analyze_enhanced_options_flow(calls, puts, current_price),
+            "unusual_activity": detect_enhanced_unusual_activity(calls, puts),
+            "gamma_analysis": calculate_enhanced_gamma_levels(calls, puts, current_price),
+            "sentiment_indicators": calculate_enhanced_options_sentiment(calls, puts),
+            "volatility_analysis": calculate_options_volatility_analysis(calls, puts),
+            "expiration": option_chain["expiration"],
+            "current_price": current_price
+        })
+        
+        return analysis_result
+        
+    except Exception as e:
+        return {"error": f"Enhanced options analysis error: {str(e)}", "ticker": ticker}
+
+# Update the main function to use enhanced analysis
+def get_advanced_options_analysis(ticker: str) -> Dict:
+    """Main function updated to use enhanced analysis"""
+    return get_enhanced_options_analysis(ticker)
 
 # New function to fetch option chain data
 @st.cache_data(ttl=120)  # Faster refresh for options - 2 minutes
@@ -2019,12 +2289,20 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
         if options.get("unusual_whales_data"):
             # Real Unusual Whales data
             options_summary += f"- Data Source: Unusual Whales (LIVE FLOW)\n"
-            options_summary += f"- Total Premium: ${options.get('total_premium', 0):,.0f}\n"
-            options_summary += f"- Call/Put Premium: ${options.get('call_premium', 0):,.0f}/${options.get('put_premium', 0):,.0f}\n"
-            options_summary += f"- Premium Ratio: {options.get('premium_ratio', 0):.2f}\n"
-            options_summary += f"- Flow Count: {options.get('flow_count', 0)}\n"
-            options_summary += f"- Bullish/Bearish Flows: {options.get('bullish_flows', 0)}/{options.get('bearish_flows', 0)}\n"
-            options_summary += f"- Unusual Activity: {len(options.get('unusual_activity', []))} alerts\n"
+            
+            # UW volume metrics
+            uw_volume = options.get("uw_volume_metrics", {})
+            if uw_volume:
+                options_summary += f"- Total Premium: ${uw_volume.get('total_premium', 0):,.0f}\n"
+                options_summary += f"- Call/Put Premium: ${uw_volume.get('total_call_premium', 0):,.0f}/${uw_volume.get('total_put_premium', 0):,.0f}\n"
+                options_summary += f"- Premium Ratio: {uw_volume.get('premium_ratio', 0):.2f}\n"
+            
+            # UW flow analysis
+            uw_flow = options.get("uw_flow_analysis", {})
+            if uw_flow:
+                options_summary += f"- Flow Count: {uw_flow.get('total_flows', 0)}\n"
+                options_summary += f"- Bullish/Bearish Flows: {uw_flow.get('bullish_flows', 0)}/{uw_flow.get('bearish_flows', 0)}\n"
+                options_summary += f"- Flow Sentiment: {uw_flow.get('flow_sentiment', 'Neutral')}\n"
         else:
             # Fallback options data
             basic = options.get('basic_metrics', {})
@@ -2381,7 +2659,14 @@ def generate_options_summary(options: Dict) -> str:
         return f"Options Error: {options['error']}"
     
     if options.get("unusual_whales_data"):
-        return f"UW Premium: ${options.get('total_premium', 0):,.0f}, Flows: {options.get('flow_count', 0)}"
+        uw_volume = options.get("uw_volume_metrics", {})
+        uw_flow = options.get("uw_flow_analysis", {})
+        
+        total_premium = uw_volume.get('total_premium', 0)
+        flow_count = uw_flow.get('total_flows', 0)
+        flow_sentiment = uw_flow.get('flow_sentiment', 'Neutral')
+        
+        return f"UW Premium: ${total_premium:,.0f}, Flows: {flow_count} ({flow_sentiment})"
     
     basic = options.get('basic_metrics', {})
     flow = options.get('flow_analysis', {})
@@ -2552,12 +2837,12 @@ Keep analysis under 300 words but be specific and actionable.
             analyses["Grok"] = multi_ai.analyze_with_grok(market_context)
         
         if analyses:
-            result = "## 🤖 Enhanced Multi-AI Market Analysis\n\n"
+            result = "## Enhanced Multi-AI Market Analysis\n\n"
             for model, analysis in analyses.items():
                 result += f"### {model} Analysis:\n{analysis}\n\n---\n\n"
             
             synthesis = multi_ai.synthesize_consensus(analyses, "Market")
-            result += f"### 🎯 Market Consensus:\n{synthesis}"
+            result += f"### Market Consensus:\n{synthesis}"
             return result
     else:
         # Use individual AI model
@@ -2591,10 +2876,6 @@ def analyze_sector_rotation() -> str:
         result += f"- {etf}: {perf:+.2f}%\n"
     
     return result
-
-def ai_market_analysis(news_items: List[Dict], movers: List[Dict]) -> str:
-    """Enhanced market analysis using selected AI model"""
-    return ai_market_analysis_enhanced(news_items, movers)
 
 # Main app
 st.title("🔥 AI Radar Pro — Live Trading Assistant")
@@ -2679,13 +2960,52 @@ if debug_mode:
                 st.json({"uw": uw_result if unusual_whales_client else None, 
                         "tech": tech_result, "fund": fund_result, "opts": opt_result})
 
+# Enhanced UW API Testing
+if debug_mode and st.sidebar.button("🧪 Test UW API Connection"):
+    if unusual_whales_client:
+        with st.sidebar:
+            st.write("**Testing UW API Connection:**")
+            connection_result = unusual_whales_client.test_connection()
+            if connection_result.get("connected"):
+                st.success("✅ UW API Connected Successfully")
+            else:
+                st.error(f"❌ UW API Error: {connection_result.get('error')}")
+            
+            st.write("**Testing UW Endpoints:**")
+            test_ticker = "AAPL"
+            
+            # Test each endpoint
+            endpoints = [
+                ("Quote", lambda: unusual_whales_client.get_quote(test_ticker)),
+                ("Options Volume", lambda: unusual_whales_client.get_options_volume(test_ticker)),
+                ("Flow Alerts", lambda: unusual_whales_client.get_flow_alerts(test_ticker)),
+                ("Greek Exposure", lambda: unusual_whales_client.get_greek_exposure(test_ticker)),
+                ("Market Tide", lambda: unusual_whales_client.get_market_tide()),
+                ("Institutional Activity", lambda: unusual_whales_client.get_institutional_activity(test_ticker))
+            ]
+            
+            for name, func in endpoints:
+                try:
+                    result = func()
+                    status = "✅" if not result.get("error") else "❌"
+                    st.write(f"{status} {name}")
+                    if result.get("error"):
+                        st.caption(f"Error: {result['error']}")
+                except Exception as e:
+                    st.write(f"❌ {name}: {str(e)}")
+    else:
+        st.sidebar.warning("⚠️ UW API Key not configured")
+
 if debug_mode and st.sidebar.button("🧪 Test All APIs"):
     st.sidebar.write("**Testing Data APIs:**")
     
     if unusual_whales_client:
         with st.spinner("Testing Unusual Whales API..."):
             test_response = unusual_whales_client.get_quote("AAPL")
-            st.sidebar.json(test_response)
+            if test_response.get("error"):
+                st.sidebar.error(f"UW: {test_response['error']}")
+            else:
+                st.sidebar.success("✅ UW API Working")
     
     if trading_economics_client:
         with st.spinner("Testing Trading Economics API..."):
@@ -2695,7 +3015,10 @@ if debug_mode and st.sidebar.button("🧪 Test All APIs"):
     if twelvedata_client:
         with st.spinner("Testing Twelve Data API..."):
             test_response = twelvedata_client.get_quote("AAPL")
-            st.sidebar.json(test_response)
+            if test_response.get("error"):
+                st.sidebar.error(f"Twelve Data: {test_response['error']}")
+            else:
+                st.sidebar.success("✅ Twelve Data Working")
     
     st.sidebar.write("**Testing AI APIs:**")
     test_prompt = "Test connection - respond with 'OK'"
@@ -2882,9 +3205,13 @@ with tabs[0]:
                             if options.get("unusual_whales_data"):
                                 st.success("🐋 Unusual Whales Options Flow Complete")
                                 opt_col1, opt_col2, opt_col3 = st.columns(3)
-                                opt_col1.metric("Total Premium", f"${options.get('total_premium', 0):,.0f}")
-                                opt_col2.metric("Flow Count", options.get('flow_count', 0))
-                                opt_col3.metric("Unusual Alerts", len(options.get('unusual_activity', [])))
+                                
+                                uw_volume = options.get("uw_volume_metrics", {})
+                                uw_flow = options.get("uw_flow_analysis", {})
+                                
+                                opt_col1.metric("Total Premium", f"${uw_volume.get('total_premium', 0):,.0f}")
+                                opt_col2.metric("Flow Count", uw_flow.get('total_flows', 0))
+                                opt_col3.metric("Flow Sentiment", uw_flow.get('flow_sentiment', 'Neutral'))
                             else:
                                 st.success("✅ Options Analysis Complete")
                                 opt_col1, opt_col2, opt_col3 = st.columns(3)
@@ -3121,11 +3448,6 @@ with tabs[1]:
             for j, ticker in enumerate(current_tickers[i:i+5]):
                 with cols[j]:
                     st.write(f"**{ticker}**")
-                    if st.button(f"Remove", key=f"watchlist_remove_{ticker}"):
-                        current_tickers.remove(ticker)
-                        st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
-                        st.rerun()
-
 # TAB 3: Enhanced Catalyst Scanner with Unusual Whales Integration
 with tabs[2]:
     st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
@@ -3561,6 +3883,8 @@ with tabs[3]:
                 st.write("**Key News Headlines:**")
                 for news in news_items[:3]:
                     st.write(f"• {news['title']}")
+
+# Continue with remaining tabs...
 
 # TAB 5: AI Playbooks - Enhanced for 80-100% accuracy
 with tabs[4]:
@@ -4063,9 +4387,12 @@ with tabs[7]:
                             
                             if options_analysis.get("unusual_whales_data"):
                                 # UW options data
-                                opt_col1.metric("Premium Flow", f"${options_analysis.get('total_premium', 0):,.0f}")
-                                opt_col2.metric("Flow Count", options_analysis.get('flow_count', 0))
-                                opt_col3.metric("UW Alerts", len(options_analysis.get('unusual_activity', [])))
+                                uw_volume = options_analysis.get("uw_volume_metrics", {})
+                                uw_flow = options_analysis.get("uw_flow_analysis", {})
+                                
+                                opt_col1.metric("Premium Flow", f"${uw_volume.get('total_premium', 0):,.0f}")
+                                opt_col2.metric("Flow Count", uw_flow.get('total_flows', 0))
+                                opt_col3.metric("Flow Sentiment", uw_flow.get('flow_sentiment', 'Neutral'))
                             else:
                                 # Fallback options data
                                 basic = options_analysis.get('basic_metrics', {})
