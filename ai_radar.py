@@ -128,15 +128,23 @@ class UnusualWhalesClient:
             for endpoint in endpoints_to_try:
                 try:
                     full_url = f"{base_url}{endpoint}"
-                    print(f"Trying UW URL: {full_url}")
+                    # Try both header auth and query param auth
+                    urls_to_try = [
+                        full_url,  # Header auth
+                        f"{full_url}?api_key={self.api_key}",  # Query param auth
+                        f"{full_url}?apikey={self.api_key}",   # Alternative query param
+                    ]
                     
-                    response = self.session.get(full_url, timeout=8)
-                    
-                    print(f"UW API Response Status: {response.status_code}")
-                    print(f"UW API Response Headers: {dict(response.headers)}")
-                    print(f"UW API Response Text: {response.text[:500]}")
-                    
-                    if response.status_code == 200:
+                    for test_url in urls_to_try:
+                        print(f"Trying UW URL: {test_url}")
+                        
+                        response = self.session.get(test_url, timeout=8)
+                        
+                        print(f"UW API Response Status: {response.status_code}")
+                        print(f"UW API Response Headers: {dict(response.headers)}")
+                        print(f"UW API Response Text: {response.text[:500]}")
+                        
+                        if response.status_code == 200:
                         try:
                             data = response.json()
                             print(f"UW API JSON Data Keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
