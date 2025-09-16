@@ -98,63 +98,122 @@ class UnusualWhalesClient:
     
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://api.unusualwhales.com"
+        # Try different base URLs based on common patterns
+        self.base_urls_to_try = [
+            "https://api.unusualwhales.com",
+            "https://unusualwhales.com/api",
+            "https://api.unusualwhales.com/v1",
+        ]
         self.session = requests.Session()
+        # Try multiple authentication methods
         self.session.headers.update({
             "Authorization": f"Bearer {api_key}",
+            "X-API-Key": api_key,  # Alternative auth method
+            "apikey": api_key,     # Another common pattern
             "Accept": "application/json",
-            "User-Agent": "AI-Radar-Pro/2.0"
+            "User-Agent": "AI-Radar-Pro/2.0",
+            "Content-Type": "application/json"
         })
     
     def get_quote(self, symbol: str) -> Dict:
-        """Get stock data from Unusual Whales /api/stock/{ticker} endpoint"""
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/stock/{symbol}",
-                timeout=8
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Extract stock data from UW response
-                price = float(data.get("last_price", data.get("price", 0)))
-                prev_close = float(data.get("prev_close", data.get("previous_close", 0)))
-                volume = int(data.get("volume", data.get("total_volume", 0)))
-                
-                # Calculate changes
-                change = price - prev_close if prev_close > 0 else 0
-                change_percent = (change / prev_close * 100) if prev_close > 0 else 0
-                
-                # Get bid/ask if available
-                bid = float(data.get("bid", price - 0.01))
-                ask = float(data.get("ask", price + 0.01))
-                
-                # Get session data if available
-                market_open = float(data.get("open", price))
-                
-                return {
-                    "last": price,
-                    "bid": bid,
-                    "ask": ask,
-                    "volume": volume,
-                    "change": change,
-                    "change_percent": change_percent,
-                    "premarket_change": 0,  # Calculate from session data if available
-                    "intraday_change": change_percent,  # Use total change for now
-                    "postmarket_change": 0,
-                    "previous_close": prev_close,
-                    "market_open": market_open,
-                    "last_updated": datetime.datetime.now().isoformat(),
-                    "data_source": "Unusual Whales",
-                    "error": None,
-                    "raw_data": data
-                }
-            else:
-                return {"error": f"UW API error: {response.status_code}", "data_source": "Unusual Whales"}
-                
-        except Exception as e:
-            return {"error": f"Unusual Whales error: {str(e)}", "data_source": "Unusual Whales"}
+        """Get stock data from Unusual Whales - try multiple endpoints"""
+        endpoints_to_try = [
+            f"/api/stock/{symbol}",
+            f"/api/v1/stock/{symbol}",
+            f"/stock/{symbol}",
+            f"/api/stocks/{symbol}",
+        ]
+        
+        for base_url in self.base_urls_to_try:
+            for endpoint in endpoints_to_try:
+                try:
+                    full_url = f"{base_url}{endpoint}"
+                    print(f"Trying UW URL: {full_url}")
+                    
+                    response = self.session.get(full_url, timeout=8)
+                    
+                    print(f"UW API Response Status: {response.status_code}")
+                    print(f"UW API Response Headers: {dict(response.headers)}")
+                    print(f"UW API Response Text: {response.text[:500]}")
+                    
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                            print(f"UW API JSON Data Keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+                            
+                            # Try to extract price data - be flexible about field names
+                            price = 0
+                            prev_close = 0
+                            volume = 0
+                            
+                            # Try different field name patterns
+                            price_fields = ["last_price", "price", "close", "last", "current_price"]
+                            for field in price_fields:
+                                if field in data and data[field]:
+                                    price = float(data[field])
+                                    break
+                            
+                            prev_close_fields = ["prev_close", "previous_close", "previousClose", "yesterday_close"]
+                            for field in prev_close_fields:
+                                if field in data and data[field]:
+                                    prev_close = float(data[field])
+                                    break
+                            
+                            volume_fields = ["volume", "total_volume", "day_volume"]
+                            for field in volume_fields:
+                                if field in data and data[field]:
+                                    volume = int(data[field])
+                                    break
+                            
+                            if price > 0:  # We got valid data
+                                # Calculate changes
+                                change = price - prev_close if prev_close > 0 else 0
+                                change_percent = (change / prev_close * 100) if prev_close > 0 else 0
+                                
+                                # Get bid/ask if available
+                                bid = float(data.get("bid", price - 0.01))
+                                ask = float(data.get("ask", price + 0.01))
+                                
+                                return {
+                                    "last": price,
+                                    "bid": bid,
+                                    "ask": ask,
+                                    "volume": volume,
+                                    "change": change,
+                                    "change_percent": change_percent,
+                                    "premarket_change": 0,
+                                    "intraday_change": change_percent,
+                                    "postmarket_change": 0,
+                                    "previous_close": prev_close,
+                                    "market_open": float(data.get("open", price)),
+                                    "last_updated": datetime.datetime.now().isoformat(),
+                                    "data_source": "Unusual Whales",
+                                    "error": None,
+                                    "raw_data": data
+                                }
+                        except Exception as json_error:
+                            print(f"UW JSON parsing error: {json_error}")
+                            continue
+                    elif response.status_code == 401:
+                        return {"error": "UW API: Unauthorized - Check API key", "data_source": "Unusual Whales"}
+                    elif response.status_code == 403:
+                        return {"error": "UW API: Forbidden - Check API permissions", "data_source": "Unusual Whales"}
+                    elif response.status_code == 404:
+                        print(f"UW 404 for: {full_url}")
+                        continue  # Try next endpoint
+                        
+                except requests.exceptions.ConnectionError:
+                    print(f"UW Connection failed for: {base_url}")
+                    continue  # Try next base URL
+                except requests.exceptions.Timeout:
+                    print(f"UW Timeout for: {base_url}")
+                    continue
+                except Exception as e:
+                    print(f"UW Error for {base_url}{endpoint}: {str(e)}")
+                    continue
+        
+        # If we get here, all attempts failed
+        return {"error": "UW API: All endpoints failed - check API documentation", "data_source": "Unusual Whales"}
     
     def get_options_volume(self, symbol: str) -> Dict:
         """Get options volume data using /api/stock/{ticker}/options-volume"""
