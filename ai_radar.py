@@ -3169,7 +3169,7 @@ with tab2:
     else:
         st.info("No LEAPS found.")
 search_quotes = st.text_input("🔍 Search Quotes", key="search_quotes").upper().strip()
-    with col2:
+        with col2:
         search_quotes = st.button("Get Quote", key="search_quotes_btn")
     
     # Search result for any ticker
