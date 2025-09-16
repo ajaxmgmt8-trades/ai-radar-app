@@ -1,14 +1,13 @@
 import streamlit as st
 import requests
 
-# Load the trial API key from secrets
 UW_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
 
-def get_supported_tickers():
+def get_option_chains(ticker: str):
     """
-    Fetch supported tickers (trial-accessible endpoint)
+    Fetch option chains for a given ticker.
     """
-    url = "https://api.unusualwhales.com/api/supported_tickers/"
+    url = f"https://api.unusualwhales.com/api/stock/{ticker.upper()}/option-chains"
     headers = {
         "Authorization": f"Bearer {UW_KEY}",
         "accept": "application/json"
@@ -23,14 +22,19 @@ def get_supported_tickers():
     except Exception as e:
         return {"error": f"Request failed: {str(e)}"}
 
-# Streamlit UI
-st.title("✅ Unusual Whales Trial API - Supported Tickers")
+# UI
+st.title("📊 Unusual Whales - Option Chains")
 
-if st.button("Fetch Tickers"):
-    with st.spinner("Loading tickers from Unusual Whales Trial API..."):
-        result = get_supported_tickers()
-        if isinstance(result, dict) and result.get("error"):
-            st.error(result["error"])
+ticker = st.text_input("Enter stock ticker", value="AAPL")
+
+if st.button("Fetch Option Chains"):
+    with st.spinner(f"Fetching option chains for {ticker}..."):
+        data = get_option_chains(ticker)
+
+        if isinstance(data, dict) and data.get("error"):
+            st.error(data["error"])
+        elif not data:
+            st.warning("No data returned.")
         else:
-            st.success(f"Loaded {len(result)} tickers")
-            st.dataframe(result)
+            st.success(f"Loaded {len(data)} contracts")
+            st.dataframe(data)
