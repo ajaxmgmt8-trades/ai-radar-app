@@ -1,5 +1,7 @@
+import streamlit as st
 
 UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
+
 
 def get_stock_state(ticker: str) -> dict:
     url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
