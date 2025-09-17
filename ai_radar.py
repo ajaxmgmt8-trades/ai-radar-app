@@ -1,59 +1,135 @@
+# ai_radar.py generated with Unusual Whales API support
 
-import streamlit as st
+
 import requests
-from datetime import date
+import streamlit as st
 
-# Load API key securely
 UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
 HEADERS = {
     "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
     "accept": "application/json"
 }
 
-# Endpoint map (including corrected path)
-endpoints = {
-    "📊 Stock State": "/api/stock/{ticker}/stock-state",
-    "📈 Options Volume": "/api/stock/{ticker}/options-volume",
-    "📉 Volatility (Realized)": "/api/stock/{ticker}/volatility/realized",
-    "📊 Volatility Stats": "/api/stock/{ticker}/volatility/stats",
-    "📉 Volatility Term Structure": "/api/stock/{ticker}/volatility/term-structure",
-    "📊 Spot GEX (1min)": "/api/stock/{ticker}/spot-exposures",
-    "🎯 Spot GEX (By Strike)": "/api/stock/{ticker}/spot-exposures/strike",
-    "📆 Spot GEX (By Expiry & Strike)": "/api/stock/{ticker}/spot-exposures/expiry-strike",
-    "📈 Price Levels (Lit/Off)": "/api/stock/{ticker}/stock-volume-price-levels",
 
-      "📊 Intraday Stats": "https://api.unusualwhales.com/api/option_chains/{ticker}/intraday/stats",
-    "🧠 Historic Option Flow": "https://api.unusualwhales.com/api/historic_chains/{ticker}?date={date}",
-    "📅 Chains (Today)": "https://api.unusualwhales.com/api/option_chains/{ticker}/chains/today",
-    "📅 Chains (Date)": "https://api.unusualwhales.com/api/option_chains/{ticker}/chains/by-date/{date}",
-    "📅 Chains (Expirations)": "https://api.unusualwhales.com/api/option_chains/{ticker}/expirations",
-    "🎯 Chains (Strikes)": "https://api.unusualwhales.com/api/option_chains/{ticker}/chains/strikes/{expiration}"
-}
-
-# UI
-st.title("🧪 Test Unusual Whales API Endpoints")
-endpoint_key = st.selectbox("Choose an endpoint to test:", list(endpoints.keys()))
-ticker = st.text_input("Ticker Symbol", value="AAPL")
-selected_date = st.date_input("Select Date (if needed)", value=date.today())
-selected_expiration = st.text_input("Expiration Date (YYYY-MM-DD)", value="2025-10-18")
-
-if st.button("Run Test"):
-    path_template = endpoints[endpoint_key]
-    final_path = path_template.replace("{ticker}", ticker.upper())
-    if "{date}" in final_path:
-        final_path = final_path.replace("{date}", selected_date.isoformat())
-    if "{expiration}" in final_path:
-        final_path = final_path.replace("{expiration}", selected_expiration)
-
-    url = f"https://api.unusualwhales.com{final_path}"
-
+# === 1. STOCK DATA ===
+def get_stock_state(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
     try:
-        response = requests.get(url, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        st.success("✅ Connected!")
-        st.json(response.json())
-    except requests.exceptions.HTTPError as e:
-        st.error(f"❌ HTTP Error: {e}")
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        return {"error": str(e)}
 
+# Example:
+# stock = get_stock_state("AAPL")
+# st.json(stock)
+
+
+# === 2. OPTION CHAIN ===
+def get_option_chains(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+# Example:
+# chains = get_option_chains("AAPL")
+# st.write(chains.get("chains", []))
+
+
+# === 3. UNUSUAL OPTION FLOW ===
+def get_recent_flow(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/flow-recent"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_flow_by_strike(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/flow-per-strike"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_flow_by_expiry(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/flow-per-expiry"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_historic_trades(ticker: str, limit=100, direction="all") -> dict:
+    url = f"https://api.unusualwhales.com/api/historic-chains/{ticker}"
+    params = {
+        "limit": limit,
+        "direction": direction
+    }
+    try:
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+# Example:
+# flow = get_recent_flow("AAPL")
+# st.dataframe(flow.get("chains", []))
+
+
+# === 4. EARNINGS ===
+def get_earnings_premarket() -> dict:
+    url = "https://api.unusualwhales.com/api/earnings/premarket"
+    try:
+        r = requests.get(url, headers=HEADERS)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_earnings_afterhours() -> dict:
+    url = "https://api.unusualwhales.com/api/earnings/afterhours"
+    try:
+        r = requests.get(url, headers=HEADERS)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def get_earnings_for_ticker(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/earnings/{ticker}"
+    try:
+        r = requests.get(url, headers=HEADERS)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+# Example:
+# earnings = get_earnings_for_ticker("MSFT")
+# st.json(earnings)
+
+
+# === 5. FLOW ALERTS ===
+def get_flow_alerts(ticker: str) -> dict:
+    url = f"https://api/unusualwhales.com/api/stock/{ticker}/flow-alerts"
+    try:
+        r = requests.get(url, headers=HEADERS)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+# Example:
+# alerts = get_flow_alerts("TSLA")
+# st.json(alerts)
