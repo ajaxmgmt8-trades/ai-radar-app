@@ -1,42 +1,59 @@
-# test_unusual_whales.py
+
 import streamlit as st
-from ai_radar_fixed import (  # or copy-paste the functions directly
-    get_stock_state,
-    get_option_chains,
-    get_recent_flow,
-    get_flow_by_strike,
-    get_flow_by_expiry,
-    get_historic_trades,
-    get_earnings_premarket,
-    get_earnings_afterhours
-)
+import requests
+from datetime import date
 
-st.title("🧪 Unusual Whales API Test")
+# Load API key securely
+UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
+HEADERS = {
+    "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
+    "accept": "application/json"
+}
 
-ticker = st.text_input("Enter Ticker", "AAPL")
+# Endpoint map (including corrected path)
+endpoints = {
+    "📊 Stock State": "/api/stock/{ticker}/stock-state",
+    "📈 Options Volume": "/api/stock/{ticker}/options-volume",
+    "📉 Volatility (Realized)": "/api/stock/{ticker}/volatility/realized",
+    "📊 Volatility Stats": "/api/stock/{ticker}/volatility/stats",
+    "📉 Volatility Term Structure": "/api/stock/{ticker}/volatility/term-structure",
+    "📊 Spot GEX (1min)": "/api/stock/{ticker}/spot-exposures",
+    "🎯 Spot GEX (By Strike)": "/api/stock/{ticker}/spot-exposures/strike",
+    "📆 Spot GEX (By Expiry & Strike)": "/api/stock/{ticker}/spot-exposures/expiry-strike",
+    "📈 Price Levels (Lit/Off)": "/api/stock/{ticker}/stock-volume-price-levels",
 
-if st.button("Test Stock State"):
-    st.json(get_stock_state(ticker))
+    "🕰️ Intraday Stats": "/api/stock/{ticker}/intraday/stats",
+    "🕰️ Historic Option Flow": "/api/historic-chains/{ticker}?date={date}",
+    "📅 Chains (Today)": "/api/option-chains/{ticker}/chains/today",
+    "📅 Chains (Date)": "/api/option_chains/by-date/{ticker}/{date}",
+    "📆 Chains (Expirations)": "/api/option_chains/{ticker}/expirations",
+    "🎯 Chains (Strikes by Expiration)": "/api/option_chains/{ticker}/chains/strikes/{expiration}"
+}
 
-if st.button("Test Option Chains"):
-    st.json(get_option_chains(ticker))
+# UI
+st.title("🧪 Test Unusual Whales API Endpoints")
+endpoint_key = st.selectbox("Choose an endpoint to test:", list(endpoints.keys()))
+ticker = st.text_input("Ticker Symbol", value="AAPL")
+selected_date = st.date_input("Select Date (if needed)", value=date.today())
+selected_expiration = st.text_input("Expiration Date (YYYY-MM-DD)", value="2025-10-18")
 
-if st.button("Test Recent Flow"):
-    st.json(get_recent_flow(ticker))
+if st.button("Run Test"):
+    path_template = endpoints[endpoint_key]
+    final_path = path_template.replace("{ticker}", ticker.upper())
+    if "{date}" in final_path:
+        final_path = final_path.replace("{date}", selected_date.isoformat())
+    if "{expiration}" in final_path:
+        final_path = final_path.replace("{expiration}", selected_expiration)
 
-if st.button("Test Flow by Strike"):
-    st.json(get_flow_by_strike(ticker))
+    url = f"https://api.unusualwhales.com{final_path}"
 
-if st.button("Test Flow by Expiry"):
-    st.json(get_flow_by_expiry(ticker))
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        st.success("✅ Connected!")
+        st.json(response.json())
+    except requests.exceptions.HTTPError as e:
+        st.error(f"❌ HTTP Error: {e}")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
 
-if st.button("Test Historic Trades"):
-    st.json(get_historic_trades(ticker))
-
-st.divider()
-
-if st.button("Test Premarket Earnings"):
-    st.json(get_earnings_premarket())
-
-if st.button("Test Afterhours Earnings"):
-    st.json(get_earnings_afterhours())
