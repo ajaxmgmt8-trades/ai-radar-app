@@ -1,47 +1,44 @@
 import streamlit as st
 import requests
 
-# 🔐 Load API Key
+# Load the Unusual Whales API key from secrets
 UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
-
-# 🧠 App Title
-st.title("🧪 Test Unusual Whales API Endpoints")
-
-# 🔒 Headers
-headers = {
+HEADERS = {
     "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
     "accept": "application/json"
 }
 
-# 📊 Define endpoints to test
+# Define the correct endpoints from the YAML (stock-level)
 endpoints = {
-    "📈 Stock State": "https://api.unusualwhales.com/api/stock/AAPL/stock-state",
-    "📊 Intraday Stats": "https://api.unusualwhales.com/api/stock/AAPL/intraday-stats",
-    "🕰️ Historic Option Flow": "https://api.unusualwhales.com/api/historic_chains/AAPL?date=2025-09-13",
-    "🧮 Chains (Today)": "https://api.unusualwhales.com/api/stock/AAPL/chains/today",
-    "📅 Chains (Date)": "https://api.unusualwhales.com/api/stock/AAPL/chains/date/2025-09-13",
-    "📆 Chains (Expirations)": "https://api.unusualwhales.com/api/stock/AAPL/chains/expirations",
-    "🎯 Chains (Strikes)": "https://api.unusualwhales.com/api/stock/AAPL/chains/strikes?expiration=2025-09-20"
+    "Stock State": "/api/stock/{ticker}/stock-state",
+    "Options Volume": "/api/stock/{ticker}/options-volume",
+    "Volatility (Realized)": "/api/stock/{ticker}/volatility/realized",
+    "Volatility Stats": "/api/stock/{ticker}/volatility/stats",
+    "Volatility Term Structure": "/api/stock/{ticker}/volatility/term-structure",
+    "Spot GEX (1min)": "/api/stock/{ticker}/spot-exposures",
+    "Spot GEX (By Strike)": "/api/stock/{ticker}/spot-exposures/strike",
+    "Spot GEX (By Expiry & Strike)": "/api/stock/{ticker}/spot-exposures/expiry-strike",
+    "Price Levels (Lit/Off)": "/api/stock/{ticker}/stock-volume-price-levels"
 }
 
-# 🧭 Endpoint selector
-selected_name = st.selectbox("Choose an endpoint to test:", list(endpoints.keys()))
-selected_url = endpoints[selected_name]
+# UI
+st.title("🧪 Test Unusual Whales API Endpoints")
+st.markdown("**Choose an endpoint and enter a ticker to test live Unusual Whales data.**")
 
-# 🔁 API request function
-def test_unusual_whales_endpoint(url):
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        return {"error": str(e)}
+selected_endpoint = st.selectbox("Choose an endpoint to test:", list(endpoints.keys()))
+ticker = st.text_input("Enter Ticker Symbol", value="AAPL")
 
-# ▶️ Test trigger
 if st.button("Run Connection Test"):
-    result = test_unusual_whales_endpoint(selected_url)
-    if "error" in result:
-        st.error(f"❌ Error: {result['error']}")
-    else:
-        st.success("✅ Connected successfully!")
-        st.json(result)
+    endpoint_path = endpoints[selected_endpoint].replace("{ticker}", ticker.upper())
+    url = f"https://api.unusualwhales.com{endpoint_path}"
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        st.success("Connected successfully!")
+        st.json(response.json())
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"❌ HTTP error: {http_err}")
+    except Exception as err:
+        st.error(f"❌ Other error: {err}")
+
