@@ -1,3 +1,5 @@
+# ai_radar.py generated with Unusual Whales API support
+
 
 import requests
 import streamlit as st
@@ -131,3 +133,4 @@ def get_flow_alerts(ticker: str) -> dict:
 # Example:
 # alerts = get_flow_alerts("TSLA")
 # st.json(alerts)
+
