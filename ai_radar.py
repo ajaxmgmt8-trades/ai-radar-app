@@ -997,7 +997,7 @@ Keep analysis under 400 words but be specific and actionable.
     return prompt
 
 # Multi-AI Analysis System
-class MultiAIAnalyzer:
+def get_options_chain(ticker: str) -> dict:def get_stock_state(ticker: str) -> dict:    """Fetch stock data from Unusual Whales, fallback to TwelveData if needed."""    api_key = st.secrets['UNUSUAL_WHALES_KEY']    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"    headers = {        "Authorization": f"Bearer {api_key}",        "accept": "application/json"    }    try:        r = requests.get(url, headers=headers, timeout=10)        r.raise_for_status()        result = r.json()        if not result or 'ticker' not in result:            raise ValueError('Empty response from Unusual Whales')        return result    except Exception as e:        st.warning(f"Unusual Whales failed, using fallback: {e}")        return get_stock_data_fallback(ticker)  # This assumes TwelveData fallback function exists    """Fetches option chain data from Unusual Whales API."""    api_key = st.secrets['UNUSUAL_WHALES_KEY']    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"    headers = {        "Authorization": f"Bearer {api_key}",        "accept": "application/json"    }    try:        response = requests.get(url, headers=headers, timeout=10)        response.raise_for_status()        return response.json()    except Exception as e:        st.error(f"Unusual Whales error: {e}")        return {}class MultiAIAnalyzer:
     """Enhanced multi-AI analysis system with comprehensive data integration"""
     
     def __init__(self):
@@ -3147,67 +3147,7 @@ with tabs[5]:
             
             col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
             col2.write("**Bid/Ask**")
-            col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
-            col3.write("**Volume**")
-            col3.write(f"{quote['volume']:,}")
-            col3.caption(f"Updated: {quote['last_updated']}")
-            col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
-            
-            if col4.button(f"Add {ticker} to Watchlist", key=f"sector_etf_add_{ticker}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if ticker not in current_list:
-                    current_list.append(ticker)
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {ticker} to watchlist!")
-                    st.rerun()
-
-            st.divider()
-
-# TAB 7: 0DTE & Lottos
-with tabs[6]:
-    st.subheader("🎲 0DTE & Lotto Plays")
-    st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
-
-    # Ticker selection
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        selected_ticker = st.selectbox("Select Ticker for 0DTE", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="0dte_ticker")
-    with col2:
-        if st.button("Analyze 0DTE", key="analyze_0dte"):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Fetch option chain
-    with st.spinner(f"Fetching option chain for {selected_ticker}..."):
-        option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
-        quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
-
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
-    else:
-        current_price = quote['last']  # Use from quote, which prefers Twelve Data
-        expiration = option_chain["expiration"]
-        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
-        st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
-        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
-
-        # AI Analysis at the top
-        st.markdown("### 🤖 AI 0DTE Playbook")
-        with st.spinner("Generating AI analysis..."):
-            tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
-            options_analysis = get_advanced_options_analysis(selected_ticker)
-            order_flow = get_order_flow(selected_ticker, option_chain)
-            # Summarize option chain
-            calls = option_chain["calls"]
-            puts = option_chain["puts"]
-            top_calls = calls.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            top_puts = puts.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            option_summary = f"Top Calls:\n{top_calls}\nTop Puts:\n{top_puts}"
-            
-            # Enhanced prompt for high confidence 0DTE play
-            tech_summary = generate_technical_summary(tech_analysis)
-            catalyst = f"0DTE options activity. Technical Analysis: {tech_summary}. Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, Put/Call Ratio: {order_flow.get('put_call_ratio', 0):.2f}. Option Chain Summary: {option_summary}"
-            playbook = ai_playbook(
+st.subheader("📊 Options Flow & Chain")with st.container():    selected_ticker = st.selectbox("Choose Ticker", options=CORE_TICKERS, key="option_ticker")    if selected_ticker:        subtabs = st.tabs(["📅 0DTE", "📈 Swing", "🧠 LEAP"])        with subtabs[0]:            st.markdown("### 📅 0DTE Options (Expiring Today)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)        with subtabs[1]:            st.markdown("### 📈 Swing Options (2-30 Days)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)        with subtabs[2]:            st.markdown("### 🧠 LEAP Options (60+ Days)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)            playbook = ai_playbook(
                 selected_ticker,
                 quote["change_percent"],
                 catalyst,
