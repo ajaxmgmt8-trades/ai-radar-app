@@ -997,7 +997,41 @@ Keep analysis under 400 words but be specific and actionable.
     return prompt
 
 # Multi-AI Analysis System
-def get_options_chain(ticker: str) -> dict:def get_stock_state(ticker: str) -> dict:    """Fetch stock data from Unusual Whales, fallback to TwelveData if needed."""    api_key = st.secrets['UNUSUAL_WHALES_KEY']    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"    headers = {        "Authorization": f"Bearer {api_key}",        "accept": "application/json"    }    try:        r = requests.get(url, headers=headers, timeout=10)        r.raise_for_status()        result = r.json()        if not result or 'ticker' not in result:            raise ValueError('Empty response from Unusual Whales')        return result    except Exception as e:        st.warning(f"Unusual Whales failed, using fallback: {e}")        return get_stock_data_fallback(ticker)def get_options_chain(ticker: str) -> dict:    """Fetches option chain data from Unusual Whales API."""    api_key = st.secrets['UNUSUAL_WHALES_KEY']    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"    headers = {        "Authorization": f"Bearer {api_key}",        "accept": "application/json"    }    try:        response = requests.get(url, headers=headers, timeout=10)        response.raise_for_status()        return response.json()    except Exception as e:        st.error(f"Unusual Whales error: {e}")        return {}    except Exception as e:        st.error(f"Unusual Whales error: {e}")        return {}class MultiAIAnalyzer:
+def get_stock_state(ticker: str) -> dict:
+    """Fetch stock data from Unusual Whales, fallback to TwelveData if needed."""
+    api_key = st.secrets["UNUSUAL_WHALES_KEY"]
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        result = r.json()
+        if not result or 'ticker' not in result:
+            raise ValueError('Empty response from Unusual Whales')
+        return result
+    except Exception as e:
+        st.warning(f"Unusual Whales failed, using fallback: {e}")
+        return get_stock_data_fallback(ticker)
+
+def get_options_chain(ticker: str) -> dict:
+    """Fetches option chain data from Unusual Whales API."""
+    api_key = st.secrets["UNUSUAL_WHALES_KEY"]
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        st.error(f"Unusual Whales error: {e}")
+        return {}
+
     """Enhanced multi-AI analysis system with comprehensive data integration"""
     
     def __init__(self):
@@ -3147,15 +3181,29 @@ with tabs[5]:
             
             col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
             col2.write("**Bid/Ask**")
-st.subheader("📊 Options Flow & Chain")with st.container():    selected_ticker = st.selectbox("Choose Ticker", options=CORE_TICKERS, key="option_ticker")    if selected_ticker:        subtabs = st.tabs(["📅 0DTE", "📈 Swing", "🧠 LEAP"])        with subtabs[0]:            st.markdown("### 📅 0DTE Options (Expiring Today)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)        with subtabs[1]:            st.markdown("### 📈 Swing Options (2-30 Days)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)        with subtabs[2]:            st.markdown("### 🧠 LEAP Options (60+ Days)")            chain_data = get_options_chain(selected_ticker)            st.write(chain_data)            playbook = ai_playbook(
+with st.container():
+    selected_ticker = st.selectbox("Choose Ticker", options=CORE_TICKERS, key="option_ticker")
+    if selected_ticker:
+        subtabs = st.tabs(["📅 0DTE", "📈 Swing", "🧠 LEAP"])
+        with subtabs[0]:
+            st.markdown("### 📅 0DTE Options (Expiring Today)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
+        with subtabs[1]:
+            st.markdown("### 📈 Swing Options (2-30 Days)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
+        with subtabs[2]:
+            st.markdown("### 🧠 LEAP Options (60+ Days)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
+            playbook = ai_playbook(
                 selected_ticker,
                 quote["change_percent"],
                 catalyst,
                 options_analysis
             )
             st.markdown(playbook)
-
-        # Display option chain
         st.markdown("### Calls")
         calls = option_chain["calls"]
         if not calls.empty:
@@ -3463,3 +3511,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
