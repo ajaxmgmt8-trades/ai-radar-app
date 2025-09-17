@@ -23,7 +23,7 @@ endpoints = {
     "📈 Price Levels (Lit/Off)": "/api/stock/{ticker}/stock-volume-price-levels",
 
     "🕰️ Intraday Stats": "/api/stock/{ticker}/intraday/stats",
-    "🕰️ Historic Option Flow": "/api/historic-chains/{ticker}?date={date}",
+    "🕰️ Historic Option Flow": "/api/option-contract/{id}/historic",
     "📅 Chains (Today)": "/api/option-chains/{ticker}/chains/today",
     "📅 Chains (Date)": "/api/option_chains/by-date/{ticker}/{date}",
     "📆 Chains (Expirations)": "/api/option_chains/{ticker}/expirations",
