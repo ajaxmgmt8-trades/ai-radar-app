@@ -14,7 +14,7 @@ ticker = st.text_input("Ticker", value="AAPL")
 chosen_date = st.date_input("Choose Date", value=date.today())
 
 if st.button("Test UW Chains by Date"):
-    url = f"https://api.unusualwhales.com/api/option_chains/{ticker}/chains/date/{chosen_date}"
+    url = f"https://api.unusualwhales.com/api/option_chains/{ticker}/chains/by-date/{chosen_date}"
     try:
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
