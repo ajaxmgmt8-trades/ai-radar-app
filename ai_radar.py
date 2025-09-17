@@ -103,11 +103,23 @@ def get_stock_state(ticker: str) -> dict:
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         result = r.json()
-        if not result or 'ticker' not in result:
-            raise ValueError("Invalid UW response")
+        
+        # More flexible validation - check if we have essential price data
+        if not result:
+            raise ValueError("Empty UW response")
+        
+        # Check for common price fields that UW might return
+        price_fields = ['price', 'last', 'close', 'current_price']
+        has_price = any(field in result for field in price_fields)
+        
+        if not has_price:
+            raise ValueError("No price data in UW response")
+        
         return result
     except Exception as e:
-        st.warning(f"UW error: {e} — fallback triggered.")
+        # Only show warning if it's a real error, not just missing ticker field
+        if "No price data" in str(e) or "Empty UW response" in str(e):
+            st.warning(f"UW error: {e} — fallback triggered.")
         return get_stock_data_fallback(ticker)
 
 def get_option_chains(ticker: str) -> dict:
@@ -393,28 +405,52 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     if UNUSUAL_WHALES_KEY:
         try:
             uw_data = get_stock_state(ticker)
-            if not uw_data.get("error") and uw_data.get("price", 0) > 0:
-                # Transform UW data to your format
-                price = float(uw_data.get('price', 0))
-                change = float(uw_data.get('change', 0))
-                change_percent = float(uw_data.get('change_percent', 0))
+            if not uw_data.get("error") and uw_data:
+                # More flexible price extraction from UW data
+                price = None
+                price_fields = ['price', 'last', 'close', 'current_price', 'last_price']
+                for field in price_fields:
+                    if field in uw_data and uw_data[field] is not None:
+                        price = float(uw_data[field])
+                        break
                 
-                return {
-                    "last": price,
-                    "bid": float(uw_data.get('bid', price - 0.01)),
-                    "ask": float(uw_data.get('ask', price + 0.01)),
-                    "volume": int(uw_data.get('volume', 0)),
-                    "change": change,
-                    "change_percent": change_percent,
-                    "premarket_change": float(uw_data.get('premarket_change_percent', 0)),
-                    "intraday_change": change_percent,
-                    "postmarket_change": float(uw_data.get('afterhours_change_percent', 0)),
-                    "previous_close": float(uw_data.get('previous_close', price - change)),
-                    "market_open": float(uw_data.get('open', 0)),
-                    "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-                    "error": None,
-                    "data_source": "Unusual Whales"
-                }
+                if price and price > 0:
+                    # Extract other fields with fallbacks
+                    change = float(uw_data.get('change', 0))
+                    change_percent = float(uw_data.get('change_percent', uw_data.get('change_pct', 0)))
+                    volume = int(uw_data.get('volume', 0))
+                    
+                    # Handle bid/ask with fallbacks
+                    bid = float(uw_data.get('bid', price - 0.01))
+                    ask = float(uw_data.get('ask', price + 0.01))
+                    
+                    # Handle session data with fallbacks
+                    premarket_change = float(uw_data.get('premarket_change_percent', 
+                                                       uw_data.get('premarket_change', 0)))
+                    afterhours_change = float(uw_data.get('afterhours_change_percent', 
+                                                        uw_data.get('aftermarket_change_percent',
+                                                                  uw_data.get('postmarket_change', 0))))
+                    
+                    # Handle previous close with fallback
+                    previous_close = float(uw_data.get('previous_close', 
+                                                     uw_data.get('prev_close', price - change)))
+                    
+                    return {
+                        "last": price,
+                        "bid": bid,
+                        "ask": ask,
+                        "volume": volume,
+                        "change": change,
+                        "change_percent": change_percent,
+                        "premarket_change": premarket_change,
+                        "intraday_change": change_percent,
+                        "postmarket_change": afterhours_change,
+                        "previous_close": previous_close,
+                        "market_open": float(uw_data.get('open', uw_data.get('market_open', 0))),
+                        "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+                        "error": None,
+                        "data_source": "Unusual Whales"
+                    }
         except Exception as e:
             print(f"UW error for {ticker}: {str(e)}")
     
