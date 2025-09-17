@@ -2997,6 +2997,20 @@ if debug_mode and st.sidebar.button("🧪 Test UW API Connection"):
                     st.write(f"{status} {name}")
                     if result.get("error"):
                         st.caption(f"Error: {result['error']}")
+
+def get_options_chain(ticker: str) -> dict:
+    """
+    Fetches options chain data from Unusual Whales.
+    """
+    client = UnusualWhalesClient(api_key=UNUSUAL_WHALES_KEY)
+    result = client._make_request(f"/api/stock/{ticker}/option-chains")
+
+    if result.get("error"):
+        st.warning(f"Unusual Whales error: {result['error']}")
+        return {}
+
+    return result.get("data", {})
+
                 except Exception as e:
                     st.write(f"❌ {name}: {str(e)}")
     else:
@@ -3542,10 +3556,27 @@ with tabs[5]:
     st.info("Sector and ETF tracking will be available in the next update.")
 
 with tabs[6]:
-    st.subheader("🎲 0DTE & Lottos - Coming Soon")
-    st.info("0DTE options analysis will be available in the next update.")
+st.subheader("📊 Options Flow & Chains")
+with st.container():
+    ticker = st.text_input("Enter Ticker Symbol", "AAPL").upper().strip()
+    if ticker:
+        tabs = st.tabs(["📅 0DTE", "📈 Swing", "🧠 LEAP"])
 
-with tabs[7]:
+        with tabs[0]:
+            st.markdown("### 📅 0DTE Options (Expiring Today)")
+            chain_data = get_options_chain(ticker)
+            # TODO: Filter for expirationDate == today
+
+        with tabs[1]:
+            st.markdown("### 📈 Swing Trades (2-30 Days Out)")
+            chain_data = get_options_chain(ticker)
+            # TODO: Filter for 2 <= expirationDate <= 30
+
+        with tabs[2]:
+            st.markdown("### 🧠 LEAP Trades (60+ Days)")
+            chain_data = get_options_chain(ticker)
+            # TODO: Filter for expirationDate >= 60
+
     st.subheader("🗓️ Earnings Plays - Coming Soon")
     st.info("Earnings calendar and plays will be available in the next update.")
 
