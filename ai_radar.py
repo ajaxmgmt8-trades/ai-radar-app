@@ -1,60 +1,4 @@
 import streamlit as st
-
-UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
-
-
-def get_stock_state(ticker: str) -> dict:
-    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
-    headers = {
-        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
-        "accept": "application/json"
-    }
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-        result = r.json()
-        if not result or 'ticker' not in result:
-            raise ValueError("Invalid UW response")
-        return result
-    except Exception as e:
-        st.warning(f"UW error: {e} — fallback triggered.")
-        return get_stock_data_fallback(ticker)
-
-def get_options_chain(ticker: str) -> dict:
-    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
-    headers = {
-        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
-        "accept": "application/json"
-    }
-    try:
-        r = requests.get(url, headers=headers, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        st.warning(f"UW options error: {e}")
-        return {}
-
-def get_unusual_trades(ticker: str) -> dict:
-    url = f"https://api.unusualwhales.com/api/historic_chains/{ticker}"
-    headers = {
-        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
-        "accept": "application/json"
-    }
-    params = {
-        "limit": 30,
-        "direction": "all",
-        "order": "desc"
-    }
-    try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-        r.raise_for_status()
-        return r.json().get("chains", [])
-    except Exception as e:
-        st.warning(f"UW trades error: {e}")
-        return []
-
-
-import streamlit as st
 import pandas as pd
 import requests
 import datetime
@@ -2363,7 +2307,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -3219,7 +3163,7 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: 0DTE & Lottos
+# TAB 7: Lottos
 with tabs[6]:
     st.subheader("🎲 0DTE & Lotto Plays")
     st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
