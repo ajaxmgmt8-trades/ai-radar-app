@@ -48,6 +48,40 @@ if "refresh_interval" not in st.session_state:
     st.session_state.refresh_interval = 30
 if "selected_tz" not in st.session_state:
     st.session_state.selected_tz = "ET"  # Default to ET
+
+# === Unusual Whales Data Fetchers ===
+def get_stock_state(ticker: str) -> dict:
+    api_key = st.secrets['UNUSUAL_WHALES_KEY']
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        result = r.json()
+        if not result or 'ticker' not in result:
+            raise ValueError('Empty response from Unusual Whales')
+        return result
+    except Exception as e:
+        st.warning(f"Unusual Whales failed, using fallback: {e}")
+        return get_stock_data_fallback(ticker)
+
+def get_options_chain(ticker: str) -> dict:
+    api_key = st.secrets['UNUSUAL_WHALES_KEY']
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        st.error(f"Unusual Whales option chain failed: {e}")
+        return {}
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
 if "data_source" not in st.session_state:
@@ -2307,7 +2341,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "📊 Options Flow & Chain", "🗓️ Earnings Plays", "📰 Important News", "🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -3165,25 +3199,35 @@ with tabs[5]:
 
 # TAB 7: 0DTE & Lottos
 with tabs[6]:
-    st.subheader("🎲 0DTE & Lotto Plays")
-    st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
-
-    # Ticker selection
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        selected_ticker = st.selectbox("Select Ticker for 0DTE", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="0dte_ticker")
-    with col2:
-        if st.button("Analyze 0DTE", key="analyze_0dte"):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Fetch option chain
-    with st.spinner(f"Fetching option chain for {selected_ticker}..."):
-        option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
-        quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
-
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
+    st.subheader("📊 Options Flow & Chain")
+    selected_ticker = st.selectbox("Choose a Ticker", options=CORE_TICKERS, key="options_flow")
+    if selected_ticker:
+        subtabs = st.tabs(["📅 0DTE", "📈 Swing", "🧠 LEAP"])
+        with subtabs[0]:
+            st.markdown("### 📅 0DTE Options (Expiring Today)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
+            st.markdown("### 🤖 AI 0DTE Playbook")
+            with st.spinner("Generating AI analysis..."):
+                tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
+                options_analysis = get_advanced_options_analysis(selected_ticker)
+                catalyst = get_top_catalyst_summary(selected_ticker)
+                quote = get_stock_state(selected_ticker)
+                playbook = ai_playbook(
+                    selected_ticker,
+                    quote["change_percent"],
+                    catalyst,
+                    options_analysis
+                )
+                st.markdown(playbook)
+        with subtabs[1]:
+            st.markdown("### 📈 Swing Options (2-30 Days)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
+        with subtabs[2]:
+            st.markdown("### 🧠 LEAP Options (60+ Days)")
+            chain_data = get_options_chain(selected_ticker)
+            st.write(chain_data)
     else:
         current_price = quote['last']  # Use from quote, which prefers Twelve Data
         expiration = option_chain["expiration"]
