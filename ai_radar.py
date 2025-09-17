@@ -1,3 +1,57 @@
+
+UNUSUAL_WHALES_KEY = st.secrets["UNUSUAL_WHALES_KEY"]
+
+def get_stock_state(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/stock-state"
+    headers = {
+        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
+        "accept": "application/json"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        result = r.json()
+        if not result or 'ticker' not in result:
+            raise ValueError("Invalid UW response")
+        return result
+    except Exception as e:
+        st.warning(f"UW error: {e} — fallback triggered.")
+        return get_stock_data_fallback(ticker)
+
+def get_options_chain(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/stock/{ticker}/option-chains"
+    headers = {
+        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
+        "accept": "application/json"
+    }
+    try:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        st.warning(f"UW options error: {e}")
+        return {}
+
+def get_unusual_trades(ticker: str) -> dict:
+    url = f"https://api.unusualwhales.com/api/historic_chains/{ticker}"
+    headers = {
+        "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
+        "accept": "application/json"
+    }
+    params = {
+        "limit": 30,
+        "direction": "all",
+        "order": "desc"
+    }
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r.raise_for_status()
+        return r.json().get("chains", [])
+    except Exception as e:
+        st.warning(f"UW trades error: {e}")
+        return []
+
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -3523,6 +3577,5 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
 
 
