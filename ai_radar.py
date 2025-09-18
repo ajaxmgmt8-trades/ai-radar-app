@@ -79,3 +79,44 @@ if st.button("Run Option Contract History"):
         st.error(f"❌ HTTP Error: {e}")
     except Exception as e:
         st.error(f"❌ Error: {e}")
+
+# ──────────────────────────────────────────────────────────────
+st.divider()
+st.header("🕰️ Option Contract Intraday Data Test")
+
+intraday_contract_id = st.text_input("Intraday Contract ID (e.g. TSLA230526P00167500)")
+intraday_date = st.date_input("Intraday Date", value=date.today(), key="intraday_date")
+
+if st.button("Run Intraday Option Contract Test"):
+    url = f"https://api.unusualwhales.com/api/option-contract/{intraday_contract_id}/intraday"
+    params = {"date": intraday_date.isoformat()}
+
+    try:
+        response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        response.raise_for_status()
+        st.success("✅ Intraday Data Retrieved!")
+        st.json(response.json())
+    except requests.exceptions.HTTPError as e:
+        st.error(f"❌ HTTP Error: {e}")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+
+# ──────────────────────────────────────────────────────────────
+st.divider()
+st.header("📊 Historical Earnings (Ticker)")
+
+earnings_ticker = st.text_input("Earnings Ticker Symbol", value="AAPL", key="earnings_ticker")
+
+if st.button("Run Earnings Test"):
+    url = f"https://api.unusualwhales.com/api/earnings/{earnings_ticker.upper()}"
+
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        st.success("✅ Earnings Data Retrieved!")
+        st.json(response.json())
+    except requests.exceptions.HTTPError as e:
+        st.error(f"❌ HTTP Error: {e}")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")
+
