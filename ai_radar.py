@@ -65,7 +65,7 @@ contract_id = st.text_input("Enter Option Contract ID (e.g. TSLA230526P00167500)
 limit = st.number_input("Limit (optional)", min_value=1, step=1)
 
 if st.button("Run Option Contract History"):
-    url = f"https://api.unusualwhales.com/api/option-contract/{contract_id}/historic"
+    url = f"https://api.unusualwhales.com/api/option-contract/{id}/historic"
     params = {}
     if limit:
         params["limit"] = int(limit)
