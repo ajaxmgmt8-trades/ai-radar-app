@@ -330,7 +330,7 @@ class GrokClient:
         """Generate trading analysis using Grok"""
         try:
             response = self.client.chat.completions.create(
-                model="grok-beta",
+                model="grok-3",
                 messages=[{
                     "role": "system", 
                     "content": "You are an expert trading analyst. Provide concise, actionable trading analysis with specific entry/exit levels and risk management."
