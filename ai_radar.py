@@ -21,7 +21,8 @@ endpoints = {
     "📆 Spot GEX (By Expiry & Strike)": "/api/stock/{ticker}/spot-exposures/expiry-strike",
     "📈 Price Levels (Lit/Off)": "/api/stock/{ticker}/stock-volume-price-levels",
     "🕰️ Intraday Stats": "/api/stock/{ticker}/intraday/stats",
-    "📅 Option Chains by Date": "/api/stock/{ticker}/option-chains?date={date}"
+    "📅 Option Chains by Date": "/api/stock/{ticker}/option-chains?date={date}",
+    "📜 Historic Chains by Date": "/api/historic_chains/{ticker}?date={date}"
 }
 
 # ──────────────────────────────────────────────────────────────
