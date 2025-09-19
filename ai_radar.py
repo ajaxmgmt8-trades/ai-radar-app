@@ -64,7 +64,7 @@ try:
     GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
-    UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_API_KEY", "")
+    UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
 
     # Initialize AI clients
     openai_client = None
@@ -4369,5 +4369,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
 
