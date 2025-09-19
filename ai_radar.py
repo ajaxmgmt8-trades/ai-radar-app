@@ -14,24 +14,6 @@ import google.generativeai as genai
 import openai
 import concurrent.futures
 
-# 🐳 Unusual Whales Integration
-UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
-UW_HEADERS = {
-    "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
-    "accept": "application/json, text/plain"
-}
-
-def fetch_uw_data(endpoint: str, params: dict = None):
-    """Generic fetch function for Unusual Whales API."""
-    url = f"https://api.unusualwhales.com{endpoint}"
-    try:
-        response = requests.get(url, headers=UW_HEADERS, params=params, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"UW API error: {e}")
-        return None
-
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
@@ -3541,35 +3523,23 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+elif selected_tab == "Options Flow":
+    subtab = st.radio("Choose Flow Type", ["0DTE", "Swing", "LEAP"])
+
+    if subtab == "0DTE":
+        st.subheader("📊 0DTE Flow Analysis")
+        st.write("Pulling high conviction 0DTE plays from UW...")
+        # [UW API integration logic for 0DTE flow goes here]
+
+    elif subtab == "Swing":
+        st.subheader("📈 Swing Flow Analysis")
+        st.write("Analyzing swing trade flow using UW data...")
+        # [UW API integration logic for Swing flow goes here]
+
+    elif subtab == "LEAP":
+        st.subheader("📅 LEAP Flow Insights")
+        st.write("Scanning for long-dated flow using UW...")
+        # [UW API integration logic for LEAP flow goes here]
 
 
-
-elif selected_tab == "Earnings":
-    st.subheader("📊 Earnings Data (via UW)")
-    earnings_ticker = st.text_input("Ticker for earnings", value="AAPL")
-    if st.button("Fetch Earnings from UW"):
-        data = fetch_uw_data(f"/api/earnings/{earnings_ticker.upper()}")
-        if data:
-            st.json(data)
-
-
-elif selected_tab == "Important News":
-    st.subheader("🗞️ Market News (via UW + Yahoo + Finhub)")
-    st.markdown("UW News:")
-    news_data = fetch_uw_data("/api/news/headlines")
-    if news_data:
-        for article in news_data.get("headlines", []):
-            st.markdown(f"- **{article.get('title', 'No Title')}**")
-
-    st.markdown("---\nYahoo + Finhub integration maintained as-is below.")
-
-
-elif selected_tab == "Catalyst Scanner":
-    st.subheader("⚡ Enhanced Catalyst Scanner (UW + Yahoo + Finhub)")
-    st.markdown("Pulling from Unusual Whales catalyst activity...")
-    uw_flows = fetch_uw_data("/api/market/top-net-impact?date=" + date.today().isoformat())
-    if uw_flows:
-        for row in uw_flows.get("data", []):
-            st.markdown(f"- **{row.get('ticker', 'N/A')}** | Net Impact: {row.get('net_impact', 'N/A')}")
-    st.markdown("---\nOther scanners (Yahoo/Finhub) below as configured.")
 
