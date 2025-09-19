@@ -1428,6 +1428,10 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             if not uw_quote.get("error") and uw_quote.get("last", 0) > 0:
                 uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
                 return uw_quote
+            elif not uw_quote.get("error"):
+                # UW has data but no price, still use it
+                uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                # Fall through to get price from other sources but note UW availability
         except Exception as e:
             print(f"Unusual Whales error for {ticker}: {str(e)}")
     
@@ -2727,6 +2731,11 @@ if alpha_vantage_client:
     available_sources.insert(1, "Alpha Vantage")
 if twelvedata_client:
     available_sources.insert(1, "Twelve Data")
+
+# Ensure UW is default if available
+if unusual_whales_client and st.session_state.data_source not in available_sources:
+    st.session_state.data_source = "Unusual Whales"
+
 st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", available_sources, 
                                                     index=available_sources.index(st.session_state.data_source) if st.session_state.data_source in available_sources else 0)
 
@@ -4348,6 +4357,7 @@ with tabs[10]:
 
 # ===== FOOTER (only once, outside all tabs) =====
 st.markdown("---")
+
 footer_sources = []
 if unusual_whales_client:
     footer_sources.append("Unusual Whales")
@@ -4369,4 +4379,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
