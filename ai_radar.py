@@ -15,8 +15,7 @@ import openai
 import concurrent.futures
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import asyncio
-import aiohttp
+
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
