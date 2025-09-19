@@ -2307,7 +2307,7 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
@@ -3163,7 +3163,7 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: Lottos
+# TAB 7: 0DTE & Lottos
 with tabs[6]:
     st.subheader("🎲 0DTE & Lotto Plays")
     st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
@@ -3523,23 +3523,6 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-elif selected_tab == "Options Flow":
-    subtab = st.radio("Choose Flow Type", ["0DTE", "Swing", "LEAP"])
-
-    if subtab == "0DTE":
-        st.subheader("📊 0DTE Flow Analysis")
-        st.write("Pulling high conviction 0DTE plays from UW...")
-        # [UW API integration logic for 0DTE flow goes here]
-
-    elif subtab == "Swing":
-        st.subheader("📈 Swing Flow Analysis")
-        st.write("Analyzing swing trade flow using UW data...")
-        # [UW API integration logic for Swing flow goes here]
-
-    elif subtab == "LEAP":
-        st.subheader("📅 LEAP Flow Insights")
-        st.write("Scanning for long-dated flow using UW...")
-        # [UW API integration logic for LEAP flow goes here]
 
 
 
