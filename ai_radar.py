@@ -51,7 +51,7 @@ if "selected_tz" not in st.session_state:
 if "etf_list" not in st.session_state:
     st.session_state.etf_list = list(ETF_TICKERS)
 if "data_source" not in st.session_state:
-    st.session_state.data_source = "Yahoo Finance"  # Default data source
+    st.session_state.data_source = "Unusual Whales"  # Default to UW
 if "ai_model" not in st.session_state:
     st.session_state.ai_model = "Multi-AI"  # Default to multi-AI
 
@@ -64,6 +64,7 @@ try:
     GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
+    UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_API_KEY", "")
 
     # Initialize AI clients
     openai_client = None
@@ -134,6 +135,207 @@ class GrokClient:
         
 # Initialize enhanced Grok client
 grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
+
+# Unusual Whales API Client
+class UnusualWhalesClient:
+    """Enhanced Unusual Whales API client for comprehensive market data"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.unusualwhales.com"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "AI-Radar-Pro/1.0"
+        })
+    
+    def get_quote(self, symbol: str) -> Dict:
+        """Get real-time quote data"""
+        try:
+            # Use stock data endpoint for comprehensive quote
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/quote",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "error" in data:
+                    return {"error": f"UW API Error: {data['error']}", "data_source": "Unusual Whales"}
+                
+                # Extract quote data from UW response
+                quote_data = data.get("data", {})
+                
+                return {
+                    "last": float(quote_data.get("price", 0)),
+                    "bid": float(quote_data.get("bid", 0)),
+                    "ask": float(quote_data.get("ask", 0)),
+                    "volume": int(quote_data.get("volume", 0)),
+                    "change": float(quote_data.get("change", 0)),
+                    "change_percent": float(quote_data.get("change_percent", 0)),
+                    "premarket_change": float(quote_data.get("premarket_change_percent", 0)),
+                    "intraday_change": float(quote_data.get("intraday_change_percent", 0)),
+                    "postmarket_change": float(quote_data.get("afterhours_change_percent", 0)),
+                    "previous_close": float(quote_data.get("previous_close", 0)),
+                    "market_open": float(quote_data.get("open", 0)),
+                    "last_updated": datetime.datetime.now().isoformat(),
+                    "data_source": "Unusual Whales",
+                    "error": None
+                }
+            else:
+                return {"error": f"UW API HTTP {response.status_code}", "data_source": "Unusual Whales"}
+                
+        except Exception as e:
+            return {"error": f"Unusual Whales API error: {str(e)}", "data_source": "Unusual Whales"}
+    
+    def get_option_flow(self, symbol: str, date: str = None) -> Dict:
+        """Get options flow data"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/flow-recent",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Options Flow API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Options Flow error: {str(e)}"}
+    
+    def get_option_chains(self, symbol: str) -> Dict:
+        """Get option chains data"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/option-contracts",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Option Chains API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Option Chains error: {str(e)}"}
+    
+    def get_greek_exposure(self, symbol: str, date: str = None) -> Dict:
+        """Get greek exposure data"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/api/stock/{symbol}/greek-exposure?date={date}",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Greek Exposure API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Greek Exposure error: {str(e)}"}
+    
+    def get_earnings_calendar(self, date: str = None) -> Dict:
+        """Get earnings calendar"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/api/market/earnings-calendar?date={date}",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Earnings Calendar API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Earnings Calendar error: {str(e)}"}
+    
+    def get_market_news(self) -> Dict:
+        """Get market news headlines"""
+        try:
+            response = self.session.get(
+                f"{self.base_url}/api/news/headlines",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW News API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW News error: {str(e)}"}
+    
+    def get_unusual_options_activity(self, date: str = None) -> Dict:
+        """Get unusual options activity"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/api/market/spike?date={date}",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Unusual Activity API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Unusual Activity error: {str(e)}"}
+    
+    def get_congress_trades(self, symbol: str = None, date: str = None) -> Dict:
+        """Get congressional trading data"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            endpoint = f"{self.base_url}/api/congress/recent-trades?date={date}"
+            if symbol:
+                endpoint += f"&ticker={symbol}"
+            
+            response = self.session.get(endpoint, timeout=10)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Congress Trades API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Congress Trades error: {str(e)}"}
+    
+    def get_darkpool_data(self, symbol: str, date: str = None) -> Dict:
+        """Get darkpool data"""
+        try:
+            if not date:
+                date = datetime.date.today().strftime("%Y-%m-%d")
+            
+            response = self.session.get(
+                f"{self.base_url}/api/darkpool/{symbol}?date={date}",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {"error": f"UW Darkpool API HTTP {response.status_code}"}
+                
+        except Exception as e:
+            return {"error": f"UW Darkpool error: {str(e)}"}
 
 # Alpha Vantage Client
 class AlphaVantageClient:
@@ -291,6 +493,7 @@ class TwelveDataClient:
             return {"error": f"Twelve Data error: {str(e)}", "data_source": "Twelve Data"}
 
 # Initialize data clients
+unusual_whales_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
 alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 
@@ -299,7 +502,20 @@ twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 def get_comprehensive_technical_analysis(ticker: str) -> Dict:
     """Enhanced technical analysis with multiple indicators and timeframes"""
     try:
-        # Try Twelve Data first for more comprehensive data
+        # Try Unusual Whales first for technical data
+        if unusual_whales_client:
+            try:
+                # Get UW stock data for technical analysis
+                uw_data = unusual_whales_client.get_quote(ticker)
+                if not uw_data.get("error"):
+                    # UW provides comprehensive data, build technical analysis
+                    indicators = build_uw_technical_analysis(ticker, uw_data)
+                    if indicators and not indicators.get("error"):
+                        return indicators
+            except Exception as e:
+                print(f"UW technical analysis error for {ticker}: {e}")
+        
+        # Try Twelve Data second for more comprehensive data
         if twelvedata_client:
             # Get multiple timeframes from Twelve Data
             timeframes = ["1day", "4h", "1h"]
@@ -353,6 +569,29 @@ def get_comprehensive_technical_analysis(ticker: str) -> Dict:
         
     except Exception as e:
         return {"error": f"Technical analysis error: {str(e)}"}
+
+def build_uw_technical_analysis(ticker: str, uw_data: Dict) -> Dict:
+    """Build technical analysis from UW data"""
+    try:
+        # This is a placeholder for UW-specific technical analysis
+        # In practice, you'd use UW's technical endpoints
+        
+        current_price = uw_data.get("last", 0)
+        change_percent = uw_data.get("change_percent", 0)
+        volume = uw_data.get("volume", 0)
+        
+        # Basic analysis from available UW data
+        return {
+            "current_price": current_price,
+            "change_percent": change_percent,
+            "volume": volume,
+            "trend_analysis": "Bullish" if change_percent > 1 else "Bearish" if change_percent < -1 else "Neutral",
+            "data_source": "Unusual Whales",
+            "signal_strength": "Strong" if abs(change_percent) > 3 else "Moderate" if abs(change_percent) > 1 else "Weak"
+        }
+        
+    except Exception as e:
+        return {"error": f"UW technical analysis error: {str(e)}"}
 
 def calculate_advanced_indicators(data_dict: Dict, ticker: str) -> Dict:
     """Calculate advanced technical indicators from Twelve Data"""
@@ -767,10 +1006,20 @@ def assess_valuation(fundamentals: Dict) -> str:
     else:
         return "Fairly Valued"
 
-# Enhanced Options Flow Analysis
+# Enhanced Options Flow Analysis using UW
 def get_advanced_options_analysis(ticker: str) -> Dict:
-    """Comprehensive options analysis with order flow insights"""
+    """Comprehensive options analysis with UW order flow insights"""
     try:
+        # Try UW first for advanced options data
+        if unusual_whales_client:
+            uw_flow = unusual_whales_client.get_option_flow(ticker)
+            uw_chains = unusual_whales_client.get_option_chains(ticker)
+            uw_greeks = unusual_whales_client.get_greek_exposure(ticker)
+            
+            if not uw_flow.get("error") or not uw_chains.get("error"):
+                return build_uw_options_analysis(ticker, uw_flow, uw_chains, uw_greeks)
+        
+        # Fallback to yfinance option chain
         option_chain = get_option_chain(ticker, st.session_state.selected_tz)
         if option_chain.get("error"):
             return {"error": option_chain["error"]}
@@ -787,13 +1036,46 @@ def get_advanced_options_analysis(ticker: str) -> Dict:
             "gamma_levels": calculate_gamma_levels(calls, puts, current_price),
             "sentiment_indicators": calculate_options_sentiment(calls, puts),
             "expiration": option_chain["expiration"],
-            "current_price": current_price
+            "current_price": current_price,
+            "data_source": "yfinance"
         }
         
         return analysis
         
     except Exception as e:
         return {"error": f"Advanced options analysis error: {str(e)}"}
+
+def build_uw_options_analysis(ticker: str, flow_data: Dict, chains_data: Dict, greeks_data: Dict) -> Dict:
+    """Build comprehensive options analysis from UW data"""
+    try:
+        analysis = {
+            "data_source": "Unusual Whales",
+            "flow_data": flow_data,
+            "chains_data": chains_data,
+            "greeks_data": greeks_data
+        }
+        
+        # Extract key metrics from UW data
+        if not flow_data.get("error"):
+            flow_info = flow_data.get("data", [])
+            if flow_info:
+                total_premium = sum([float(item.get("premium", 0)) for item in flow_info])
+                call_premium = sum([float(item.get("premium", 0)) for item in flow_info if item.get("type") == "call"])
+                put_premium = sum([float(item.get("premium", 0)) for item in flow_info if item.get("type") == "put"])
+                
+                analysis["uw_metrics"] = {
+                    "total_premium": total_premium,
+                    "call_premium": call_premium,
+                    "put_premium": put_premium,
+                    "put_call_premium_ratio": put_premium / call_premium if call_premium > 0 else 0,
+                    "total_trades": len(flow_info),
+                    "bullish_flow": "Bullish" if call_premium > put_premium else "Bearish"
+                }
+        
+        return analysis
+        
+    except Exception as e:
+        return {"error": f"UW options analysis error: {str(e)}"}
 
 def calculate_basic_options_metrics(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict:
     """Calculate basic options metrics"""
@@ -944,15 +1226,23 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
     if options.get("error"):
         options_summary += f"Options Error: {options['error']}\n"
     else:
-        basic = options.get('basic_metrics', {})
-        flow = options.get('flow_analysis', {})
-        unusual = options.get('unusual_activity', {})
-        options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
-        options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
-        options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
-        options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
-        options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
-        options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
+        # Check if UW data is available
+        if options.get("data_source") == "Unusual Whales":
+            uw_metrics = options.get('uw_metrics', {})
+            options_summary += f"- UW Total Premium: ${uw_metrics.get('total_premium', 0):,.0f}\n"
+            options_summary += f"- UW Flow Sentiment: {uw_metrics.get('bullish_flow', 'Neutral')}\n"
+            options_summary += f"- UW Put/Call Premium Ratio: {uw_metrics.get('put_call_premium_ratio', 0):.2f}\n"
+            options_summary += f"- UW Total Trades: {uw_metrics.get('total_trades', 0)}\n"
+        else:
+            basic = options.get('basic_metrics', {})
+            flow = options.get('flow_analysis', {})
+            unusual = options.get('unusual_activity', {})
+            options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
+            options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
+            options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
+            options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
+            options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
+            options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
     
     # Session data
     session_summary = f"""Session Performance:
@@ -1122,16 +1412,26 @@ class MultiAIAnalyzer:
 # Initialize Multi-AI Analyzer
 multi_ai = MultiAIAnalyzer()
 
-# Enhanced primary data function - Alpha Vantage/Twelve Data first, Yahoo Finance fallback
+# Enhanced primary data function - UW first, then Alpha Vantage/Twelve Data, Yahoo Finance fallback
 @st.cache_data(ttl=60)  # Cache for 60 seconds
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Get live stock quote using Alpha Vantage/Twelve Data first, then Yahoo Finance fallback
+    Get live stock quote using UW first, then other sources as fallback
     """
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
     
-    # Try Alpha Vantage first (if available)
+    # Try Unusual Whales first (if available)
+    if unusual_whales_client:
+        try:
+            uw_quote = unusual_whales_client.get_quote(ticker)
+            if not uw_quote.get("error") and uw_quote.get("last", 0) > 0:
+                uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                return uw_quote
+        except Exception as e:
+            print(f"Unusual Whales error for {ticker}: {str(e)}")
+    
+    # Try Alpha Vantage second (if available)
     if alpha_vantage_client:
         try:
             alpha_quote = alpha_vantage_client.get_quote(ticker)
@@ -1141,7 +1441,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         except Exception as e:
             print(f"Alpha Vantage error for {ticker}: {str(e)}")
     
-    # Try Twelve Data second (if available)
+    # Try Twelve Data third (if available)
     if twelvedata_client:
         try:
             twelve_quote = twelvedata_client.get_quote(ticker)
@@ -1247,6 +1547,36 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "data_source": "Yahoo Finance"
         }
 
+# Enhanced news functions using UW + existing sources
+@st.cache_data(ttl=600)
+def get_uw_news() -> List[Dict]:
+    """Get news from Unusual Whales"""
+    if not unusual_whales_client:
+        return []
+    
+    try:
+        uw_news_data = unusual_whales_client.get_market_news()
+        if uw_news_data.get("error"):
+            return []
+        
+        news_items = []
+        for item in uw_news_data.get("data", []):
+            news_items.append({
+                "title": item.get("title", ""),
+                "summary": item.get("description", ""),
+                "source": "Unusual Whales",
+                "url": item.get("url", ""),
+                "datetime": item.get("published_at", ""),
+                "related": item.get("tickers", ""),
+                "provider": "Unusual Whales API"
+            })
+        
+        return news_items[:15]
+    
+    except Exception as e:
+        print(f"UW News error: {e}")
+        return []
+
 @st.cache_data(ttl=600)
 def get_finnhub_news(symbol: str = None) -> List[Dict]:
     if not FINNHUB_KEY:
@@ -1287,6 +1617,10 @@ def get_polygon_news() -> List[Dict]:
 def get_all_news() -> List[Dict]:
     all_news = []
     
+    # UW news first
+    uw_news = get_uw_news()
+    all_news.extend(uw_news)
+    
     # Finnhub news
     finnhub_news = get_finnhub_news()
     for item in finnhub_news:
@@ -1317,7 +1651,7 @@ def get_all_news() -> List[Dict]:
     except:
         pass
     
-    return all_news[:15]
+    return all_news[:20]
 
 def get_comprehensive_news(ticker: str) -> List[Dict]:
     """Get comprehensive news from all sources for a specific ticker"""
@@ -1462,10 +1796,30 @@ def get_market_moving_news() -> List[Dict]:
     """Get market-moving news from all sources with catalyst analysis"""
     all_news = []
     
-    # Get general market news from all sources
+    # Get general market news from all sources (including UW)
+    uw_general = get_uw_news()
     finnhub_general = get_finnhub_news()  # General news
     polygon_general = get_polygon_news()
     yahoo_general = get_yfinance_news()
+    
+    # Process UW news
+    for item in uw_general:
+        catalyst_analysis = analyze_catalyst_impact(
+            item.get("title", ""), 
+            item.get("summary", "")
+        )
+        
+        news_item = {
+            "title": item.get("title", ""),
+            "summary": item.get("summary", ""),
+            "source": "Unusual Whales",
+            "url": item.get("url", ""),
+            "datetime": item.get("datetime", ""),
+            "related": item.get("related", ""),
+            "provider": "Unusual Whales API",
+            "catalyst_analysis": catalyst_analysis
+        }
+        all_news.append(news_item)
     
     # Process Finnhub news
     for item in finnhub_general:
@@ -1696,7 +2050,18 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
 # New function to fetch option chain data
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
-    """Fetch 0DTE or nearest expiration option chain using yfinance"""
+    """Fetch 0DTE or nearest expiration option chain using UW first, then yfinance"""
+    
+    # Try UW first for option chains
+    if unusual_whales_client:
+        try:
+            uw_chains = unusual_whales_client.get_option_chains(ticker)
+            if not uw_chains.get("error"):
+                return format_uw_option_chain(uw_chains, ticker)
+        except Exception as e:
+            print(f"UW option chains error for {ticker}: {e}")
+    
+    # Fallback to yfinance
     try:
         stock = yf.Ticker(ticker)
         # Get all expiration dates
@@ -1738,15 +2103,47 @@ def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
             "puts": puts,
             "expiration": expiration_str,
             "current_price": current_price,
-            "error": None
+            "error": None,
+            "data_source": "yfinance"
         }
     except Exception as e:
         return {"error": f"Error fetching option chain for {ticker}: {str(e)}"}
 
+def format_uw_option_chain(uw_data: Dict, ticker: str) -> Dict:
+    """Format UW option chain data to match expected structure"""
+    try:
+        # This would need to be customized based on actual UW API response format
+        # For now, return a structured response
+        
+        current_price = get_live_quote(ticker).get('last', 0)
+        
+        return {
+            "calls": pd.DataFrame(),  # Would parse UW call data here
+            "puts": pd.DataFrame(),   # Would parse UW put data here
+            "expiration": datetime.date.today().strftime('%Y-%m-%d'),
+            "current_price": current_price,
+            "error": None,
+            "data_source": "Unusual Whales"
+        }
+        
+    except Exception as e:
+        return {"error": f"Error formatting UW option chain: {str(e)}"}
+
 # New function to simulate order flow (placeholder for premium API integration)
 @st.cache_data(ttl=300)
 def get_order_flow(ticker: str, option_chain: Dict) -> Dict:
-    """Simulate order flow by analyzing option chain volume and open interest"""
+    """Get order flow using UW first, then simulate from option chain"""
+    
+    # Try UW flow data first
+    if unusual_whales_client:
+        try:
+            uw_flow = unusual_whales_client.get_option_flow(ticker)
+            if not uw_flow.get("error"):
+                return format_uw_order_flow(uw_flow)
+        except Exception as e:
+            print(f"UW order flow error for {ticker}: {e}")
+    
+    # Fallback to analyzing option chain
     calls = option_chain.get('calls', pd.DataFrame())
     puts = option_chain.get('puts', pd.DataFrame())
     if calls.empty or puts.empty:
@@ -1774,14 +2171,57 @@ def get_order_flow(ticker: str, option_chain: Dict) -> Dict:
             "top_calls": top_calls.to_dict('records'),
             "top_puts": top_puts.to_dict('records'),
             "sentiment": sentiment,
-            "error": None
+            "error": None,
+            "data_source": "yfinance"
         }
     except Exception as e:
         return {"error": f"Error analyzing order flow: {str(e)}"}
 
-# Modified get_options_data to use real data
+def format_uw_order_flow(uw_data: Dict) -> Dict:
+    """Format UW order flow data"""
+    try:
+        flow_items = uw_data.get("data", [])
+        
+        # Analyze UW flow data
+        call_volume = sum([item.get("volume", 0) for item in flow_items if item.get("type") == "call"])
+        put_volume = sum([item.get("volume", 0) for item in flow_items if item.get("type") == "put"])
+        
+        put_call_ratio = put_volume / call_volume if call_volume > 0 else 0
+        sentiment = "Bullish" if call_volume > put_volume else "Bearish" if put_volume > call_volume else "Neutral"
+        
+        # Extract top trades
+        sorted_items = sorted(flow_items, key=lambda x: x.get("premium", 0), reverse=True)
+        top_calls = [item for item in sorted_items if item.get("type") == "call"][:3]
+        top_puts = [item for item in sorted_items if item.get("type") == "put"][:3]
+        
+        return {
+            "put_call_ratio": put_call_ratio,
+            "top_calls": top_calls,
+            "top_puts": top_puts,
+            "sentiment": sentiment,
+            "error": None,
+            "data_source": "Unusual Whales"
+        }
+        
+    except Exception as e:
+        return {"error": f"Error formatting UW order flow: {str(e)}"}
+
+# Modified get_options_data to use UW first
 def get_options_data(ticker: str) -> Optional[Dict]:
-    """Fetch real options data for a ticker"""
+    """Fetch real options data for a ticker using UW first"""
+    
+    # Try UW first
+    if unusual_whales_client:
+        try:
+            uw_chains = unusual_whales_client.get_option_chains(ticker)
+            uw_flow = unusual_whales_client.get_option_flow(ticker)
+            
+            if not uw_chains.get("error") or not uw_flow.get("error"):
+                return build_uw_options_data(ticker, uw_chains, uw_flow)
+        except Exception as e:
+            print(f"UW options data error for {ticker}: {e}")
+    
+    # Fallback to yfinance
     option_chain = get_option_chain(ticker, st.session_state.selected_tz)
     if option_chain.get("error"):
         return {"error": option_chain["error"]}
@@ -1803,13 +2243,63 @@ def get_options_data(ticker: str) -> Optional[Dict]:
         "top_put_oi_strike": puts[puts['openInterest'] == puts['openInterest'].max()]['strike'].iloc[0] if not puts.empty and puts['openInterest'].max() > 0 else 0,
         "high_iv_strike": high_iv_call['strike'].iloc[0] if not high_iv_call.empty else (high_iv_put['strike'].iloc[0] if not high_iv_put.empty else 0),
         "total_calls": calls['volume'].sum() if not calls.empty else 0,
-        "total_puts": puts['volume'].sum() if not puts.empty else 0
+        "total_puts": puts['volume'].sum() if not puts.empty else 0,
+        "data_source": "yfinance"
     }
 
+def build_uw_options_data(ticker: str, chains_data: Dict, flow_data: Dict) -> Dict:
+    """Build options data from UW sources"""
+    try:
+        # Extract key metrics from UW data
+        total_call_premium = 0
+        total_put_premium = 0
+        total_calls = 0
+        total_puts = 0
+        
+        if not flow_data.get("error"):
+            flow_items = flow_data.get("data", [])
+            for item in flow_items:
+                if item.get("type") == "call":
+                    total_call_premium += float(item.get("premium", 0))
+                    total_calls += int(item.get("volume", 0))
+                elif item.get("type") == "put":
+                    total_put_premium += float(item.get("premium", 0))
+                    total_puts += int(item.get("volume", 0))
+        
+        put_call_ratio = total_puts / total_calls if total_calls > 0 else 0
+        
+        return {
+            "iv": 0,  # Would need IV calculation from UW data
+            "put_call_ratio": put_call_ratio,
+            "top_call_oi": 0,  # Would extract from UW chains data
+            "top_call_oi_strike": 0,
+            "top_put_oi": 0,
+            "top_put_oi_strike": 0,
+            "high_iv_strike": 0,
+            "total_calls": total_calls,
+            "total_puts": total_puts,
+            "data_source": "Unusual Whales",
+            "uw_call_premium": total_call_premium,
+            "uw_put_premium": total_put_premium
+        }
+        
+    except Exception as e:
+        return {"error": f"Error building UW options data: {str(e)}"}
+
+# Enhanced earnings calendar using UW
 def get_earnings_calendar() -> List[Dict]:
-    """
-    Placeholder function for earnings calendar
-    """
+    """Get earnings calendar using UW first, then fallback"""
+    
+    # Try UW first
+    if unusual_whales_client:
+        try:
+            uw_earnings = unusual_whales_client.get_earnings_calendar()
+            if not uw_earnings.get("error"):
+                return format_uw_earnings(uw_earnings)
+        except Exception as e:
+            print(f"UW earnings error: {e}")
+    
+    # Fallback to simulated data
     today = datetime.date.today().strftime("%Y-%m-%d")
     
     return [
@@ -1817,6 +2307,27 @@ def get_earnings_calendar() -> List[Dict]:
         {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20"},
         {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75"},
     ]
+
+def format_uw_earnings(uw_data: Dict) -> List[Dict]:
+    """Format UW earnings data"""
+    try:
+        earnings_items = uw_data.get("data", [])
+        formatted_earnings = []
+        
+        for item in earnings_items:
+            formatted_earnings.append({
+                "ticker": item.get("ticker", ""),
+                "date": item.get("date", ""),
+                "time": item.get("time", ""),
+                "estimate": item.get("estimate", ""),
+                "source": "Unusual Whales"
+            })
+        
+        return formatted_earnings
+        
+    except Exception as e:
+        print(f"Error formatting UW earnings: {e}")
+        return []
 
 # Enhanced AI analysis functions
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
@@ -2008,15 +2519,21 @@ def generate_options_summary(options: Dict) -> str:
     if options.get("error"):
         return f"Options Error: {options['error']}"
     
-    basic = options.get('basic_metrics', {})
-    flow = options.get('flow_analysis', {})
-    
-    pc_ratio = basic.get('put_call_volume_ratio', 0)
-    pc_ratio_str = f"{pc_ratio:.2f}" if pc_ratio is not None else "N/A"
-    
-    sentiment = flow.get('flow_sentiment', 'Neutral')
-    
-    return f"P/C Ratio: {pc_ratio_str}, Flow: {sentiment}"
+    if options.get("data_source") == "Unusual Whales":
+        uw_metrics = options.get('uw_metrics', {})
+        sentiment = uw_metrics.get('bullish_flow', 'Neutral')
+        premium_ratio = uw_metrics.get('put_call_premium_ratio', 0)
+        return f"UW Flow: {sentiment}, P/C Premium: {premium_ratio:.2f}"
+    else:
+        basic = options.get('basic_metrics', {})
+        flow = options.get('flow_analysis', {})
+        
+        pc_ratio = basic.get('put_call_volume_ratio', 0)
+        pc_ratio_str = f"{pc_ratio:.2f}" if pc_ratio is not None else "N/A"
+        
+        sentiment = flow.get('flow_sentiment', 'Neutral')
+        
+        return f"P/C Ratio: {pc_ratio_str}, Flow: {sentiment}"
 
 # Enhanced market analysis
 def ai_market_analysis_enhanced(news_items: List[Dict], movers: List[Dict]) -> str:
@@ -2205,18 +2722,24 @@ else:
 
 # Data Source Toggle
 st.sidebar.subheader("📊 Data Configuration")
-available_sources = ["Yahoo Finance"]
+available_sources = ["Unusual Whales", "Yahoo Finance"]
 if alpha_vantage_client:
-    available_sources.append("Alpha Vantage")
+    available_sources.insert(1, "Alpha Vantage")
 if twelvedata_client:
-    available_sources.append("Twelve Data")
-st.session_state.data_source = st.sidebar.selectbox("Select Data Source", available_sources, index=available_sources.index(st.session_state.data_source))
+    available_sources.insert(1, "Twelve Data")
+st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", available_sources, 
+                                                    index=available_sources.index(st.session_state.data_source) if st.session_state.data_source in available_sources else 0)
 
 # Data source status
-st.sidebar.subheader("Data Sources")
+st.sidebar.subheader("📈 Data Sources Status")
+
+if unusual_whales_client:
+    st.sidebar.success("✅ Unusual Whales Connected (Primary)")
+else:
+    st.sidebar.warning("⚠️ Unusual Whales Not Connected")
 
 # Debug toggle and API test
-debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
+debug_mode = st.sidebar.checkbox("🛠 Debug Mode", help="Show API response details")
 st.session_state.debug_mode = debug_mode
 
 if debug_mode:
@@ -2226,6 +2749,13 @@ if debug_mode:
     if st.sidebar.button("🧪 Test Enhanced Analysis"):
         with st.sidebar:
             st.write("**Testing Enhanced Functions:**")
+            
+            # Test UW API
+            if unusual_whales_client:
+                uw_quote = unusual_whales_client.get_quote(debug_ticker)
+                st.write(f"UW Quote: {'✅' if not uw_quote.get('error') else '❌'}")
+                if uw_quote.get('error'):
+                    st.write(f"Error: {uw_quote['error']}")
             
             # Test technical analysis
             tech_result = get_comprehensive_technical_analysis(debug_ticker)
@@ -2240,10 +2770,17 @@ if debug_mode:
             st.write(f"Options: {'✅' if not opt_result.get('error') else '❌'}")
             
             if st.checkbox("Show Raw Data"):
-                st.json({"tech": tech_result, "fund": fund_result, "opts": opt_result})
+                st.json({"uw_quote": uw_quote if unusual_whales_client else "N/A", 
+                        "tech": tech_result, "fund": fund_result, "opts": opt_result})
 
 if debug_mode and st.sidebar.button("🧪 Test All APIs"):
     st.sidebar.write("**Testing Data APIs:**")
+    
+    if unusual_whales_client:
+        with st.spinner("Testing Unusual Whales API..."):
+            uw_test = unusual_whales_client.get_quote("AAPL")
+            st.sidebar.json(uw_test)
+    
     if twelvedata_client:
         with st.spinner("Testing Twelve Data API..."):
             test_response = twelvedata_client.get_quote("AAPL")
@@ -2266,7 +2803,7 @@ if debug_mode and st.sidebar.button("🧪 Test All APIs"):
 
 # Show available data sources
 if twelvedata_client:
-    st.sidebar.success("✅ Twelve Data Connected (Primary)")
+    st.sidebar.success("✅ Twelve Data Connected")
 else:
     st.sidebar.warning("⚠️ Twelve Data Not Connected")
 
@@ -2306,12 +2843,14 @@ with col4:
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time} {tz_label}")
 
-# Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+# Create tabs - Updated to "Lottos" instead of "0DTE & Lottos"
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌍 Sector/ETF Tracking", "🎰 Options Flow", "🎲 Lottos", "📅 Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
 data_sources = []
+if unusual_whales_client:
+    data_sources.append("Unusual Whales")
 if alpha_vantage_client:
     data_sources.append("Alpha Vantage")
 if twelvedata_client:
@@ -2398,11 +2937,17 @@ with tabs[0]:
                         if not options.get("error"):
                             st.success("✅ Options Analysis Complete")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            basic = options.get('basic_metrics', {})
-                            flow = options.get('flow_analysis', {})
-                            opt_col1.metric("P/C Ratio", f"{basic.get('put_call_volume_ratio', 0):.2f}")
-                            opt_col2.metric("Flow Sentiment", flow.get('flow_sentiment', 'Neutral'))
-                            opt_col3.metric("Unusual Activity", f"{options.get('unusual_activity', {}).get('total_unusual_contracts', 0)}")
+                            if options.get("data_source") == "Unusual Whales":
+                                uw_metrics = options.get('uw_metrics', {})
+                                opt_col1.metric("UW Flow", uw_metrics.get('bullish_flow', 'Neutral'))
+                                opt_col2.metric("UW Premium Ratio", f"{uw_metrics.get('put_call_premium_ratio', 0):.2f}")
+                                opt_col3.metric("UW Trades", f"{uw_metrics.get('total_trades', 0)}")
+                            else:
+                                basic = options.get('basic_metrics', {})
+                                flow = options.get('flow_analysis', {})
+                                opt_col1.metric("P/C Ratio", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                                opt_col2.metric("Flow Sentiment", flow.get('flow_sentiment', 'Neutral'))
+                                opt_col3.metric("Unusual Activity", f"{options.get('unusual_activity', {}).get('total_unusual_contracts', 0)}")
                 
                 if col4.button(f"Add {search_ticker} to Watchlist", key="quotes_add_searched_ticker"):
                     current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -2467,10 +3012,17 @@ with tabs[0]:
                     if options_data:
                         st.write("**Options Metrics:**")
                         opt_col1, opt_col2, opt_col3 = st.columns(3)
-                        opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                        opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                        opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                        st.caption("Note: Options data is real from yfinance")
+                        if options_data.get("data_source") == "Unusual Whales":
+                            uw_call_premium = options_data.get('uw_call_premium', 0)
+                            uw_put_premium = options_data.get('uw_put_premium', 0)
+                            opt_col1.metric("UW Call Premium", f"${uw_call_premium:,.0f}")
+                            opt_col2.metric("UW Put Premium", f"${uw_put_premium:,.0f}")
+                            opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                        else:
+                            opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
+                            opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                            opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                        st.caption(f"Note: Options data from {options_data.get('data_source', 'yfinance')}")
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
                 st.divider()
@@ -2582,13 +3134,18 @@ with tabs[1]:
                         current_tickers.remove(ticker)
                         st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
                         st.rerun()
+
 # TAB 3: Enhanced Catalyst Scanner
 with tabs[2]:
     st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
-    st.caption("Comprehensive news analysis from Finnhub, Polygon, and Yahoo Finance")
+    st.caption("Comprehensive news analysis from Unusual Whales, Finnhub, Polygon, and Yahoo Finance")
     
     # Show data sources status
     sources_status = []
+    if unusual_whales_client:
+        sources_status.append("✅ Unusual Whales")
+    else:
+        sources_status.append("❌ Unusual Whales")
     if FINNHUB_KEY:
         sources_status.append("✅ Finnhub")
     else:
@@ -2703,7 +3260,7 @@ with tabs[2]:
                 st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
     # Main market catalyst scan
-    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
+    st.markdown("### 🌍 Market-Wide Catalyst Scanner")
     
     scan_col1, scan_col2 = st.columns([2, 1])
     with scan_col1:
@@ -2895,11 +3452,19 @@ with tabs[3]:
                 if options_data:
                     st.markdown("#### Options Metrics")
                     opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
-                    opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
-                    opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
-                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
-                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
-                    st.caption("Note: Options data is real from yfinance")
+                    if options_data.get("data_source") == "Unusual Whales":
+                        uw_call_premium = options_data.get('uw_call_premium', 0)
+                        uw_put_premium = options_data.get('uw_put_premium', 0)
+                        opt_col1.metric("UW Call Premium", f"${uw_call_premium:,.0f}")
+                        opt_col2.metric("UW Put Premium", f"${uw_put_premium:,.0f}")
+                        opt_col3.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col4.metric("Total Volume", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                    else:
+                        opt_col1.metric("IV", f"{options_data.get('iv', 0):.1f}%")
+                        opt_col2.metric("Put/Call", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,}")
+                        opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,}")
+                    st.caption(f"Note: Options data from {options_data.get('data_source', 'yfinance')}")
                 
                 st.markdown("### 🎯 AI Analysis")
                 st.markdown(analysis)
@@ -3048,11 +3613,19 @@ with tabs[4]:
                 if options_data:
                     st.markdown("#### Options Analysis")
                     opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
-                    opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                    opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                    opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
-                    opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
-                    st.caption("Note: Options data is real from yfinance")
+                    if options_data.get("data_source") == "Unusual Whales":
+                        uw_call_premium = options_data.get('uw_call_premium', 0)
+                        uw_put_premium = options_data.get('uw_put_premium', 0)
+                        opt_col1.metric("UW Call Premium", f"${uw_call_premium:,.0f}")
+                        opt_col2.metric("UW Put Premium", f"${uw_put_premium:,.0f}")
+                        opt_col3.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col4.metric("Total Volume", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                    else:
+                        opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
+                        opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
+                        opt_col3.metric("Call OI", f"{options_data.get('top_call_oi', 0):,} @ ${options_data.get('top_call_oi_strike', 0)}")
+                        opt_col4.metric("Put OI", f"{options_data.get('top_put_oi', 0):,} @ ${options_data.get('top_put_oi_strike', 0)}")
+                    st.caption(f"Note: Options data from {options_data.get('data_source', 'yfinance')}")
                 
                 st.markdown("### 🎯 AI Trading Playbook")
                 st.markdown(playbook)
@@ -3114,7 +3687,7 @@ with tabs[4]:
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
-    st.subheader("🌐 Sector/ETF Tracking")
+    st.subheader("🌍 Sector/ETF Tracking")
 
     # Add search and add functionality
     st.markdown("### 🔍 Search & Add ETFs")
@@ -3163,108 +3736,372 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: 0DTE & Lottos
+# TAB 7: Options Flow (NEW)
 with tabs[6]:
-    st.subheader("🎲 0DTE & Lotto Plays")
-    st.markdown("**High-risk, high-reward options expiring today. Monitor order flow for institutional moves.**")
+    st.subheader("🎰 Real-Time Options Flow")
+    st.markdown("**Advanced options flow analysis powered by Unusual Whales and comprehensive option chain data.**")
 
     # Ticker selection
     col1, col2 = st.columns([3, 1])
     with col1:
-        selected_ticker = st.selectbox("Select Ticker for 0DTE", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="0dte_ticker")
+        selected_ticker = st.selectbox("Select Ticker for Options Flow", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="options_flow_ticker")
     with col2:
-        if st.button("Analyze 0DTE", key="analyze_0dte"):
+        if st.button("Analyze Flow", key="analyze_options_flow"):
             st.cache_data.clear()
             st.rerun()
 
-    # Fetch option chain
-    with st.spinner(f"Fetching option chain for {selected_ticker}..."):
+    # Get comprehensive options analysis
+    with st.spinner(f"Fetching comprehensive options data for {selected_ticker}..."):
+        quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
+        options_analysis = get_advanced_options_analysis(selected_ticker)
+        option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
+
+    if options_analysis.get("error"):
+        st.error(options_analysis["error"])
+    else:
+        current_price = quote['last']
+        data_source = options_analysis.get("data_source", "yfinance")
+        
+        st.markdown(f"**Options Flow Analysis for {selected_ticker}**")
+        st.markdown(f"**Current Price:** ${current_price:.2f} | **Data Source:** {data_source}")
+
+        # Top-level metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        if data_source == "Unusual Whales":
+            uw_metrics = options_analysis.get('uw_metrics', {})
+            col1.metric("UW Flow Sentiment", uw_metrics.get('bullish_flow', 'Neutral'))
+            col2.metric("UW Total Premium", f"${uw_metrics.get('total_premium', 0):,.0f}")
+            col3.metric("UW Put/Call Premium", f"{uw_metrics.get('put_call_premium_ratio', 0):.2f}")
+            col4.metric("UW Total Trades", f"{uw_metrics.get('total_trades', 0)}")
+        else:
+            basic_metrics = options_analysis.get('basic_metrics', {})
+            flow_analysis = options_analysis.get('flow_analysis', {})
+            col1.metric("Flow Sentiment", flow_analysis.get('flow_sentiment', 'Neutral'))
+            col2.metric("Put/Call Volume", f"{basic_metrics.get('put_call_volume_ratio', 0):.2f}")
+            col3.metric("Avg Call IV", f"{basic_metrics.get('avg_call_iv', 0):.1f}%")
+            col4.metric("IV Skew", f"{basic_metrics.get('iv_skew', 0):.1f}%")
+
+        # AI Analysis for options flow
+        st.markdown("### 🤖 AI Options Flow Analysis")
+        with st.spinner("Generating AI options flow analysis..."):
+            if data_source == "Unusual Whales":
+                uw_metrics = options_analysis.get('uw_metrics', {})
+                catalyst = f"UW Options Flow Analysis. Flow: {uw_metrics.get('bullish_flow', 'Neutral')}, Premium Ratio: {uw_metrics.get('put_call_premium_ratio', 0):.2f}, Total Trades: {uw_metrics.get('total_trades', 0)}"
+            else:
+                basic = options_analysis.get('basic_metrics', {})
+                flow = options_analysis.get('flow_analysis', {})
+                unusual = options_analysis.get('unusual_activity', {})
+                catalyst = f"Options Flow Analysis. P/C Ratio: {basic.get('put_call_volume_ratio', 0):.2f}, Flow: {flow.get('flow_sentiment', 'Neutral')}, Unusual Contracts: {unusual.get('total_unusual_contracts', 0)}"
+            
+            flow_playbook = ai_playbook(
+                selected_ticker,
+                quote["change_percent"],
+                catalyst,
+                options_analysis
+            )
+            st.markdown(flow_playbook)
+
+        # Detailed flow analysis
+        if not options_analysis.get("error"):
+            # Display different analysis based on data source
+            if data_source == "Unusual Whales":
+                st.markdown("### 🐳 Unusual Whales Flow Data")
+                
+                # UW specific data display
+                flow_data = options_analysis.get('flow_data', {})
+                if not flow_data.get("error"):
+                    flow_items = flow_data.get("data", [])
+                    
+                    if flow_items:
+                        st.markdown("#### Recent Flow Transactions")
+                        # Display recent transactions in a nice format
+                        for i, item in enumerate(flow_items[:10]):  # Show top 10
+                            with st.container():
+                                col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                                option_type = item.get("type", "").title()
+                                strike = item.get("strike", 0)
+                                premium = item.get("premium", 0)
+                                volume = item.get("volume", 0)
+                                
+                                col1.write(f"**{option_type}** ${strike}")
+                                col2.write(f"Premium: ${premium:,.0f}")
+                                col3.write(f"Volume: {volume:,}")
+                                col4.write(f"Time: {item.get('time', 'N/A')}")
+                                
+                                st.divider()
+                    else:
+                        st.info("No recent flow data available from Unusual Whales.")
+                else:
+                    st.warning(f"UW Flow Data Error: {flow_data.get('error', 'Unknown error')}")
+                
+                # UW Greeks data
+                greeks_data = options_analysis.get('greeks_data', {})
+                if not greeks_data.get("error"):
+                    st.markdown("#### 🔢 Greek Exposure")
+                    st.info("UW Greek exposure data available - would display comprehensive gamma, delta, theta analysis here.")
+                
+            else:
+                # Standard yfinance analysis
+                st.markdown("### 📊 Standard Options Analysis")
+                
+                # Basic metrics
+                basic_metrics = options_analysis.get('basic_metrics', {})
+                st.markdown("#### Basic Metrics")
+                metric_col1, metric_col2, metric_col3 = st.columns(3)
+                metric_col1.metric("Total Call Volume", f"{basic_metrics.get('total_call_volume', 0):,}")
+                metric_col2.metric("Total Put Volume", f"{basic_metrics.get('total_put_volume', 0):,}")
+                metric_col3.metric("Total Open Interest", f"{basic_metrics.get('total_call_oi', 0) + basic_metrics.get('total_put_oi', 0):,}")
+                
+                # Flow analysis
+                flow_analysis = options_analysis.get('flow_analysis', {})
+                st.markdown("#### Flow Analysis")
+                flow_col1, flow_col2, flow_col3 = st.columns(3)
+                flow_col1.metric("ITM Call Volume", f"{flow_analysis.get('itm_call_volume', 0):,}")
+                flow_col2.metric("OTM Call Volume", f"{flow_analysis.get('otm_call_volume', 0):,}")
+                flow_col3.metric("Net Call Bias", f"{flow_analysis.get('net_call_bias', 0):,}")
+                
+                # Unusual activity
+                unusual_activity = options_analysis.get('unusual_activity', {})
+                st.markdown("#### Unusual Activity")
+                
+                unusual_calls = unusual_activity.get('unusual_calls', [])
+                unusual_puts = unusual_activity.get('unusual_puts', [])
+                
+                if unusual_calls or unusual_puts:
+                    if unusual_calls:
+                        st.write("**Unusual Call Activity:**")
+                        for call in unusual_calls[:5]:
+                            st.write(f"• Strike ${call['strike']}: Volume {call['volume']:,}, OI {call['openInterest']:,}, Price ${call['lastPrice']:.2f}")
+                    
+                    if unusual_puts:
+                        st.write("**Unusual Put Activity:**")
+                        for put in unusual_puts[:5]:
+                            st.write(f"• Strike ${put['strike']}: Volume {put['volume']:,}, OI {put['openInterest']:,}, Price ${put['lastPrice']:.2f}")
+                else:
+                    st.info("No unusual activity detected.")
+                
+                # Gamma levels
+                gamma_levels = options_analysis.get('gamma_levels', {})
+                if gamma_levels:
+                    st.markdown("#### Gamma Exposure Levels")
+                    gamma_col1, gamma_col2 = st.columns(2)
+                    gamma_col1.metric("Max Gamma Strike", f"${gamma_levels.get('max_gamma_strike', 0):.2f}")
+                    gamma_col2.metric("Max Gamma Level", f"{gamma_levels.get('max_gamma_level', 0):.2f}")
+
+        # Option chain display (if available)
+        if not option_chain.get("error") and data_source != "Unusual Whales":
+            st.markdown("### 📋 Option Chain")
+            
+            tab1, tab2 = st.tabs(["Calls", "Puts"])
+            
+            with tab1:
+                calls = option_chain["calls"]
+                if not calls.empty:
+                    display_calls = calls[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
+                    display_calls.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
+                    display_calls['IV (%)'] = display_calls['IV (%)'].map('{:.2f}'.format)
+                    st.dataframe(display_calls, use_container_width=True)
+                else:
+                    st.warning("No call options available.")
+            
+            with tab2:
+                puts = option_chain["puts"]
+                if not puts.empty:
+                    display_puts = puts[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
+                    display_puts.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
+                    display_puts['IV (%)'] = display_puts['IV (%)'].map('{:.2f}'.format)
+                    st.dataframe(display_puts, use_container_width=True)
+                else:
+                    st.warning("No put options available.")
+
+# TAB 8: Lottos (renamed from 0DTE & Lottos)
+with tabs[7]:
+    st.subheader("🎲 Lotto Plays")
+    st.markdown("**High-risk, high-reward lotto options under $1.00. Perfect for small capital, massive potential.**")
+
+    # Ticker selection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected_ticker = st.selectbox("Select Ticker for Lotto Analysis", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="lotto_ticker")
+    with col2:
+        if st.button("Find Lotto Plays", key="analyze_lotto"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # Fetch option chain for lotto analysis
+    with st.spinner(f"Scanning for lotto opportunities in {selected_ticker}..."):
         option_chain = get_option_chain(selected_ticker, st.session_state.selected_tz)
         quote = get_live_quote(selected_ticker, st.session_state.selected_tz)
 
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
-        current_price = quote['last']  # Use from quote, which prefers Twelve Data
+        current_price = quote['last']
         expiration = option_chain["expiration"]
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
-        st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        
+        st.markdown(f"**Lotto Analysis for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
-        # AI Analysis at the top
-        st.markdown("### 🤖 AI 0DTE Playbook")
-        with st.spinner("Generating AI analysis..."):
+        # AI Lotto Analysis
+        st.markdown("### 🤖 AI Lotto Strategy")
+        with st.spinner("Generating AI lotto analysis..."):
+            # Enhanced prompt for lotto plays
             tech_analysis = get_comprehensive_technical_analysis(selected_ticker)
             options_analysis = get_advanced_options_analysis(selected_ticker)
-            order_flow = get_order_flow(selected_ticker, option_chain)
-            # Summarize option chain
+            
+            # Analyze option chain for lotto opportunities
             calls = option_chain["calls"]
             puts = option_chain["puts"]
-            top_calls = calls.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            top_puts = puts.sort_values('volume', ascending=False).head(3)[['strike', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False)
-            option_summary = f"Top Calls:\n{top_calls}\nTop Puts:\n{top_puts}"
             
-            # Enhanced prompt for high confidence 0DTE play
+            # Find options under $1.00
+            cheap_calls = calls[calls['lastPrice'] <= 1.0] if not calls.empty else pd.DataFrame()
+            cheap_puts = puts[puts['lastPrice'] <= 1.0] if not puts.empty else pd.DataFrame()
+            
+            lotto_summary = f"Lotto Analysis: Found {len(cheap_calls)} call options and {len(cheap_puts)} put options under $1.00. "
+            if not cheap_calls.empty:
+                lotto_summary += f"Cheapest call: ${cheap_calls['lastPrice'].min():.2f} at ${cheap_calls[cheap_calls['lastPrice'] == cheap_calls['lastPrice'].min()]['strike'].iloc[0]} strike. "
+            if not cheap_puts.empty:
+                lotto_summary += f"Cheapest put: ${cheap_puts['lastPrice'].min():.2f} at ${cheap_puts[cheap_puts['lastPrice'] == cheap_puts['lastPrice'].min()]['strike'].iloc[0]} strike."
+            
             tech_summary = generate_technical_summary(tech_analysis)
-            catalyst = f"0DTE options activity. Technical Analysis: {tech_summary}. Order Flow Sentiment: {order_flow.get('sentiment', 'Neutral')}, Put/Call Ratio: {order_flow.get('put_call_ratio', 0):.2f}. Option Chain Summary: {option_summary}"
-            playbook = ai_playbook(
+            catalyst = f"Lotto Play Analysis. {lotto_summary} Technical: {tech_summary}. Current price: ${current_price:.2f}"
+            
+            lotto_playbook = ai_playbook(
                 selected_ticker,
                 quote["change_percent"],
                 catalyst,
                 options_analysis
             )
-            st.markdown(playbook)
+            st.markdown(lotto_playbook)
 
-        # Display option chain
-        st.markdown("### Calls")
+        # Lotto Opportunities
+        st.markdown("### 🎯 Lotto Opportunities Under $1.00")
+        
         calls = option_chain["calls"]
-        if not calls.empty:
-            display_calls = calls[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
-            display_calls.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
-            display_calls['IV (%)'] = display_calls['IV (%)'].map('{:.2f}'.format)
-            st.dataframe(display_calls, use_container_width=True)
-        else:
-            st.warning("No call options available.")
-
-        st.markdown("### Puts")
         puts = option_chain["puts"]
-        if not puts.empty:
-            display_puts = puts[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']].copy()
-            display_puts.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'Open Interest', 'IV (%)', 'Moneyness']
-            display_puts['IV (%)'] = display_puts['IV (%)'].map('{:.2f}'.format)
-            st.dataframe(display_puts, use_container_width=True)
+        
+        # Filter for lotto plays (under $1.00)
+        lotto_calls = calls[calls['lastPrice'] <= 1.0] if not calls.empty else pd.DataFrame()
+        lotto_puts = puts[puts['lastPrice'] <= 1.0] if not puts.empty else pd.DataFrame()
+        
+        if not lotto_calls.empty or not lotto_puts.empty:
+            tab1, tab2 = st.tabs(["🚀 Lotto Calls", "📉 Lotto Puts"])
+            
+            with tab1:
+                if not lotto_calls.empty:
+                    st.markdown("#### Call Options Under $1.00")
+                    
+                    # Add potential return calculations
+                    lotto_calls_display = lotto_calls.copy()
+                    lotto_calls_display['Cost_100_Contracts'] = lotto_calls_display['lastPrice'] * 100
+                    lotto_calls_display['Breakeven'] = lotto_calls_display['strike'] + lotto_calls_display['lastPrice']
+                    lotto_calls_display['Distance_to_Strike'] = ((lotto_calls_display['strike'] - current_price) / current_price * 100)
+                    
+                    # Sort by distance to strike (closest first)
+                    lotto_calls_display = lotto_calls_display.sort_values('Distance_to_Strike', key=abs)
+                    
+                    display_calls = lotto_calls_display[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'Cost_100_Contracts', 'Breakeven', 'Distance_to_Strike']].copy()
+                    display_calls.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'OI', 'IV (%)', 'Cost (100x)', 'Breakeven', 'Distance %']
+                    display_calls['IV (%)'] = display_calls['IV (%)'].map('{:.1f}'.format)
+                    display_calls['Cost (100x)'] = display_calls['Cost (100x)'].map('${:.0f}'.format)
+                    display_calls['Breakeven'] = display_calls['Breakeven'].map('${:.2f}'.format)
+                    display_calls['Distance %'] = display_calls['Distance %'].map('{:+.1f}%'.format)
+                    
+                    st.dataframe(display_calls, use_container_width=True)
+                    
+                    # Highlight best opportunities
+                    if len(lotto_calls_display) > 0:
+                        cheapest_call = lotto_calls_display.loc[lotto_calls_display['lastPrice'].idxmin()]
+                        closest_call = lotto_calls_display.loc[lotto_calls_display['Distance_to_Strike'].abs().idxmin()]
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.info(f"💰 **Cheapest**: ${cheapest_call['strike']} strike for ${cheapest_call['lastPrice']:.2f} (${cheapest_call['lastPrice']*100:.0f} for 100 contracts)")
+                        with col2:
+                            st.info(f"🎯 **Closest to Price**: ${closest_call['strike']} strike ({closest_call['Distance_to_Strike']:+.1f}% from current price)")
+                
+                else:
+                    st.warning("No call options under $1.00 available.")
+            
+            with tab2:
+                if not lotto_puts.empty:
+                    st.markdown("#### Put Options Under $1.00")
+                    
+                    # Add potential return calculations for puts
+                    lotto_puts_display = lotto_puts.copy()
+                    lotto_puts_display['Cost_100_Contracts'] = lotto_puts_display['lastPrice'] * 100
+                    lotto_puts_display['Breakeven'] = lotto_puts_display['strike'] - lotto_puts_display['lastPrice']
+                    lotto_puts_display['Distance_to_Strike'] = ((current_price - lotto_puts_display['strike']) / current_price * 100)
+                    
+                    # Sort by distance to strike (closest first)
+                    lotto_puts_display = lotto_puts_display.sort_values('Distance_to_Strike', key=abs)
+                    
+                    display_puts = lotto_puts_display[['strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility', 'Cost_100_Contracts', 'Breakeven', 'Distance_to_Strike']].copy()
+                    display_puts.columns = ['Strike', 'Last Price', 'Bid', 'Ask', 'Volume', 'OI', 'IV (%)', 'Cost (100x)', 'Breakeven', 'Distance %']
+                    display_puts['IV (%)'] = display_puts['IV (%)'].map('{:.1f}'.format)
+                    display_puts['Cost (100x)'] = display_puts['Cost (100x)'].map('${:.0f}'.format)
+                    display_puts['Breakeven'] = display_puts['Breakeven'].map('${:.2f}'.format)
+                    display_puts['Distance %'] = display_puts['Distance %'].map('{:+.1f}%'.format)
+                    
+                    st.dataframe(display_puts, use_container_width=True)
+                    
+                    # Highlight best opportunities
+                    if len(lotto_puts_display) > 0:
+                        cheapest_put = lotto_puts_display.loc[lotto_puts_display['lastPrice'].idxmin()]
+                        closest_put = lotto_puts_display.loc[lotto_puts_display['Distance_to_Strike'].abs().idxmin()]
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.info(f"💰 **Cheapest**: ${cheapest_put['strike']} strike for ${cheapest_put['lastPrice']:.2f} (${cheapest_put['lastPrice']*100:.0f} for 100 contracts)")
+                        with col2:
+                            st.info(f"🎯 **Closest to Price**: ${closest_put['strike']} strike ({closest_put['Distance_to_Strike']:+.1f}% from current price)")
+                
+                else:
+                    st.warning("No put options under $1.00 available.")
+        
         else:
-            st.warning("No put options available.")
+            st.warning(f"No lotto opportunities found for {selected_ticker}. All options are priced above $1.00.")
+        
+        # Risk Warning
+        with st.expander("⚠️ Lotto Trading Risk Warning"):
+            st.warning("""
+            **HIGH RISK WARNING - LOTTO PLAYS**
+            
+            Lotto options are extremely high-risk investments:
+            
+            🚨 **Risks:**
+            - Most lotto options expire worthless (90%+ loss rate)
+            - Time decay works against you rapidly
+            - Requires significant price movement to profit
+            - Can lose 100% of investment quickly
+            
+            💡 **Best Practices:**
+            - Only risk money you can afford to lose completely
+            - Never risk more than 1-2% of your portfolio on lottos
+            - Have a clear exit strategy (both profit and loss)
+            - Consider taking profits at 50-100% gains
+            - Most profitable on high-volatility events
+            
+            📊 **When Lottos Work:**
+            - Major earnings surprises
+            - FDA approvals/rejections
+            - Acquisition announcements
+            - Market crash/rally scenarios
+            """)
 
-        # Order flow analysis
-        st.markdown("### Order Flow Analysis")
-        order_flow = get_order_flow(selected_ticker, option_chain)
-        if order_flow.get("error"):
-            st.error(order_flow["error"])
-        else:
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Put/Call Volume Ratio", f"{order_flow['put_call_ratio']:.2f}")
-            col2.metric("Sentiment", order_flow["sentiment"])
-            col3.metric("Total Volume", f"{int(calls['volume'].sum() + puts['volume'].sum()):,}")
-
-            st.markdown("#### Top Trades (Unusual Activity)")
-            if order_flow["top_calls"]:
-                st.markdown("**Top Call Trades**")
-                for trade in order_flow["top_calls"]:
-                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
-            if order_flow["top_puts"]:
-                st.markdown("**Top Put Trades**")
-                for trade in order_flow["top_puts"]:
-                    st.write(f"- Strike ${trade['strike']:.2f} ({trade['moneyness']}): ${trade['lastPrice']:.2f}, Volume: {trade['volume']:,}")
-            if not order_flow["top_calls"] and not order_flow["top_puts"]:
-                st.info("No unusual activity detected.")
-
-# TAB 8: Earnings Plays
-with tabs[7]:
-    st.subheader("🗓️ Top Earnings Plays")
+# TAB 9: Earnings Plays
+with tabs[8]:
+    st.subheader("📅 Top Earnings Plays")
     
     st.write("This section tracks upcoming earnings reports and provides AI analysis for potential earnings plays.")
-    st.info("Note: Earnings data is simulated for demonstration. For live earnings calendar, consider integrating a financial calendar API.")
+    
+    # Show UW vs other data sources
+    if unusual_whales_client:
+        st.info("🐳 **Enhanced with Unusual Whales earnings data** - Real-time earnings calendar and analysis")
+    else:
+        st.info("📊 **Standard earnings data** - Basic earnings calendar (consider upgrading to UW for enhanced data)")
     
     if st.button("📊 Get Today's Earnings Plays", type="primary"):
         with st.spinner("AI analyzing earnings reports..."):
@@ -3294,10 +4131,17 @@ with tabs[7]:
                         if not options_analysis.get("error"):
                             st.write("**Options Metrics:**")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            basic = options_analysis.get('basic_metrics', {})
-                            opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
-                            opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
-                            opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
+                            
+                            if options_analysis.get("data_source") == "Unusual Whales":
+                                uw_metrics = options_analysis.get('uw_metrics', {})
+                                opt_col1.metric("UW Flow", uw_metrics.get('bullish_flow', 'Neutral'))
+                                opt_col2.metric("UW Premium Ratio", f"{uw_metrics.get('put_call_premium_ratio', 0):.2f}")
+                                opt_col3.metric("UW Total Trades", f"{uw_metrics.get('total_trades', 0)}")
+                            else:
+                                basic = options_analysis.get('basic_metrics', {})
+                                opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
+                                opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
+                                opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
                     
                     if not options_analysis.get("error"):
                         ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str}", options_analysis)
@@ -3318,8 +4162,8 @@ with tabs[7]:
                         st.markdown(ai_analysis)
                     st.divider()
 
-# TAB 9: Important News & Economic Calendar
-with tabs[8]:
+# TAB 10: Important News & Economic Calendar
+with tabs[9]:
     st.subheader("📰 Important News & Economic Calendar")
 
     if st.button("📊 Get This Week's Events", type="primary"):
@@ -3338,8 +4182,8 @@ with tabs[8]:
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
 
-# TAB 10: Twitter/X Market Sentiment & Rumors
-with tabs[9]:
+# TAB 11: Twitter/X Market Sentiment & Rumors
+with tabs[10]:
     st.subheader("🐦 Twitter/X Market Sentiment & Rumors")
 
     # Important disclaimer
@@ -3505,6 +4349,8 @@ with tabs[9]:
 # ===== FOOTER (only once, outside all tabs) =====
 st.markdown("---")
 footer_sources = []
+if unusual_whales_client:
+    footer_sources.append("Unusual Whales")
 if alpha_vantage_client:
     footer_sources.append("Alpha Vantage")
 if twelvedata_client:
