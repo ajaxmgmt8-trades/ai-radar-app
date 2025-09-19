@@ -117,8 +117,16 @@ class UnusualWhalesClient:
             return {"data": None, "error": str(e)}
     
     def get_stock_state(self, ticker: str) -> Dict:
-        """Get live stock quote"""
-        return self._make_request(f"/api/stock/{ticker}/stock-state")
+        """Get live stock quote using UW stock-state endpoint"""
+        endpoint = f"/api/stock/{ticker}/stock-state"
+        try:
+            url = f"{self.base_url}{endpoint}"
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            return {"data": data, "error": None}
+        except requests.exceptions.RequestException as e:
+            return {"data": None, "error": f"UW API Error: {str(e)}"}
     
     def get_options_volume(self, ticker: str) -> Dict:
         """Get options volume"""
@@ -426,7 +434,7 @@ twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 @st.cache_data(ttl=60)  # Cache for 60 seconds
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Get live stock quote using Unusual Whales first, then fallbacks
+    Get live stock quote using Unusual Whales stock-state first, then fallbacks
     """
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
@@ -438,29 +446,53 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             if not uw_response.get("error") and uw_response.get("data"):
                 data = uw_response["data"]
                 
-                # Extract UW data and format
-                current_price = float(data.get("price", 0)) if data.get("price") else 0
-                change = float(data.get("change", 0)) if data.get("change") else 0
-                change_percent = float(data.get("changesPercentage", 0)) if data.get("changesPercentage") else 0
-                volume = int(data.get("volume", 0)) if data.get("volume") else 0
+                # Parse UW stock-state response format
+                # The actual response format may vary, so we'll handle multiple possible structures
+                current_price = 0
+                change = 0
+                change_percent = 0
+                volume = 0
+                bid = 0
+                ask = 0
+                premarket_change = 0
+                afterhours_change = 0
+                previous_close = 0
+                market_open = 0
+                
+                # Try different possible field names that UW might use
+                if isinstance(data, dict):
+                    # Handle various possible response formats
+                    current_price = float(data.get("price", data.get("last", data.get("currentPrice", 0))))
+                    change = float(data.get("change", data.get("priceChange", 0)))
+                    change_percent = float(data.get("changePercent", data.get("changesPercentage", data.get("percentChange", 0))))
+                    volume = int(data.get("volume", data.get("dayVolume", 0)))
+                    bid = float(data.get("bid", data.get("bidPrice", current_price - 0.01)))
+                    ask = float(data.get("ask", data.get("askPrice", current_price + 0.01)))
+                    premarket_change = float(data.get("preMarketChangePercent", data.get("preMarketChange", 0)))
+                    afterhours_change = float(data.get("afterHoursChangePercent", data.get("afterHoursChange", 0)))
+                    previous_close = float(data.get("previousClose", data.get("prevClose", current_price - change)))
+                    market_open = float(data.get("open", data.get("openPrice", current_price)))
                 
                 if current_price > 0:
                     return {
                         "last": current_price,
-                        "bid": float(data.get("bid", current_price - 0.01)),
-                        "ask": float(data.get("ask", current_price + 0.01)),
+                        "bid": bid,
+                        "ask": ask,
                         "volume": volume,
                         "change": change,
                         "change_percent": change_percent,
-                        "premarket_change": float(data.get("preMarketChange", 0)),
-                        "intraday_change": change_percent,
-                        "postmarket_change": float(data.get("afterHoursChange", 0)),
-                        "previous_close": float(data.get("previousClose", current_price - change)),
-                        "market_open": float(data.get("open", current_price)),
+                        "premarket_change": premarket_change,
+                        "intraday_change": change_percent,  # Use main change for intraday
+                        "postmarket_change": afterhours_change,
+                        "previous_close": previous_close,
+                        "market_open": market_open,
                         "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
                         "data_source": "Unusual Whales",
-                        "error": None
+                        "error": None,
+                        "raw_uw_data": data  # Include raw data for debugging
                     }
+                else:
+                    print(f"UW returned zero price for {ticker}, falling back to other sources")
         except Exception as e:
             print(f"Unusual Whales error for {ticker}: {str(e)}")
     
