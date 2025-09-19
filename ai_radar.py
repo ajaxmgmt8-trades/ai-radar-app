@@ -1,11 +1,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-UNUSUAL_WHALES_KEY = st.secrets['UNUSUAL_WHALES_KEY']
-HEADERS = {
-    'Authorization': f'Bearer {UNUSUAL_WHALES_KEY}',
-    'accept': 'application/json, text/plain'
-}
 import datetime
 import json
 import plotly.graph_objects as go
@@ -69,6 +64,7 @@ try:
     GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
     ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
+    UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
 
     # Initialize AI clients
     openai_client = None
@@ -139,6 +135,248 @@ class GrokClient:
         
 # Initialize enhanced Grok client
 grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
+
+# ===== ENHANCED UNUSUAL WHALES API CLIENT =====
+class UnusualWhalesClient:
+    """Enhanced Unusual Whales client optimized with specific endpoints"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://api.unusualwhales.com"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "accept": "application/json, text/plain",
+            "User-Agent": "AI-Radar-Pro/2.1"
+        })
+        
+        # Optimized endpoints from CSV
+        self.endpoints = {
+            "quote": "/api/stock/{symbol}/quote",
+            "stock_state": "/api/stock/{symbol}/stock-state", 
+            "options_flow": "/api/stock/{symbol}/options-flow",
+            "options_contracts": "/api/stock/{symbol}/options-contracts",
+            "insider_trading": "/api/stock/{symbol}/insider-trading",
+            "institutional_holdings": "/api/stock/{symbol}/institutional-holdings",
+            "earnings": "/api/stock/{symbol}/earnings",
+            "splits": "/api/stock/{symbol}/splits",
+            "analyst_ratings": "/api/stock/{symbol}/analyst-ratings",
+            "social_sentiment": "/api/stock/{symbol}/social-sentiment",
+            "technical_analysis": "/api/stock/{symbol}/technical-analysis",
+            "market_overview": "/api/market/overview",
+            "sector_performance": "/api/market/sectors",
+            "trending_tickers": "/api/market/trending-tickers"
+        }
+    
+    def get_quote(self, symbol: str) -> Dict:
+        """Get stock quote using optimized UW quote endpoint"""
+        try:
+            # Try primary quote endpoint first
+            url = f"{self.base_url}{self.endpoints['quote'].format(symbol=symbol.upper())}"
+            response = self._make_request(url)
+            
+            if response and not response.get("error"):
+                return self._format_quote_response(response, symbol)
+            
+            # Fallback to stock-state endpoint
+            url = f"{self.base_url}{self.endpoints['stock_state'].format(symbol=symbol.upper())}"
+            response = self._make_request(url)
+            
+            if response and not response.get("error"):
+                return self._format_stock_state_response(response, symbol)
+            
+            return {"error": f"UW: No valid quote data for {symbol}", "data_source": "🐋 Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def get_options_flow(self, symbol: str, limit: int = 100) -> Dict:
+        """Get options flow data"""
+        try:
+            url = f"{self.base_url}{self.endpoints['options_flow'].format(symbol=symbol.upper())}"
+            params = {"limit": limit}
+            response = self._make_request(url, params)
+            
+            if response and not response.get("error"):
+                return {"data": response, "error": None, "data_source": "🐋 Unusual Whales"}
+            
+            return {"error": f"UW: No options flow data for {symbol}", "data_source": "🐋 Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW options flow error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def get_social_sentiment(self, symbol: str) -> Dict:
+        """Get social sentiment data"""
+        try:
+            url = f"{self.base_url}{self.endpoints['social_sentiment'].format(symbol=symbol.upper())}"
+            response = self._make_request(url)
+            
+            if response and not response.get("error"):
+                return {"data": response, "error": None, "data_source": "🐋 Unusual Whales"}
+            
+            return {"error": f"UW: No social sentiment data for {symbol}", "data_source": "🐋 Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW social sentiment error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def get_market_overview(self) -> Dict:
+        """Get market overview"""
+        try:
+            url = f"{self.base_url}{self.endpoints['market_overview']}"
+            response = self._make_request(url)
+            
+            if response and not response.get("error"):
+                return {"data": response, "error": None, "data_source": "🐋 Unusual Whales"}
+            
+            return {"error": "UW: No market overview data", "data_source": "🐋 Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW market overview error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def get_trending_tickers(self, limit: int = 20) -> Dict:
+        """Get trending tickers"""
+        try:
+            url = f"{self.base_url}{self.endpoints['trending_tickers']}"
+            params = {"limit": limit}
+            response = self._make_request(url, params)
+            
+            if response and not response.get("error"):
+                return {"data": response, "error": None, "data_source": "🐋 Unusual Whales"}
+            
+            return {"error": "UW: No trending tickers data", "data_source": "🐋 Unusual Whales"}
+            
+        except Exception as e:
+            return {"error": f"UW trending tickers error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def _make_request(self, url: str, params: Dict = None) -> Dict:
+        """Make HTTP request with error handling"""
+        try:
+            response = self.session.get(url, params=params, timeout=10)
+            
+            if response.status_code == 429:
+                return {"error": "Rate limited", "status_code": 429}
+            
+            if response.status_code != 200:
+                return {"error": f"API error {response.status_code}", "status_code": response.status_code}
+            
+            return response.json()
+            
+        except requests.exceptions.Timeout:
+            return {"error": "Request timeout"}
+        except requests.exceptions.RequestException as e:
+            return {"error": f"Connection error: {str(e)}"}
+        except json.JSONDecodeError:
+            return {"error": "Invalid JSON response"}
+    
+    def _format_quote_response(self, data: Dict, symbol: str) -> Dict:
+        """Format quote endpoint response"""
+        try:
+            quote_data = data.get("data", data)
+            
+            last_price = self._safe_float(quote_data.get("last", quote_data.get("price", 0)))
+            if not last_price or last_price <= 0:
+                return {"error": f"Invalid price data for {symbol}", "data_source": "🐋 Unusual Whales"}
+            
+            open_price = self._safe_float(quote_data.get("open", last_price))
+            high_price = self._safe_float(quote_data.get("high", last_price))
+            low_price = self._safe_float(quote_data.get("low", last_price))
+            volume = self._safe_int(quote_data.get("volume", 0))
+            prev_close = self._safe_float(quote_data.get("previous_close", quote_data.get("prev_close", last_price)))
+            
+            change_dollar = last_price - prev_close if prev_close > 0 else 0
+            change_percent = (change_dollar / prev_close * 100) if prev_close > 0 else 0
+            
+            return {
+                "last": float(last_price),
+                "bid": self._safe_float(quote_data.get("bid", last_price - 0.01)),
+                "ask": self._safe_float(quote_data.get("ask", last_price + 0.01)),
+                "volume": int(volume),
+                "change": float(change_dollar),
+                "change_percent": float(change_percent),
+                "premarket_change": self._safe_float(quote_data.get("premarket_change", 0)),
+                "intraday_change": float(change_percent),
+                "postmarket_change": self._safe_float(quote_data.get("afterhours_change", 0)),
+                "previous_close": float(prev_close),
+                "market_open": float(open_price),
+                "last_updated": datetime.datetime.now().isoformat(),
+                "error": None,
+                "data_source": "🐋 Unusual Whales"
+            }
+            
+        except Exception as e:
+            return {"error": f"UW quote formatting error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def _format_stock_state_response(self, data: Dict, symbol: str) -> Dict:
+        """Format stock-state endpoint response (fallback)"""
+        try:
+            # Handle nested data structure if present
+            if isinstance(data, dict) and 'data' in data:
+                stock_data = data['data']
+            else:
+                stock_data = data
+            
+            # Extract price - UW typically has 'price' or 'last' field
+            last_price = None
+            for field in ['price', 'last', 'current_price', 'close']:
+                if field in stock_data and stock_data[field] is not None:
+                    try:
+                        last_price = float(stock_data[field])
+                        if last_price > 0:
+                            break
+                    except (ValueError, TypeError):
+                        continue
+            
+            if not last_price or last_price <= 0:
+                return {"error": f"Invalid price data for {symbol}", "data_source": "🐋 Unusual Whales"}
+            
+            # Extract other fields with fallbacks
+            open_price = self._safe_float(stock_data.get('open', stock_data.get('open_price', last_price)))
+            high_price = self._safe_float(stock_data.get('high', stock_data.get('day_high', last_price)))
+            low_price = self._safe_float(stock_data.get('low', stock_data.get('day_low', last_price)))
+            volume = self._safe_int(stock_data.get('volume', stock_data.get('day_volume', 0)))
+            prev_close = self._safe_float(stock_data.get('previous_close', stock_data.get('prev_close', last_price)))
+            
+            # Calculate changes
+            change_dollar = last_price - prev_close if prev_close > 0 else 0
+            change_percent = (change_dollar / prev_close * 100) if prev_close > 0 else 0
+            
+            # Session changes (simplified - UW may have more detailed session data)
+            premarket_change = self._safe_float(stock_data.get('premarket_change', 0))
+            postmarket_change = self._safe_float(stock_data.get('afterhours_change', 0))
+            
+            return {
+                "last": float(last_price),
+                "bid": float(last_price - 0.01),  # UW may have actual bid/ask
+                "ask": float(last_price + 0.01),  # UW may have actual bid/ask
+                "volume": int(volume),
+                "change": float(change_dollar),
+                "change_percent": float(change_percent),
+                "premarket_change": float(premarket_change),
+                "intraday_change": float(change_percent),
+                "postmarket_change": float(postmarket_change),
+                "previous_close": float(prev_close),
+                "market_open": float(open_price),
+                "last_updated": datetime.datetime.now().isoformat(),
+                "error": None,
+                "data_source": "🐋 Unusual Whales"
+            }
+            
+        except Exception as e:
+            return {"error": f"UW stock-state formatting error: {str(e)}", "data_source": "🐋 Unusual Whales"}
+    
+    def _safe_float(self, value) -> float:
+        """Safely convert value to float"""
+        try:
+            return float(value) if value is not None else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+    
+    def _safe_int(self, value) -> int:
+        """Safely convert value to int"""
+        try:
+            return int(value) if value is not None else 0
+        except (ValueError, TypeError):
+            return 0
 
 # Alpha Vantage Client
 class AlphaVantageClient:
@@ -295,7 +533,8 @@ class TwelveDataClient:
         except Exception as e:
             return {"error": f"Twelve Data error: {str(e)}", "data_source": "Twelve Data"}
 
-# Initialize data clients
+# Initialize data clients with enhanced UW
+unusual_whales_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
 alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 
@@ -1127,24 +1366,24 @@ class MultiAIAnalyzer:
 # Initialize Multi-AI Analyzer
 multi_ai = MultiAIAnalyzer()
 
-# Enhanced primary data function - Alpha Vantage/Twelve Data first, Yahoo Finance fallback
+# Enhanced primary data function - UW → Twelve Data → Alpha Vantage → Yahoo Finance fallback
 @st.cache_data(ttl=60)  # Cache for 60 seconds
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Get live stock quote using Alpha Vantage/Twelve Data first, then Yahoo Finance fallback
+    Get live stock quote using UW first, then Twelve Data, Alpha Vantage, then Yahoo Finance fallback
     """
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
     
-    # Try Alpha Vantage first (if available)
-    if alpha_vantage_client:
+    # Try Enhanced Unusual Whales first (if available)
+    if unusual_whales_client:
         try:
-            alpha_quote = alpha_vantage_client.get_quote(ticker)
-            if not alpha_quote.get("error") and alpha_quote.get("last", 0) > 0:
-                alpha_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
-                return alpha_quote
+            uw_quote = unusual_whales_client.get_quote(ticker)
+            if not uw_quote.get("error") and uw_quote.get("last", 0) > 0:
+                uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                return uw_quote
         except Exception as e:
-            print(f"Alpha Vantage error for {ticker}: {str(e)}")
+            print(f"Enhanced Unusual Whales error for {ticker}: {str(e)}")
     
     # Try Twelve Data second (if available)
     if twelvedata_client:
@@ -1155,6 +1394,16 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
                 return twelve_quote
         except Exception as e:
             print(f"Twelve Data error for {ticker}: {str(e)}")
+    
+    # Try Alpha Vantage third (if available)
+    if alpha_vantage_client:
+        try:
+            alpha_quote = alpha_vantage_client.get_quote(ticker)
+            if not alpha_quote.get("error") and alpha_quote.get("last", 0) > 0:
+                alpha_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                return alpha_quote
+        except Exception as e:
+            print(f"Alpha Vantage error for {ticker}: {str(e)}")
     
     # Fall back to Yahoo Finance
     try:
@@ -2172,7 +2421,7 @@ def get_important_events() -> List[Dict]:
         return []
 
 # Main app
-st.title("🔥 AI Radar Pro — Live Trading Assistant")
+st.title("🔥 AI Radar Pro – Live Trading Assistant")
 
 # Timezone toggle (made smaller with column and smaller font)
 col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
@@ -2217,11 +2466,11 @@ if twelvedata_client:
     available_sources.append("Twelve Data")
 st.session_state.data_source = st.sidebar.selectbox("Select Data Source", available_sources, index=available_sources.index(st.session_state.data_source))
 
-# Data source status
+# Enhanced data source status with new UW endpoints
 st.sidebar.subheader("Data Sources")
 
 # Debug toggle and API test
-debug_mode = st.sidebar.checkbox("🐛 Debug Mode", help="Show API response details")
+debug_mode = st.sidebar.checkbox("🛠 Debug Mode", help="Show API response details")
 st.session_state.debug_mode = debug_mode
 
 if debug_mode:
@@ -2244,11 +2493,27 @@ if debug_mode:
             opt_result = get_advanced_options_analysis(debug_ticker)
             st.write(f"Options: {'✅' if not opt_result.get('error') else '❌'}")
             
+            if unusual_whales_client:
+                # Test UW enhanced endpoints
+                st.write("**Testing UW Enhanced:**")
+                uw_quote = unusual_whales_client.get_quote(debug_ticker)
+                st.write(f"UW Quote: {'✅' if not uw_quote.get('error') else '❌'}")
+                
+                uw_flow = unusual_whales_client.get_options_flow(debug_ticker, 50)
+                st.write(f"UW Flow: {'✅' if not uw_flow.get('error') else '❌'}")
+            
             if st.checkbox("Show Raw Data"):
                 st.json({"tech": tech_result, "fund": fund_result, "opts": opt_result})
 
 if debug_mode and st.sidebar.button("🧪 Test All APIs"):
-    st.sidebar.write("**Testing Data APIs:**")
+    st.sidebar.write("**Testing Enhanced Data APIs:**")
+    if unusual_whales_client:
+        with st.spinner("Testing Enhanced Unusual Whales API..."):
+            test_response = unusual_whales_client.get_quote("AAPL")
+            st.sidebar.write(f"UW Quote: {'✅' if not test_response.get('error') else '❌'}")
+            if st.sidebar.checkbox("Show UW Response"):
+                st.sidebar.json(test_response)
+    
     if twelvedata_client:
         with st.spinner("Testing Twelve Data API..."):
             test_response = twelvedata_client.get_quote("AAPL")
@@ -2269,9 +2534,16 @@ if debug_mode and st.sidebar.button("🧪 Test All APIs"):
         grok_test = multi_ai.analyze_with_grok(test_prompt)
         st.sidebar.write(f"Grok: {grok_test[:50]}...")
 
-# Show available data sources
+# Show enhanced data sources with UW optimizations
+if unusual_whales_client:
+    st.sidebar.success("✅ Enhanced Unusual Whales Connected (Primary)")
+    if debug_mode:
+        st.sidebar.caption("• Optimized endpoints: quote, options-flow, social-sentiment")
+else:
+    st.sidebar.warning("⚠️ Unusual Whales Not Connected")
+
 if twelvedata_client:
-    st.sidebar.success("✅ Twelve Data Connected (Primary)")
+    st.sidebar.success("✅ Twelve Data Connected")
 else:
     st.sidebar.warning("⚠️ Twelve Data Not Connected")
 
@@ -2280,7 +2552,7 @@ if alpha_vantage_client:
 else:
     st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
 
-st.sidebar.success("✅ Yahoo Finance Connected")
+st.sidebar.success("✅ Yahoo Finance Connected (Last Resort)")
 
 if FINNHUB_KEY:
     st.sidebar.success("✅ Finnhub API Connected")
@@ -2312,17 +2584,19 @@ with col4:
     st.write(f"**{status}** | {current_time} {tz_label}")
 
 # Create tabs
-tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌐 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
+tabs = st.tabs(["📊 Live Quotes", "📋 Watchlist Manager", "🔥 Catalyst Scanner", "📈 Market Analysis", "🤖 AI Playbooks", "🌍 Sector/ETF Tracking", "🎲 0DTE & Lottos", "🗓️ Earnings Plays", "📰 Important News","🐦 Twitter/X Market Sentiment & Rumors"])
 
 # Global timestamp
 data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}"
 data_sources = []
-if alpha_vantage_client:
-    data_sources.append("Alpha Vantage")
+if unusual_whales_client:
+    data_sources.append("🐋 Enhanced Unusual Whales")
 if twelvedata_client:
     data_sources.append("Twelve Data")
+if alpha_vantage_client:
+    data_sources.append("Alpha Vantage")
 data_sources.append("Yahoo Finance")
-data_source_info = " + ".join(data_sources)
+data_source_info = " → ".join(data_sources)
 
 # AI model info
 ai_info = f"AI: {st.session_state.ai_model}"
@@ -2587,6 +2861,7 @@ with tabs[1]:
                         current_tickers.remove(ticker)
                         st.session_state.watchlists[st.session_state.active_watchlist] = current_tickers
                         st.rerun()
+
 # TAB 3: Enhanced Catalyst Scanner
 with tabs[2]:
     st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
@@ -2708,7 +2983,7 @@ with tabs[2]:
                 st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
     # Main market catalyst scan
-    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
+    st.markdown("### 🌍 Market-Wide Catalyst Scanner")
     
     scan_col1, scan_col2 = st.columns([2, 1])
     with scan_col1:
@@ -2950,7 +3225,7 @@ with tabs[3]:
                 for news in news_items[:3]:
                     st.write(f"• {news['title']}")
 
-# TAB 5: AI Playbooks
+# TAB 5: AI Playbooks - WITH HORIZONTAL LAYOUT FIX
 with tabs[4]:
     st.subheader("🤖 AI Trading Playbooks")
     
@@ -2973,7 +3248,7 @@ with tabs[4]:
                     for i, play in enumerate(auto_plays):
                         with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Yahoo Finance')}"):
                             
-                            # Display session data
+                            # Display session data horizontally
                             sess_col1, sess_col2, sess_col3 = st.columns(3)
                             sess_col1.metric("Premarket", f"{play['session_data']['premarket']:+.2f}%")
                             sess_col2.metric("Intraday", f"{play['session_data']['intraday']:+.2f}%")
@@ -2983,10 +3258,14 @@ with tabs[4]:
                             if play['catalyst']:
                                 st.write(f"**Catalyst:** {play['catalyst']}")
                             
-                            # Display enhanced summaries
-                            st.write(f"**Technical:** {play['technical_summary']}")
-                            st.write(f"**Fundamental:** {play['fundamental_summary']}")
-                            st.write(f"**Options:** {play['options_summary']}")
+                            # 🔥 HORIZONTAL LAYOUT FIX APPLIED HERE 🔥
+                            # Display enhanced summaries horizontally
+                            summary_col1, summary_col2, summary_col3 = st.columns(3)
+                            summary_col1.write(f"**Technical:** {play['technical_summary']}")
+                            summary_col2.write(f"**Fundamental:** {play['fundamental_summary']}")
+                            summary_col3.write(f"**Options:** {play['options_summary']}")
+                            
+                            # Significance score in a separate row
                             st.write(f"**Significance Score:** {play['significance_score']:.2f}")
                             
                             # Display AI play analysis
@@ -3119,7 +3398,7 @@ with tabs[4]:
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
-    st.subheader("🌐 Sector/ETF Tracking")
+    st.subheader("🌍 Sector/ETF Tracking")
 
     # Add search and add functionality
     st.markdown("### 🔍 Search & Add ETFs")
@@ -3190,7 +3469,7 @@ with tabs[6]:
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
-        current_price = quote['last']  # Use from quote, which prefers Twelve Data
+        current_price = quote['last']  # Use from quote, which prefers UW
         expiration = option_chain["expiration"]
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         st.markdown(f"**Option Chain for {selected_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
@@ -3510,12 +3789,14 @@ with tabs[9]:
 # ===== FOOTER (only once, outside all tabs) =====
 st.markdown("---")
 footer_sources = []
-if alpha_vantage_client:
-    footer_sources.append("Alpha Vantage")
+if unusual_whales_client:
+    footer_sources.append("🐋 Enhanced Unusual Whales")
 if twelvedata_client:
     footer_sources.append("Twelve Data")
+if alpha_vantage_client:
+    footer_sources.append("Alpha Vantage")
 footer_sources.append("Yahoo Finance")
-footer_text = " + ".join(footer_sources)
+footer_text = " → ".join(footer_sources)
 
 available_ai_models = multi_ai.get_available_models()
 ai_footer = f"AI: {st.session_state.ai_model}"
@@ -3524,8 +3805,7 @@ if st.session_state.ai_model == "Multi-AI" and available_ai_models:
 
 st.markdown(
     f"<div style='text-align: center; color: #666;'>"
-    f"🔥 AI Radar Pro | Data: {footer_text} | {ai_footer}"
+    f"🔥 AI Radar Pro | Data Hierarchy: {footer_text} | {ai_footer}"
     "</div>",
     unsafe_allow_html=True
 )
-
