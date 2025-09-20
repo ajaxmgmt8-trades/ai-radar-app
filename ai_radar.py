@@ -13,6 +13,19 @@ from zoneinfo import ZoneInfo  # For timezone support
 import google.generativeai as genai
 import openai
 import concurrent.futures
+# === Initialize Unusual Whales Client ===
+import os
+from unusual_whales_client import UnusualWhalesClient
+
+UNUSUAL_WHALES_KEY = os.getenv("UNUSUAL_WHALES_KEY", "9d6447d3-9bd0-454a-870d-56bf3e9a8bf0")
+
+try:
+    unusual_whales_client = UnusualWhalesClient(api_key=UNUSUAL_WHALES_KEY)
+except Exception as e:
+    unusual_whales_client = None
+    print(f"Failed to initialize UW client: {e}")
+
+
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
