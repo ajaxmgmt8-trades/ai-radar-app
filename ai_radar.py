@@ -2021,7 +2021,8 @@ def assess_valuation(fundamentals: Dict) -> str:
         return "Fairly Valued"
 
 # =============================================================================
-# ENHANCED OPTIONS ANALYSIS WITH UW DATA
+# UNUSUAL WHALES API CLIENT - PRIMARY DATA SOURCE
+# ============================================================================= ENHANCED OPTIONS ANALYSIS WITH UW DATA
 # =============================================================================
 
 def get_enhanced_options_analysis(ticker: str) -> Dict:
