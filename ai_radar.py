@@ -17,6 +17,19 @@ import concurrent.futures
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
+# --- UW LIVE TEST ---
+st.sidebar.subheader("🔌 UW Connection Test")
+if unusual_whales_client:
+    try:
+        test_data = unusual_whales_client.get_lottos("all")
+        st.sidebar.success("✅ UW connected")
+        st.sidebar.write(test_data[:3])  # show first 3 results
+    except Exception as e:
+        st.sidebar.error(f"❌ UW error: {e}")
+else:
+    st.sidebar.error("UW client not initialized")
+
+
 # Core tickers for selection
 CORE_TICKERS = [
     "AAPL","NVDA","TSLA","SPY","AMD","MSFT","META","ORCL","MDB","GOOG",
@@ -7141,4 +7154,3 @@ def check_big_flow_alerts(data, threshold=1_000_000):
 
 # === ☁️ DEPLOYMENT HINT ===
 st.caption("📡 To deploy this app: run `streamlit run ai_radar_uw_pro.py` on Streamlit Cloud, Render, or a container.")
-
