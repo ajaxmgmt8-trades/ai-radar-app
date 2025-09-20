@@ -124,33 +124,57 @@ class UnusualWhalesClient:
     # STOCK DATA METHODS
     # =================================================================
     
-    def get_stock_quote(self, ticker: str) -> Dict:
-        """Get basic stock quote (using screener endpoint)"""
-        today = datetime.date.today().isoformat()
-        endpoint = "/api/screener/stocks"
-        params = {"ticker": ticker, "date": today}
+    def get_stock_state(self, ticker: str) -> Dict:
+        """Get real-time stock state using UW stock-state endpoint"""
+        endpoint = f"/api/stock/{ticker}/stock-state"
         
-        result = self._make_request(endpoint, params)
+        result = self._make_request(endpoint)
         if result["error"]:
             return {"error": result["error"]}
         
         try:
             data = result["data"]
-            if data and len(data) > 0:
-                stock_data = data[0]  # Get first result
+            if data and isinstance(data, dict):
+                # Parse UW stock state response
+                close = float(data.get("close", 0))
+                open_price = float(data.get("open", close))
+                high = float(data.get("high", close))
+                low = float(data.get("low", close))
+                volume = int(data.get("volume", 0))
+                total_volume = int(data.get("total_volume", volume))
+                prev_close = float(data.get("prev_close", close))
+                market_time = data.get("market_time", "market")
+                
+                # Calculate changes
+                change_dollar = close - prev_close
+                change_percent = ((close - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                
+                # Estimate bid/ask spread (UW doesn't provide this in stock-state)
+                spread_estimate = (high - low) * 0.1  # Estimate as 10% of daily range
+                bid_estimate = close - (spread_estimate / 2)
+                ask_estimate = close + (spread_estimate / 2)
+                
                 return {
-                    "last": stock_data.get("price", 0),
-                    "change": stock_data.get("change", 0),
-                    "change_percent": stock_data.get("change_percent", 0),
-                    "volume": stock_data.get("volume", 0),
-                    "market_cap": stock_data.get("market_cap", 0),
+                    "last": close,
+                    "bid": bid_estimate,
+                    "ask": ask_estimate,
+                    "volume": volume,
+                    "total_volume": total_volume,
+                    "change": change_dollar,
+                    "change_percent": change_percent,
+                    "open": open_price,
+                    "high": high,
+                    "low": low,
+                    "previous_close": prev_close,
+                    "market_time": market_time,
+                    "tape_time": data.get("tape_time", ""),
                     "data_source": "Unusual Whales",
                     "error": None
                 }
             else:
-                return {"error": "No data found for ticker"}
+                return {"error": "No stock state data found for ticker"}
         except Exception as e:
-            return {"error": f"Error parsing stock data: {str(e)}"}
+            return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
         """Get options flow alerts"""
@@ -1245,16 +1269,16 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
     
-    # Try Unusual Whales first (primary data source)
+    # Try Unusual Whales first (primary data source using stock-state endpoint)
     if uw_client:
         try:
-            uw_quote = uw_client.get_stock_quote(ticker)
+            uw_quote = uw_client.get_stock_state(ticker)
             if not uw_quote.get("error") and uw_quote.get("last", 0) > 0:
-                # Enhance UW data with session tracking
-                enhanced_quote = enhance_uw_quote_with_sessions(uw_quote, ticker, tz_zone, tz_label)
+                # Enhance UW stock-state data with session tracking
+                enhanced_quote = enhance_uw_stock_state_with_sessions(uw_quote, ticker, tz_zone, tz_label)
                 return enhanced_quote
         except Exception as e:
-            print(f"UW error for {ticker}: {str(e)}")
+            print(f"UW stock-state error for {ticker}: {str(e)}")
     
     # Try Alpha Vantage second
     if alpha_vantage_client:
@@ -1372,58 +1396,58 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "data_source": "Yahoo Finance"
         }
 
-def enhance_uw_quote_with_sessions(uw_quote: Dict, ticker: str, tz_zone, tz_label: str) -> Dict:
-    """Enhance UW quote with session tracking data"""
+def enhance_uw_stock_state_with_sessions(uw_stock_state: Dict, ticker: str, tz_zone, tz_label: str) -> Dict:
+    """Enhance UW stock-state data with session tracking"""
     try:
-        # Use yfinance for session data if UW doesn't provide it
-        stock = yf.Ticker(ticker)
-        hist_1d = stock.history(period="1d", interval="1m", prepost=True)
+        # Extract UW stock-state data
+        current_price = uw_stock_state.get("last", 0)
+        open_price = uw_stock_state.get("open", current_price)
+        previous_close = uw_stock_state.get("previous_close", open_price)
+        market_time = uw_stock_state.get("market_time", "market")
         
+        # Calculate session changes based on UW data and market_time
         premarket_change = 0
-        intraday_change = uw_quote.get("change_percent", 0)  # Use UW intraday as default
+        intraday_change = 0
         postmarket_change = 0
         
-        if not hist_1d.empty:
-            try:
-                # Get session data from yfinance
-                hist_1d_tz = hist_1d.copy()
-                if hist_1d_tz.index.tz is None:
-                    hist_1d_tz.index = hist_1d_tz.index.tz_localize('America/New_York')
-                else:
-                    hist_1d_tz.index = hist_1d_tz.index.tz_convert('America/New_York')
-                
-                market_hours = hist_1d_tz.between_time('09:30', '16:00')
-                
-                if not market_hours.empty:
-                    market_open_price = market_hours['Open'].iloc[0]
-                    market_close_price = market_hours['Close'].iloc[-1]
-                    current_price = uw_quote.get("last", 0)
-                    
-                    # Calculate premarket change
-                    previous_close = hist_1d_tz['Close'].iloc[0] if len(hist_1d_tz) > 0 else market_open_price
-                    if previous_close and market_open_price:
-                        premarket_change = ((market_open_price - previous_close) / previous_close) * 100
-                    
-                    # After hours change
-                    current_hour = datetime.datetime.now(tz_zone).hour
-                    if (current_hour >= 16 or current_hour < 4) and current_price != market_close_price:
-                        postmarket_change = ((current_price - market_close_price) / market_close_price) * 100
-            except Exception:
-                pass
+        if market_time == "premarket":
+            # Currently in premarket
+            premarket_change = ((current_price - previous_close) / previous_close) * 100 if previous_close > 0 else 0
+            intraday_change = 0
+            postmarket_change = 0
+        elif market_time == "market":
+            # Currently in market hours
+            if open_price != previous_close:
+                premarket_change = ((open_price - previous_close) / previous_close) * 100 if previous_close > 0 else 0
+            intraday_change = ((current_price - open_price) / open_price) * 100 if open_price > 0 else 0
+            postmarket_change = 0
+        elif market_time == "postmarket":
+            # Currently in after hours
+            if open_price != previous_close:
+                premarket_change = ((open_price - previous_close) / previous_close) * 100 if previous_close > 0 else 0
+            # Assume market close was same as open for simplification (could enhance with more data)
+            intraday_change = ((open_price - open_price) / open_price) * 100 if open_price > 0 else 0
+            postmarket_change = ((current_price - open_price) / open_price) * 100 if open_price > 0 else 0
         
-        # Enhance UW quote with session data
+        # Enhance UW stock-state with session data
         enhanced_quote = {
-            "last": uw_quote.get("last", 0),
-            "bid": uw_quote.get("last", 0) - 0.01,  # Approximate
-            "ask": uw_quote.get("last", 0) + 0.01,  # Approximate
-            "volume": uw_quote.get("volume", 0),
-            "change": uw_quote.get("change", 0),
-            "change_percent": uw_quote.get("change_percent", 0),
+            "last": current_price,
+            "bid": uw_stock_state.get("bid", current_price - 0.01),
+            "ask": uw_stock_state.get("ask", current_price + 0.01),
+            "volume": uw_stock_state.get("volume", 0),
+            "total_volume": uw_stock_state.get("total_volume", uw_stock_state.get("volume", 0)),
+            "change": uw_stock_state.get("change", 0),
+            "change_percent": uw_stock_state.get("change_percent", 0),
             "premarket_change": premarket_change,
             "intraday_change": intraday_change,
             "postmarket_change": postmarket_change,
-            "previous_close": uw_quote.get("last", 0) - uw_quote.get("change", 0),
-            "market_open": uw_quote.get("last", 0) - uw_quote.get("change", 0),
+            "previous_close": previous_close,
+            "market_open": open_price,
+            "open": open_price,
+            "high": uw_stock_state.get("high", current_price),
+            "low": uw_stock_state.get("low", current_price),
+            "market_time": market_time,
+            "tape_time": uw_stock_state.get("tape_time", ""),
             "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": None,
             "data_source": "Unusual Whales"
@@ -1433,9 +1457,12 @@ def enhance_uw_quote_with_sessions(uw_quote: Dict, ticker: str, tz_zone, tz_labe
         
     except Exception as e:
         # Return basic UW quote if enhancement fails
-        uw_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
-        uw_quote["data_source"] = "Unusual Whales"
-        return uw_quote
+        uw_stock_state["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+        uw_stock_state["data_source"] = "Unusual Whales"
+        uw_stock_state.setdefault("premarket_change", 0)
+        uw_stock_state.setdefault("intraday_change", 0)
+        uw_stock_state.setdefault("postmarket_change", 0)
+        return uw_stock_state
 
 # =============================================================================
 # NEWS AND MARKET DATA WITH UW INTEGRATION
@@ -2205,23 +2232,54 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
         # Check if this is UW data or yfinance data
         if options.get("data_source") == "Unusual Whales":
             enhanced = options.get('enhanced_metrics', {})
-            options_summary += f"- Flow Alerts: {enhanced.get('total_flow_alerts', 'N/A')}\n"
-            options_summary += f"- Flow Sentiment: {enhanced.get('flow_sentiment', 'Neutral')}\n"
-            options_summary += f"- ATM P/C Ratio: {enhanced.get('atm_put_call_ratio', 'N/A'):.2f}\n"
-            options_summary += f"- Total Delta: {enhanced.get('total_delta', 'N/A')}\n"
-            options_summary += f"- Total Gamma: {enhanced.get('total_gamma', 'N/A')}\n"
-            options_summary += f"- Data Source: Unusual Whales (Premium)\n"
+            if enhanced:
+                options_summary += f"- Flow Alerts: {enhanced.get('total_flow_alerts', 'N/A')}\n"
+                options_summary += f"- Flow Sentiment: {enhanced.get('flow_sentiment', 'Neutral')}\n"
+                
+                # Safe handling of ATM P/C Ratio
+                atm_pc_ratio = enhanced.get('atm_put_call_ratio', None)
+                if atm_pc_ratio is not None and isinstance(atm_pc_ratio, (int, float)):
+                    options_summary += f"- ATM P/C Ratio: {atm_pc_ratio:.2f}\n"
+                else:
+                    options_summary += f"- ATM P/C Ratio: N/A\n"
+                
+                options_summary += f"- Total Delta: {enhanced.get('total_delta', 'N/A')}\n"
+                options_summary += f"- Total Gamma: {enhanced.get('total_gamma', 'N/A')}\n"
+                options_summary += f"- Data Source: Unusual Whales (Premium)\n"
+            else:
+                options_summary += f"- UW Data: No enhanced metrics available\n"
+                options_summary += f"- Data Source: Unusual Whales (Limited)\n"
         else:
             # Standard yfinance data
             basic = options.get('basic_metrics', {})
             flow = options.get('flow_analysis', {})
             unusual = options.get('unusual_activity', {})
-            options_summary += f"- Put/Call Ratio: {basic.get('put_call_volume_ratio', 0):.2f}\n"
-            options_summary += f"- Average IV: {basic.get('avg_call_iv', 0):.1f}%\n"
-            options_summary += f"- IV Skew: {basic.get('iv_skew', 0):.1f}%\n"
-            options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
-            options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
-            options_summary += f"- Total Volume: {basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0):,}\n"
+            if basic:
+                pc_ratio = basic.get('put_call_volume_ratio', 0)
+                if isinstance(pc_ratio, (int, float)):
+                    options_summary += f"- Put/Call Ratio: {pc_ratio:.2f}\n"
+                else:
+                    options_summary += f"- Put/Call Ratio: N/A\n"
+                
+                avg_iv = basic.get('avg_call_iv', 0)
+                if isinstance(avg_iv, (int, float)):
+                    options_summary += f"- Average IV: {avg_iv:.1f}%\n"
+                else:
+                    options_summary += f"- Average IV: N/A\n"
+                
+                iv_skew = basic.get('iv_skew', 0)
+                if isinstance(iv_skew, (int, float)):
+                    options_summary += f"- IV Skew: {iv_skew:.1f}%\n"
+                else:
+                    options_summary += f"- IV Skew: N/A\n"
+                
+                options_summary += f"- Flow Sentiment: {flow.get('flow_sentiment', 'Neutral')}\n"
+                options_summary += f"- Unusual Activity: {unusual.get('total_unusual_contracts', 0)} contracts\n"
+                
+                total_volume = basic.get('total_call_volume', 0) + basic.get('total_put_volume', 0)
+                options_summary += f"- Total Volume: {total_volume:,}\n"
+            else:
+                options_summary += f"- Options data: Limited metrics available\n"
     
     # Session data
     session_summary = f"""Session Performance:
