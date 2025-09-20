@@ -133,24 +133,29 @@ class UnusualWhalesClient:
             return {"error": result["error"]}
         
         try:
-            data = result["data"]
-            if data and isinstance(data, dict):
-                # Parse UW stock state response
-                close = float(data.get("close", 0))
-                open_price = float(data.get("open", close))
-                high = float(data.get("high", close))
-                low = float(data.get("low", close))
+            response_data = result["data"]
+            if response_data and "data" in response_data:
+                # Extract the actual data from the nested structure
+                data = response_data["data"]
+                
+                # Parse UW stock state response - all prices come as strings
+                close = float(data.get("close", "0"))
+                open_price = float(data.get("open", str(close)))
+                high = float(data.get("high", str(close)))
+                low = float(data.get("low", str(close)))
                 volume = int(data.get("volume", 0))
                 total_volume = int(data.get("total_volume", volume))
-                prev_close = float(data.get("prev_close", close))
+                prev_close = float(data.get("prev_close", str(close)))
                 market_time = data.get("market_time", "market")
+                tape_time = data.get("tape_time", "")
                 
                 # Calculate changes
                 change_dollar = close - prev_close
                 change_percent = ((close - prev_close) / prev_close * 100) if prev_close > 0 else 0
                 
-                # Estimate bid/ask spread (UW doesn't provide this in stock-state)
-                spread_estimate = (high - low) * 0.1  # Estimate as 10% of daily range
+                # Estimate bid/ask spread based on daily range
+                daily_range = high - low
+                spread_estimate = max(0.01, daily_range * 0.1)  # At least 1 cent, or 10% of daily range
                 bid_estimate = close - (spread_estimate / 2)
                 ask_estimate = close + (spread_estimate / 2)
                 
@@ -167,7 +172,7 @@ class UnusualWhalesClient:
                     "low": low,
                     "previous_close": prev_close,
                     "market_time": market_time,
-                    "tape_time": data.get("tape_time", ""),
+                    "tape_time": tape_time,
                     "data_source": "Unusual Whales",
                     "error": None
                 }
