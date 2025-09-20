@@ -2995,6 +2995,25 @@ with tabs[0]:
                 col2.metric("Bid/Ask", f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
                 col3.metric("Volume", f"{quote['volume']:,}")
                 
+                # Show UW-specific data if available
+                if quote.get('data_source') == 'Unusual Whales':
+                    col4.metric("Market Time", quote.get('market_time', 'Unknown'))
+                
+                # Extended UW data display
+                if quote.get('data_source') == 'Unusual Whales':
+                    st.markdown("#### 🔥 Unusual Whales Extended Data")
+                    uw_col1, uw_col2, uw_col3, uw_col4, uw_col5 = st.columns(5)
+                    uw_col1.metric("Open", f"${quote.get('open', 0):.2f}")
+                    uw_col2.metric("High", f"${quote.get('high', 0):.2f}")
+                    uw_col3.metric("Low", f"${quote.get('low', 0):.2f}")
+                    uw_col4.metric("Total Volume", f"{quote.get('total_volume', 0):,}")
+                    uw_col5.metric("Prev Close", f"${quote.get('previous_close', 0):.2f}")
+                    
+                    # Show tape time if available
+                    tape_time = quote.get('tape_time', '')
+                    if tape_time:
+                        st.caption(f"**Tape Time:** {tape_time}")
+                
                 # Session breakdown
                 st.markdown("#### Session Performance")
                 sess_col1, sess_col2, sess_col3 = st.columns(3)
@@ -3089,6 +3108,16 @@ with tabs[0]:
                 col3.caption(f"Updated: {quote['last_updated']}")
                 col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
+                # Show UW-specific data if available
+                if quote.get('data_source') == 'Unusual Whales':
+                    col4.write("**🔥 UW Data**")
+                    col4.write(f"Market Time: {quote.get('market_time', 'Unknown')}")
+                    col4.write(f"Total Vol: {quote.get('total_volume', 0):,}")
+                    col4.write(f"OHLC: {quote.get('open', 0):.2f}/{quote.get('high', 0):.2f}/{quote.get('low', 0):.2f}/{quote['last']:.2f}")
+                    tape_time = quote.get('tape_time', '')
+                    if tape_time:
+                        col4.caption(f"Tape: {tape_time[-8:]}")  # Show just the time part
+                
                 if abs(quote['change_percent']) >= 2.0:
                     if col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
                         with st.spinner(f"Analyzing {ticker}..."):
@@ -3105,6 +3134,10 @@ with tabs[0]:
                 sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
                 sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
                 sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
+                
+                # Show extended UW data in session row for UW sources
+                if quote.get('data_source') == 'Unusual Whales':
+                    sess_col4.caption(f"🔥 Prev Close: ${quote.get('previous_close', 0):.2f}")
                 
                 with st.expander(f"🔎 Expand {ticker}"):
                     news = get_finnhub_news(ticker)
@@ -3148,13 +3181,27 @@ with tabs[0]:
     for ticker in CORE_TICKERS[:20]:  # Limit to top 20 for performance
         quote = get_live_quote(ticker, tz_label)
         if not quote["error"]:
-            movers.append({
+            mover_data = {
                 "ticker": ticker,
                 "change_pct": quote["change_percent"],
                 "price": quote["last"],
                 "volume": quote["volume"],
                 "data_source": quote.get("data_source", "Yahoo Finance")
-            })
+            }
+            
+            # Add UW-specific fields if available
+            if quote.get('data_source') == 'Unusual Whales':
+                mover_data.update({
+                    "open": quote.get("open", 0),
+                    "high": quote.get("high", 0),
+                    "low": quote.get("low", 0),
+                    "total_volume": quote.get("total_volume", 0),
+                    "market_time": quote.get("market_time", "Unknown"),
+                    "tape_time": quote.get("tape_time", ""),
+                    "previous_close": quote.get("previous_close", 0)
+                })
+            
+            movers.append(mover_data)
     movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
     top_movers = movers[:10]  # Show top 10 movers
 
@@ -3163,10 +3210,24 @@ with tabs[0]:
             col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
             direction = "🚀" if mover["change_pct"] > 0 else "📉"
             col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
-            col2.write("**Bid/Ask**")
-            col2.write(f"N/A")  # Movers don't include bid/ask in this view
-            col3.write("**Volume**")
-            col3.write(f"{mover['volume']:,}")
+            
+            # Show enhanced data if from UW
+            if mover.get('data_source') == 'Unusual Whales':
+                col2.write("**🔥 UW OHLC**")
+                col2.write(f"O: ${mover.get('open', 0):.2f}")
+                col2.write(f"H: ${mover.get('high', 0):.2f}")
+                col2.write(f"L: ${mover.get('low', 0):.2f}")
+                
+                col3.write("**Volume/Total**")
+                col3.write(f"{mover['volume']:,}")
+                col3.write(f"Total: {mover.get('total_volume', 0):,}")
+                col3.caption(f"Market: {mover.get('market_time', 'Unknown')}")
+            else:
+                col2.write("**Bid/Ask**")
+                col2.write(f"N/A")  # Movers don't include bid/ask in this view
+                col3.write("**Volume**")
+                col3.write(f"{mover['volume']:,}")
+            
             col3.caption(f"Source: {mover['data_source']}")
             if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"quotes_mover_{mover['ticker']}"):
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
