@@ -3578,6 +3578,7 @@ with st.sidebar:
 
             prompt = f"User asked: '{user_query}'. Here's the recent flow for {ticker}. Analyze and summarize:
 {data}"
+{data}"
             result = multi_ai.multi_ai_consensus_enhanced(prompt)
             st.markdown(f"**LLM Response:**\n\n{result}")
         except Exception as e:
