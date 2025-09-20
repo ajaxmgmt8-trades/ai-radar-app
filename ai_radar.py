@@ -354,7 +354,7 @@ class UnusualWhalesClient:
         
         # Gather all relevant data
         data = {
-            "quote": self.get_stock_quote(ticker),
+            "quote": self.get_stock_state(ticker),
             "flow_alerts": self.get_stock_flow_recent(ticker),
             "greek_exposure": self.get_greek_exposure(ticker, today),
             "greek_by_expiry": self.get_greek_exposure_by_expiry(ticker, today),
