@@ -3577,7 +3577,6 @@ with st.sidebar:
             data = unusual_whales_client.get_stock_flow_recent(ticker=ticker)
 
             prompt = f"User asked: '{user_query}'. Here's the recent flow for {ticker}. Analyze and summarize:\n{data}"
-{data}"
             result = multi_ai.multi_ai_consensus_enhanced(prompt)
             st.markdown(f"**LLM Response:**\n\n{result}")
         except Exception as e:
