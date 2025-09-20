@@ -35,7 +35,7 @@ ETF_TICKERS = [
     "SPX", "NDX", "IWM", "IWF", "HOOY", "MSTY", "NVDY", "CONY"
 ]
 
-# Initialize session state
+# Initialize session state for live updates
 if "watchlists" not in st.session_state:
     st.session_state.watchlists = {"Default": ["AAPL", "NVDA", "TSLA", "SPY", "AMD", "MSFT"]}
 if "active_watchlist" not in st.session_state:
@@ -54,6 +54,12 @@ if "data_source" not in st.session_state:
     st.session_state.data_source = "Unusual Whales"  # Primary data source now UW
 if "ai_model" not in st.session_state:
     st.session_state.ai_model = "Multi-AI"  # Default to multi-AI
+if "live_data" not in st.session_state:
+    st.session_state.live_data = {}
+if "live_containers" not in st.session_state:
+    st.session_state.live_containers = {}
+if "last_update" not in st.session_state:
+    st.session_state.last_update = time.time()
 
 # API Keys
 try:
@@ -196,16 +202,18 @@ if debug_mode:
             enhanced_opts = get_enhanced_options_analysis(debug_ticker)
             st.write(f"Enhanced Options: {'✅' if not enhanced_opts.get('error') else '❌'}")
 
-# Auto-refresh controls
+# Auto-refresh controls with live updates
 col1, col2, col3, col4 = st.columns([2, 1, 1, 2])
 with col1:
-    st.session_state.auto_refresh = st.checkbox("🔄 Auto Refresh", value=st.session_state.auto_refresh)
+    st.session_state.auto_refresh = st.checkbox("Auto Refresh (Live)", value=st.session_state.auto_refresh)
 
 with col2:
-    st.session_state.refresh_interval = st.selectbox("Interval", [10, 30, 60], index=1)
+    st.session_state.refresh_interval = st.selectbox("Interval", [5, 10, 30, 60], index=0)
 
 with col3:
-    if st.button("🔄 Refresh Now"):
+    if st.button("Refresh Now"):
+        # Clear live data to force refresh
+        st.session_state.live_data = {}
         st.cache_data.clear()
         st.rerun()
 
@@ -214,6 +222,26 @@ with col4:
     market_open = 9 <= current_tz.hour < 16
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time} {tz_label}")
+
+# Auto-refresh trigger for live updates
+if st.session_state.auto_refresh:
+    # Use a placeholder to trigger updates without full refresh
+    auto_refresh_placeholder = st.empty()
+    
+    # JavaScript-based auto refresh (works in browser)
+    auto_refresh_placeholder.markdown(f"""
+    <script>
+    setTimeout(function(){{
+        // Only refresh if page is visible (not in background tab)
+        if (!document.hidden) {{
+            // Trigger Streamlit rerun by clicking a hidden button
+            const event = new Event('click');
+            const refreshBtn = parent.document.querySelector('[data-testid="stButton"] button');
+            if (refreshBtn) refreshBtn.click();
+        }}
+    }}, {st.session_state.refresh_interval * 1000});
+    </script>
+    """, unsafe_allow_html=True)
 
 # Create tabs - Updated with new Options Flow tab and renamed 0DTE tab
 tabs = st.tabs([
@@ -369,19 +397,32 @@ with tabs[0]:
             else:
                 st.error(f"Could not get quote for {search_ticker}: {quote['error']}")
     
-    # Watchlist display
+    # Watchlist display with live updates
     tickers = st.session_state.watchlists[st.session_state.active_watchlist]
     st.markdown("### Your Watchlist")
     if not tickers:
         st.warning("No symbols in watchlist. Add some in the Watchlist Manager tab or check Market Movers below.")
     else:
+        # Initialize live data for watchlist
         for ticker in tickers:
-            quote = get_live_quote(ticker, tz_label)
-            if quote["error"]:
-                st.error(f"{ticker}: {quote['error']}")
+            if ticker not in st.session_state.live_data:
+                st.session_state.live_data[ticker] = get_live_quote(ticker, tz_label)
+        
+        # Display watchlist with live containers
+        for ticker in tickers:
+            # Create unique container for each ticker
+            container_key = f"watchlist_{ticker}"
+            if container_key not in st.session_state.live_containers:
+                st.session_state.live_containers[container_key] = st.empty()
+            
+            container = st.session_state.live_containers[container_key]
+            quote = st.session_state.live_data.get(ticker, {})
+            
+            if quote.get("error"):
+                container.error(f"{ticker}: {quote['error']}")
                 continue
             
-            with st.container():
+            with container.container():
                 col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
                 
                 col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -394,26 +435,23 @@ with tabs[0]:
                 
                 # Show UW-specific data if available
                 if quote.get('data_source') == 'Unusual Whales':
-                    col4.write("**🔥 UW Data**")
+                    col4.write("**UW Data**")
                     col4.write(f"Market Time: {quote.get('market_time', 'Unknown')}")
                     col4.write(f"Total Vol: {quote.get('total_volume', 0):,}")
                     col4.write(f"OHLC: {quote.get('open', 0):.2f}/{quote.get('high', 0):.2f}/{quote.get('low', 0):.2f}/{quote['last']:.2f}")
-                    tape_time = quote.get('tape_time', '')
-                    if tape_time:
-                        col4.caption(f"Tape: {tape_time[-8:]}")  # Show just the time part
                 
                 if abs(quote['change_percent']) >= 2.0:
-                    if col4.button(f"🎯 AI Analysis", key=f"quotes_ai_{ticker}"):
+                    if col4.button(f"AI Analysis", key=f"quotes_ai_{ticker}"):
                         with st.spinner(f"Analyzing {ticker}..."):
                             if uw_client:
                                 options_data = get_enhanced_options_analysis(ticker)
                             else:
                                 options_data = get_options_data(ticker)
                             analysis = ai_playbook(ticker, quote['change_percent'], "", options_data)
-                            st.success(f"🤖 {ticker} Analysis")
+                            st.success(f"AI Analysis for {ticker}")
                             st.markdown(analysis)
                 
-                # Session data
+                # Session data with live updates
                 sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
                 sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
                 sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
@@ -421,25 +459,25 @@ with tabs[0]:
                 
                 # Show extended UW data in session row for UW sources
                 if quote.get('data_source') == 'Unusual Whales':
-                    sess_col4.caption(f"🔥 Prev Close: ${quote.get('previous_close', 0):.2f}")
+                    sess_col4.caption(f"Prev Close: ${quote.get('previous_close', 0):.2f}")
                 
-                with st.expander(f"🔎 Expand {ticker}"):
+                with st.expander(f"Expand {ticker}"):
                     news = get_finnhub_news(ticker)
                     if news:
-                        st.write("### 📰 Catalysts (last 24h)")
+                        st.write("### Catalysts (last 24h)")
                         for n in news:
                             st.write(f"- [{n.get('headline', 'No title')}]({n.get('url', '#')}) ({n.get('source', 'Finnhub')})")
                     else:
                         st.info("No recent news.")
                     
-                    st.markdown("### 🎯 AI Playbook")
+                    st.markdown("### AI Playbook")
                     catalyst_title = news[0].get('headline', '') if news else ""
                     
                     # Use enhanced options data if UW available
                     if uw_client:
                         options_data = get_enhanced_options_analysis(ticker)
                         if not options_data.get("error"):
-                            st.write("**🔥 Unusual Whales Options Metrics:**")
+                            st.write("**Unusual Whales Options Metrics:**")
                             enhanced = options_data.get('enhanced_metrics', {})
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             opt_col1.metric("Flow Alerts", enhanced.get('total_flow_alerts', 'N/A'))
@@ -457,6 +495,10 @@ with tabs[0]:
                     st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 
                 st.divider()
+        
+        # Background refresh trigger
+        if st.session_state.auto_refresh:
+            background_data_refresh()
 
     # Top Market Movers
     st.markdown("### 🌟 Top Market Movers")
@@ -2021,8 +2063,88 @@ def assess_valuation(fundamentals: Dict) -> str:
         return "Fairly Valued"
 
 # =============================================================================
-# UNUSUAL WHALES API CLIENT - PRIMARY DATA SOURCE
-# ============================================================================= ENHANCED OPTIONS ANALYSIS WITH UW DATA
+# LIVE DATA UPDATE FUNCTIONS (ROBINHOOD-STYLE)
+# =============================================================================
+
+def update_live_data(ticker: str, tz: str = "ET") -> bool:
+    """Update live data for a ticker and return True if data changed"""
+    try:
+        new_quote = get_live_quote(ticker, tz)
+        old_quote = st.session_state.live_data.get(ticker, {})
+        
+        # Check if data actually changed (price or volume)
+        if (new_quote.get('last', 0) != old_quote.get('last', 0) or 
+            new_quote.get('volume', 0) != old_quote.get('volume', 0) or
+            new_quote.get('change_percent', 0) != old_quote.get('change_percent', 0)):
+            
+            st.session_state.live_data[ticker] = new_quote
+            return True
+        return False
+    except Exception:
+        return False
+
+def create_live_container(ticker: str, container_key: str):
+    """Create a live updating container for a ticker"""
+    if container_key not in st.session_state.live_containers:
+        st.session_state.live_containers[container_key] = st.empty()
+    return st.session_state.live_containers[container_key]
+
+def update_watchlist_display():
+    """Update watchlist display with live data"""
+    tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+    
+    for ticker in tickers:
+        quote = st.session_state.live_data.get(ticker, {})
+        if quote and not quote.get("error"):
+            container_key = f"watchlist_{ticker}"
+            container = create_live_container(ticker, container_key)
+            
+            with container.container():
+                col1, col2, col3, col4 = st.columns([2, 2, 2, 4])
+                
+                # Dynamic price update without page refresh
+                col1.metric(ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+                col2.write("**Bid/Ask**")
+                col2.write(f"${quote['bid']:.2f} / ${quote['ask']:.2f}")
+                col3.write("**Volume**")
+                col3.write(f"{quote['volume']:,}")
+                col3.caption(f"Updated: {quote['last_updated']}")
+                col3.caption(f"Source: {quote.get('data_source', 'Twelve Data')}")
+                
+                # Session data with live updates
+                sess_col1, sess_col2, sess_col3, sess_col4 = st.columns([2, 2, 2, 4])
+                sess_col1.caption(f"**PM:** {quote['premarket_change']:+.2f}%")
+                sess_col2.caption(f"**Day:** {quote['intraday_change']:+.2f}%")
+                sess_col3.caption(f"**AH:** {quote['postmarket_change']:+.2f}%")
+                
+                st.divider()
+
+def background_data_refresh():
+    """Background function to refresh data for auto-refresh"""
+    if st.session_state.auto_refresh:
+        current_time = time.time()
+        if current_time - st.session_state.last_update >= st.session_state.refresh_interval:
+            
+            # Update watchlist data
+            tickers = st.session_state.watchlists[st.session_state.active_watchlist]
+            data_changed = False
+            
+            for ticker in tickers:
+                if update_live_data(ticker, st.session_state.selected_tz):
+                    data_changed = True
+            
+            # Update market movers
+            for ticker in CORE_TICKERS[:10]:
+                if update_live_data(ticker, st.session_state.selected_tz):
+                    data_changed = True
+            
+            st.session_state.last_update = current_time
+            
+            if data_changed:
+                # Update displays without full refresh
+                update_watchlist_display()
+                return True
+    return False ENHANCED OPTIONS ANALYSIS WITH UW DATA
 # =============================================================================
 
 def get_enhanced_options_analysis(ticker: str) -> Dict:
