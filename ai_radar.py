@@ -59,9 +59,11 @@ if "ai_model" not in st.session_state:
 try:
     UNUSUAL_WHALES_KEY = st.secrets.get("UNUSUAL_WHALES_KEY", "")
     FINNHUB_KEY = st.secrets.get("FINNHUB_API_KEY", "")
+    POLYGON_KEY = st.secrets.get("POLYGON_API_KEY", "")
     OPENAI_KEY = st.secrets.get("OPENAI_API_KEY", "")
     GEMINI_KEY = st.secrets.get("GEMINI_API_KEY", "")
     GROK_API_KEY = st.secrets.get("GROK_API_KEY", "")
+    ALPHA_VANTAGE_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     TWELVEDATA_KEY = st.secrets.get("TWELVEDATA_API_KEY", "")
 
     # Initialize AI clients
@@ -101,7 +103,7 @@ class UnusualWhalesClient:
         self.base_url = "https://api.unusualwhales.com"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
-            "accept": "application/json, text/plain"
+            "Accept": "application/json, text/plain"
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -412,6 +414,62 @@ class GrokClient:
 # Initialize enhanced Grok client
 grok_enhanced = GrokClient(GROK_API_KEY) if GROK_API_KEY else None
 
+# Alpha Vantage Client
+class AlphaVantageClient:
+    """Enhanced Alpha Vantage client for real-time stock data"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://www.alphavantage.co/query"
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "AI-Radar-Pro/1.0"
+        })
+        
+    def get_quote(self, symbol: str) -> Dict:
+        try:
+            params = {
+                "function": "GLOBAL_QUOTE",
+                "symbol": symbol,
+                "apikey": self.api_key
+            }
+            
+            response = self.session.get(self.base_url, params=params, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "Global Quote" in data:
+                    quote_data = data["Global Quote"]
+                    
+                    price = float(quote_data.get("05. price", 0))
+                    change = float(quote_data.get("09. change", 0))
+                    change_percent = float(quote_data.get("10. change percent", "0%").replace("%", ""))
+                    volume = int(quote_data.get("06. volume", 0))
+                    
+                    return {
+                        "last": price,
+                        "bid": price - 0.01,  # Approximate
+                        "ask": price + 0.01,  # Approximate
+                        "volume": volume,
+                        "change": change,
+                        "change_percent": change_percent,
+                        "premarket_change": 0,
+                        "intraday_change": change_percent,
+                        "postmarket_change": 0,
+                        "previous_close": price - change,
+                        "market_open": price - change,
+                        "last_updated": datetime.datetime.now().isoformat(),
+                        "data_source": "Alpha Vantage",
+                        "error": None
+                    }
+                else:
+                    return {"error": f"No data found for {symbol}", "data_source": "Alpha Vantage"}
+            else:
+                return {"error": f"API error: {response.status_code}", "data_source": "Alpha Vantage"}
+                
+        except Exception as e:
+            return {"error": f"Alpha Vantage error: {str(e)}", "data_source": "Alpha Vantage"}
+
 # Twelve Data Client
 class TwelveDataClient:
     """Twelve Data client for real-time stock data"""
@@ -512,6 +570,7 @@ class TwelveDataClient:
             return {"error": f"Twelve Data error: {str(e)}", "data_source": "Twelve Data"}
 
 # Initialize data clients
+alpha_vantage_client = AlphaVantageClient(ALPHA_VANTAGE_KEY) if ALPHA_VANTAGE_KEY else None
 twelvedata_client = TwelveDataClient(TWELVEDATA_KEY) if TWELVEDATA_KEY else None
 
 # Enhanced Technical Analysis using multiple data sources
@@ -1045,28 +1104,44 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 metrics["total_theta"] = greek_data.get("total_theta", 0)
                 metrics["total_vega"] = greek_data.get("total_vega", 0)
         
-        # ATM chains analysis
+        # ATM chains analysis - Fixed for correct API response structure
         atm_chains = uw_data.get("atm_chains", {})
-        if atm_chains.get("data"):
+        if atm_chains.get("data") and not atm_chains.get("error"):
             chains_data = atm_chains["data"]
             if isinstance(chains_data, list) and len(chains_data) > 0:
-                call_chains = [c for c in chains_data if c.get("type", "").lower() == "call"]
-                put_chains = [c for c in chains_data if c.get("type", "").lower() == "put"]
+                total_call_volume = 0
+                total_put_volume = 0
+                total_call_oi = 0
+                total_put_oi = 0
                 
-                if call_chains:
-                    total_call_volume = sum(c.get("volume", 0) for c in call_chains)
-                    total_call_oi = sum(c.get("open_interest", 0) for c in call_chains)
-                    metrics["atm_call_volume"] = total_call_volume
-                    metrics["atm_call_oi"] = total_call_oi
+                for chain in chains_data:
+                    # Based on the actual API response structure
+                    if "option_symbol" in chain:
+                        option_symbol = chain["option_symbol"]
+                        volume = chain.get("volume", 0)
+                        oi = chain.get("open_interest", 0)
+                        
+                        # Determine if it's a call or put based on option symbol
+                        if "C" in option_symbol:  # Call option
+                            total_call_volume += volume
+                            total_call_oi += oi
+                        elif "P" in option_symbol:  # Put option
+                            total_put_volume += volume
+                            total_put_oi += oi
                 
-                if put_chains:
-                    total_put_volume = sum(c.get("volume", 0) for c in put_chains)
-                    total_put_oi = sum(c.get("open_interest", 0) for c in put_chains)
-                    metrics["atm_put_volume"] = total_put_volume
-                    metrics["atm_put_oi"] = total_put_oi
+                metrics["atm_call_volume"] = total_call_volume
+                metrics["atm_put_volume"] = total_put_volume
+                metrics["atm_call_oi"] = total_call_oi
+                metrics["atm_put_oi"] = total_put_oi
                 
-                if call_chains and put_chains:
-                    metrics["atm_put_call_ratio"] = metrics.get("atm_put_volume", 0) / max(metrics.get("atm_call_volume", 1), 1)
+                if total_call_volume > 0:
+                    metrics["atm_put_call_ratio"] = total_put_volume / total_call_volume
+                else:
+                    metrics["atm_put_call_ratio"] = 0
+        else:
+            # Log the ATM chains error for debugging
+            if atm_chains.get("error"):
+                metrics["atm_chains_error"] = atm_chains["error"]
         
         return metrics
         
@@ -1204,13 +1279,13 @@ def calculate_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict
     }
 
 # =============================================================================
-# PRIMARY DATA FUNCTION - UW FIRST, FALLBACK TO TWELVE DATA ONLY
+# PRIMARY DATA FUNCTION - UW FIRST, FALLBACK TO OTHERS
 # =============================================================================
 
 @st.cache_data(ttl=60)  # Cache for 60 seconds
 def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
     """
-    Enhanced live quote using UW first, then fallback to Twelve Data only
+    Enhanced live quote using UW first, then fallback hierarchy
     """
     tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
     tz_label = "ET" if tz == "ET" else "CT"
@@ -1226,7 +1301,17 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         except Exception as e:
             print(f"UW stock-state error for {ticker}: {str(e)}")
     
-    # Try Twelve Data as fallback
+    # Try Alpha Vantage second
+    if alpha_vantage_client:
+        try:
+            alpha_quote = alpha_vantage_client.get_quote(ticker)
+            if not alpha_quote.get("error") and alpha_quote.get("last", 0) > 0:
+                alpha_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                return alpha_quote
+        except Exception as e:
+            print(f"Alpha Vantage error for {ticker}: {str(e)}")
+    
+    # Try Twelve Data third
     if twelvedata_client:
         try:
             twelve_quote = twelvedata_client.get_quote(ticker)
@@ -1236,16 +1321,101 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         except Exception as e:
             print(f"Twelve Data error for {ticker}: {str(e)}")
     
-    # Final fallback - return error
-    return {
-        "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
-        "change": 0.0, "change_percent": 0.0,
-        "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
-        "previous_close": 0.0, "market_open": 0.0,
-        "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
-        "error": f"Unable to get quote for {ticker}",
-        "data_source": "Error"
-    }
+    # Fall back to Yahoo Finance
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Get historical data with extended hours
+        hist_2d = stock.history(period="2d", interval="1m", prepost=True)
+        hist_1d = stock.history(period="1d", interval="1m", prepost=True)
+        
+        if hist_1d.empty:
+            hist_1d = stock.history(period="1d", prepost=True)
+        if hist_2d.empty:
+            hist_2d = stock.history(period="2d", prepost=True)
+        
+        # Current price
+        current_price = float(info.get('currentPrice', info.get('regularMarketPrice', hist_1d['Close'].iloc[-1] if not hist_1d.empty else 0)))
+        
+        # Session data
+        regular_market_open = info.get('regularMarketOpen', 0)
+        previous_close = info.get('previousClose', hist_2d['Close'].iloc[-2] if len(hist_2d) >= 2 else 0)
+        
+        # Calculate session changes
+        premarket_change = 0
+        intraday_change = 0
+        postmarket_change = 0
+        
+        # Enhanced session tracking
+        if not hist_1d.empty and len(hist_1d) > 0:
+            try:
+                # Convert to timezone-aware
+                hist_1d_tz = hist_1d.copy()
+                if hist_1d_tz.index.tz is None:
+                    hist_1d_tz.index = hist_1d_tz.index.tz_localize('America/New_York')
+                else:
+                    hist_1d_tz.index = hist_1d_tz.index.tz_convert('America/New_York')
+                
+                # Filter for different sessions
+                market_hours = hist_1d_tz.between_time('09:30', '16:00')
+                
+                if not market_hours.empty:
+                    market_open_price = market_hours['Open'].iloc[0]
+                    market_close_price = market_hours['Close'].iloc[-1]
+                    
+                    # Premarket change
+                    if previous_close and market_open_price:
+                        premarket_change = ((market_open_price - previous_close) / previous_close) * 100
+                    
+                    # Intraday change
+                    if market_open_price and market_close_price:
+                        intraday_change = ((market_close_price - market_open_price) / market_open_price) * 100
+                    
+                    # After hours change
+                    current_hour = datetime.datetime.now(tz_zone).hour
+                    if (current_hour >= 16 or current_hour < 4) and current_price != market_close_price:
+                        postmarket_change = ((current_price - market_close_price) / market_close_price) * 100
+                        
+            except Exception:
+                # Fallback to basic calculation
+                if regular_market_open and previous_close:
+                    premarket_change = ((regular_market_open - previous_close) / previous_close) * 100
+                    if current_price and regular_market_open:
+                        intraday_change = ((current_price - regular_market_open) / regular_market_open) * 100
+        
+        # Total change
+        total_change = ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+        change_dollar = current_price - previous_close if previous_close else 0
+        
+        return {
+            "last": float(current_price),
+            "bid": float(info.get('bid', current_price - 0.01)),
+            "ask": float(info.get('ask', current_price + 0.01)),
+            "volume": int(info.get('volume', hist_1d['Volume'].iloc[-1] if not hist_1d.empty else 0)),
+            "change": float(change_dollar),
+            "change_percent": float(total_change),
+            "premarket_change": float(premarket_change),
+            "intraday_change": float(intraday_change),
+            "postmarket_change": float(postmarket_change),
+            "previous_close": float(previous_close),
+            "market_open": float(regular_market_open) if regular_market_open else 0,
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "error": None,
+            "data_source": "Yahoo Finance"
+        }
+        
+    except Exception as e:
+        tz_zone = ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')
+        return {
+            "last": 0.0, "bid": 0.0, "ask": 0.0, "volume": 0,
+            "change": 0.0, "change_percent": 0.0,
+            "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
+            "previous_close": 0.0, "market_open": 0.0,
+            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "error": str(e),
+            "data_source": "Yahoo Finance"
+        }
 
 def enhance_uw_stock_state_with_sessions(uw_stock_state: Dict, ticker: str, tz_zone, tz_label: str) -> Dict:
     """Enhance UW stock-state data with session tracking"""
@@ -1369,6 +1539,24 @@ def get_finnhub_news(symbol: str = None) -> List[Dict]:
     
     return []
 
+@st.cache_data(ttl=600)
+def get_polygon_news() -> List[Dict]:
+    if not POLYGON_KEY:
+        return []
+    
+    try:
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        url = f"https://api.polygon.io/v2/reference/news?published_utc.gte={today}&limit=20&apikey={POLYGON_KEY}"
+        
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get("results", [])
+    except Exception as e:
+        st.warning(f"Polygon API error: {e}")
+    
+    return []
+
 def get_all_news() -> List[Dict]:
     """Enhanced news with UW integration"""
     all_news = []
@@ -1387,6 +1575,18 @@ def get_all_news() -> List[Dict]:
             "url": item.get("url", ""),
             "datetime": item.get("datetime", 0),
             "related": item.get("related", "")
+        })
+    
+    # Polygon news
+    polygon_news = get_polygon_news()
+    for item in polygon_news:
+        all_news.append({
+            "title": item.get("title", ""),
+            "summary": item.get("description", ""),
+            "source": "Polygon",
+            "url": item.get("article_url", ""),
+            "datetime": item.get("published_utc", ""),
+            "related": ",".join(item.get("tickers", []))
         })
     
     # Sort by datetime
@@ -1554,6 +1754,7 @@ def get_market_moving_news() -> List[Dict]:
     # Get general market news from all sources
     uw_general = get_uw_news()
     finnhub_general = get_finnhub_news()  # General news
+    polygon_general = get_polygon_news()
     yahoo_general = get_yfinance_news()
     
     # Process UW news
@@ -1580,6 +1781,25 @@ def get_market_moving_news() -> List[Dict]:
             "datetime": item.get("datetime", 0),
             "related": item.get("related", ""),
             "provider": "Finnhub API",
+            "catalyst_analysis": catalyst_analysis
+        }
+        all_news.append(news_item)
+    
+    # Process Polygon news
+    for item in polygon_general:
+        catalyst_analysis = analyze_catalyst_impact(
+            item.get("title", ""), 
+            item.get("description", "")
+        )
+        
+        news_item = {
+            "title": item.get("title", ""),
+            "summary": item.get("description", ""),
+            "source": "Polygon",
+            "url": item.get("article_url", ""),
+            "datetime": item.get("published_utc", ""),
+            "related": ",".join(item.get("tickers", [])),
+            "provider": "Polygon API",
             "catalyst_analysis": catalyst_analysis
         }
         all_news.append(news_item)
@@ -2632,8 +2852,11 @@ else:
 # Data Source Configuration
 st.sidebar.subheader("📊 Data Configuration")
 available_sources = ["Unusual Whales"]
+if alpha_vantage_client:
+    available_sources.append("Alpha Vantage")
 if twelvedata_client:
     available_sources.append("Twelve Data")
+available_sources.append("Yahoo Finance")
 
 st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", available_sources, 
                                                      index=available_sources.index(st.session_state.data_source) if st.session_state.data_source in available_sources else 0)
@@ -2651,10 +2874,22 @@ if twelvedata_client:
 else:
     st.sidebar.warning("⚠️ Twelve Data Not Connected")
 
+if alpha_vantage_client:
+    st.sidebar.success("✅ Alpha Vantage Connected")
+else:
+    st.sidebar.warning("⚠️ Alpha Vantage Not Connected")
+
+st.sidebar.success("✅ Yahoo Finance Connected (Fallback)")
+
 if FINNHUB_KEY:
     st.sidebar.success("✅ Finnhub API Connected")
 else:
     st.sidebar.warning("⚠️ Finnhub API Not Found")
+
+if POLYGON_KEY:
+    st.sidebar.success("✅ Polygon API Connected (News)")
+else:
+    st.sidebar.warning("⚠️ Polygon API Not Found")
 
 # Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🛠 Debug Mode", help="Show API response details")
@@ -2729,8 +2964,11 @@ data_timestamp = current_tz.strftime("%B %d, %Y at %I:%M:%S %p") + f" {tz_label}
 data_sources = []
 if uw_client:
     data_sources.append("Unusual Whales")
+if alpha_vantage_client:
+    data_sources.append("Alpha Vantage")
 if twelvedata_client:
     data_sources.append("Twelve Data")
+data_sources.append("Yahoo Finance")
 data_source_info = " + ".join(data_sources)
 
 # AI model info
@@ -2766,7 +3004,7 @@ with tabs[0]:
         with st.spinner(f"Getting quote for {search_ticker}..."):
             quote = get_live_quote(search_ticker, tz_label)
             if not quote["error"]:
-                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Twelve Data')}")
+                st.success(f"Quote for {search_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
                 col1.metric(search_ticker, f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -2884,7 +3122,7 @@ with tabs[0]:
                 col3.write("**Volume**")
                 col3.write(f"{quote['volume']:,}")
                 col3.caption(f"Updated: {quote['last_updated']}")
-                col3.caption(f"Source: {quote.get('data_source', 'Twelve Data')}")
+                col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 # Show UW-specific data if available
                 if quote.get('data_source') == 'Unusual Whales':
@@ -2964,7 +3202,7 @@ with tabs[0]:
                 "change_pct": quote["change_percent"],
                 "price": quote["last"],
                 "volume": quote["volume"],
-                "data_source": quote.get("data_source", "Twelve Data")
+                "data_source": quote.get("data_source", "Yahoo Finance")
             }
             
             # Add UW-specific fields if available
@@ -3091,7 +3329,7 @@ with tabs[1]:
 # TAB 3: Enhanced Catalyst Scanner
 with tabs[2]:
     st.subheader("🔥 Enhanced Real-Time Catalyst Scanner")
-    st.caption("Comprehensive news analysis from Unusual Whales and Finnhub")
+    st.caption("Comprehensive news analysis from Unusual Whales, Finnhub, Polygon, and Yahoo Finance")
     
     # Show data sources status
     sources_status = []
@@ -3103,6 +3341,10 @@ with tabs[2]:
         sources_status.append("✅ Finnhub")
     else:
         sources_status.append("❌ Finnhub")
+    if POLYGON_KEY:
+        sources_status.append("✅ Polygon")
+    else:
+        sources_status.append("❌ Polygon")
     sources_status.append("✅ Yahoo Finance")
     
     st.info(f"**News Sources:** {' | '.join(sources_status)}")
@@ -3121,7 +3363,7 @@ with tabs[2]:
             quote = get_live_quote(search_catalyst_ticker, tz_label)
             
             if not quote["error"]:
-                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Twelve Data')}")
+                st.success(f"Catalyst Analysis for {search_catalyst_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 # Price and volume info
                 col1, col2, col3, col4 = st.columns(4)
@@ -3232,7 +3474,7 @@ with tabs[2]:
                         "change_pct": quote["change_percent"],
                         "price": quote["last"],
                         "volume": quote["volume"],
-                        "data_source": quote.get("data_source", "Twelve Data")
+                        "data_source": quote.get("data_source", "Yahoo Finance")
                     })
             
             movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
@@ -3334,7 +3576,7 @@ with tabs[2]:
                         )
                     with col2:
                         st.write(f"Volume: {mover['volume']:,}")
-                        st.caption(f"Source: {mover.get('data_source', 'Twelve Data')}")
+                        st.caption(f"Source: {mover.get('data_source', 'Yahoo Finance')}")
                     with col3:
                         if st.button(f"📰 News", key=f"catalyst_news_{mover['ticker']}"):
                             # Quick news lookup for this ticker
@@ -3380,7 +3622,7 @@ with tabs[3]:
                 
                 analysis = ai_playbook(search_analysis_ticker, quote["change_percent"], catalyst, options_data)
                 
-                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Twelve Data')}")
+                st.success(f"🤖 AI Analysis: {search_analysis_ticker} - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -3447,7 +3689,7 @@ with tabs[3]:
                         "ticker": ticker,
                         "change_pct": quote["change_percent"],
                         "price": quote["last"],
-                        "data_source": quote.get("data_source", "Twelve Data")
+                        "data_source": quote.get("data_source", "Yahoo Finance")
                     })
             
             analysis = ai_market_analysis(news_items, movers)
@@ -3458,7 +3700,7 @@ with tabs[3]:
             with st.expander("📊 Supporting Data"):
                 st.write("**Top Market Movers:**")
                 for mover in sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:5]:
-                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Twelve Data')}")
+                    st.write(f"• {mover['ticker']}: {mover['change_pct']:+.2f}% | Source: {mover.get('data_source', 'Yahoo Finance')}")
                 
                 st.write("**Key News Headlines:**")
                 for news in news_items[:3]:
@@ -3485,7 +3727,7 @@ with tabs[4]:
                     st.success(f"🤖 Generated {len(auto_plays)} Trading Plays")
                     
                     for i, play in enumerate(auto_plays):
-                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Twelve Data')}"):
+                        with st.expander(f"🎯 {play['ticker']} - ${play['current_price']:.2f} ({play['change_percent']:+.2f}%) | {play.get('data_source', 'Yahoo Finance')}"):
                             
                             # Display session data
                             sess_col1, sess_col2, sess_col3 = st.columns(3)
@@ -3507,7 +3749,7 @@ with tabs[4]:
                             st.markdown("**AI Trading Play:**")
                             st.markdown(play['play_analysis'])
                             
-                            st.caption(f"Data Source: {play.get('data_source', 'Twelve Data')} | Updated: {play['timestamp']}")
+                            st.caption(f"Data Source: {play.get('data_source', 'Yahoo Finance')} | Updated: {play['timestamp']}")
                             
                             # Add to watchlist option
                             if st.button(f"Add {play['ticker']} to Watchlist", key=f"playbook_auto_{i}_{play['ticker']}"):
@@ -3546,7 +3788,7 @@ with tabs[4]:
                 
                 playbook = ai_playbook(search_playbook_ticker, quote["change_percent"], catalyst, options_data)
                 
-                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Twelve Data')}")
+                st.success(f"✅ {search_playbook_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -3621,7 +3863,7 @@ with tabs[4]:
                     
                     playbook = ai_playbook(selected_ticker, quote["change_percent"], catalyst_input, options_data)
                     
-                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Twelve Data')}")
+                    st.success(f"✅ {selected_ticker} Trading Playbook - Updated: {quote['last_updated']} | Source: {quote.get('data_source', 'Yahoo Finance')}")
                     
                     col1, col2, col3 = st.columns(3)
                     col1.metric("Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
@@ -3687,7 +3929,7 @@ with tabs[5]:
             col3.write("**Volume**")
             col3.write(f"{quote['volume']:,}")
             col3.caption(f"Updated: {quote['last_updated']}")
-            col3.caption(f"Source: {quote.get('data_source', 'Twelve Data')}")
+            col3.caption(f"Source: {quote.get('data_source', 'Yahoo Finance')}")
             
             if col4.button(f"Add {ticker} to Watchlist", key=f"sector_etf_add_{ticker}"):
                 current_list = st.session_state.watchlists[st.session_state.active_watchlist]
@@ -3929,7 +4171,7 @@ with tabs[7]:
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         
         st.markdown(f"**Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
-        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Twelve Data')}")
+        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
         # Filter for lotto plays (options under $1.00)
         calls = option_chain["calls"]
@@ -4267,7 +4509,7 @@ with tabs[10]:
                     if not quote.get("error"):
                         col1.metric(f"{social_ticker} Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
                         col2.metric("Volume", f"{quote['volume']:,}")
-                        col3.metric("Data Source", quote.get('data_source', 'Twelve Data'))
+                        col3.metric("Data Source", quote.get('data_source', 'Yahoo Finance'))
 
                     # Get Twitter sentiment
                     sentiment_analysis = grok_enhanced.get_twitter_market_sentiment(social_ticker)
@@ -4345,7 +4587,7 @@ with tabs[10]:
 
         for i, ticker in enumerate(popular_for_social):
             with cols[i % 4]:
-                if st.button(f"📱 {ticker}", key=f"twitter_quick_social_{ticker}"):
+                if st.button(f"📊 {ticker}", key=f"twitter_quick_social_{ticker}"):
                     with st.spinner(f"Getting {ticker} social sentiment..."):
                         try:
                             sentiment = grok_enhanced.get_twitter_market_sentiment(ticker)
@@ -4384,8 +4626,11 @@ st.markdown("---")
 footer_sources = []
 if uw_client:
     footer_sources.append("🔥 Unusual Whales")
+if alpha_vantage_client:
+    footer_sources.append("Alpha Vantage")
 if twelvedata_client:
     footer_sources.append("Twelve Data")
+footer_sources.append("Yahoo Finance")
 footer_text = " + ".join(footer_sources)
 
 available_ai_models = multi_ai.get_available_models()
