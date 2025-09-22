@@ -230,10 +230,32 @@ class UnusualWhalesClient:
         params = {"date": date}
         return self._make_request(endpoint, params)
     
-    def get_atm_chains(self, ticker: str) -> Dict:
+    def get_atm_chains(self, ticker: str, expirations: List[str] = None) -> Dict:
         """Get at-the-money option chains"""
         endpoint = f"/api/stock/{ticker}/atm-chains"
-        return self._make_request(endpoint)
+        
+        # If no expirations provided, get current and next Friday
+        if not expirations:
+            today = datetime.date.today()
+            # Find next Friday (most common options expiration)
+            days_ahead = 4 - today.weekday()  # Friday is weekday 4
+            if days_ahead <= 0:  # Target next Friday
+                days_ahead += 7
+            next_friday = today + datetime.timedelta(days_ahead)
+            
+            # Also include the Friday after that
+            following_friday = next_friday + datetime.timedelta(7)
+            
+            expirations = [
+                next_friday.strftime("%Y-%m-%d"),
+                following_friday.strftime("%Y-%m-%d")
+            ]
+        
+        params = {
+            "expirations[]": expirations
+        }
+        
+        return self._make_request(endpoint, params)
     
     # =================================================================
     # MARKET DATA METHODS
