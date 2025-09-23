@@ -418,21 +418,20 @@ class UnusualWhalesClient:
 
 
 # ================================
-# UW ASYNC FETCH SUPPORT
+# UW REQUESTS FETCH SUPPORT
 # ================================
-import aiohttp
+import requests
 
-async def fetch_uw_async(endpoint: str, params: Dict = None) -> Dict:
-    """Async fetch for Unusual Whales API"""
+def fetch_uw(endpoint: str, params: Dict = None) -> Dict:
+    """Synchronous fetch for Unusual Whales API using requests"""
     try:
         headers = {
             "Authorization": f"Bearer {st.secrets['UNUSUAL_WHALES_KEY']}",
             "accept": "application/json, text/plain"
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.unusualwhales.com{endpoint}", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                resp.raise_for_status()
-                return {"data": await resp.json(), "error": None}
+        response = requests.get(f"https://api.unusualwhales.com{endpoint}", headers=headers, params=params, timeout=15)
+        response.raise_for_status()
+        return {"data": response.json(), "error": None}
     except Exception as e:
         return {"data": None, "error": str(e)}
 
@@ -4758,7 +4757,7 @@ st.markdown(
 
 
 # ========================================
-# OPTIONS FLOW TAB (Tidy Tabbed Version)
+# OPTIONS FLOW TAB (Requests Version)
 # ========================================
 if selected_tab == "Options Flow":
     st.header("🌀 Options Flow (Unusual Whales)")
@@ -4780,7 +4779,7 @@ if selected_tab == "Options Flow":
                 "end_date": (today + datetime.timedelta(days=end_days)).isoformat()
             }
             endpoint = f"/api/stock/{selected_ticker}/flow-per-strike"
-            result = asyncio.run(fetch_uw_async(endpoint, params))
+            result = fetch_uw(endpoint, params)
 
             if result["error"]:
                 st.error(result["error"])
@@ -4797,13 +4796,13 @@ if selected_tab == "Options Flow":
 
 
 # ========================================
-# EARNINGS TAB - UW ENHANCED
+# EARNINGS TAB - UW ENHANCED (Requests)
 # ========================================
 if selected_tab == "Earnings":
     st.header("📊 Earnings Calendar (Unusual Whales)")
     st.subheader(f"Earnings for {selected_ticker}")
     endpoint = f"/api/stock/{selected_ticker}/earnings"
-    result = asyncio.run(fetch_uw_async(endpoint))
+    result = fetch_uw(endpoint)
     if result["error"]:
         st.error(result["error"])
     else:
