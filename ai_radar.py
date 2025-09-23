@@ -231,8 +231,8 @@ class UnusualWhalesClient:
         return self._make_request(endpoint, params)
     
     def get_atm_chains(self, ticker: str, expirations: List[str] = None) -> Dict:
-    """Get at-the-money option chains with enhanced error handling and debugging"""
-    endpoint = f"/api/stock/{ticker.upper()}/atm-chains"
+        """Get at-the-money option chains with enhanced error handling and debugging"""
+        endpoint = f"/api/stock/{ticker.upper()}/atm-chains"
     
     print(f'Fetching ATM chains from: {endpoint}')
     
