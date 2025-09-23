@@ -91,8 +91,154 @@ except Exception as e:
     gemini_model = None
     grok_client = None
 
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 # UNUSUAL WHALES API CLIENT - PRIMARY DATA SOURCE
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 
 class UnusualWhalesClient:
@@ -103,7 +249,7 @@ class UnusualWhalesClient:
         self.base_url = "https://api.unusualwhales.com"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
-            "Accept": "application/json, text/plain"
+            "accept": "application/json, text/plain"
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -230,60 +376,10 @@ class UnusualWhalesClient:
         params = {"date": date}
         return self._make_request(endpoint, params)
     
-    def get_atm_chains(self, ticker: str, expirations: List[str] = None) -> Dict:
-        """Get at-the-money option chains with enhanced error handling"""
-        endpoint = f"/api/stock/{ticker.upper()}/atm-chains"
-        
-        print(f'Fetching ATM chains from:', endpoint)
-        
-        # If no expirations provided, get current and next Friday
-        if not expirations:
-            today = datetime.date.today()
-            # Find next Friday (most common options expiration)
-            days_ahead = 4 - today.weekday()  # Friday is weekday 4
-            if days_ahead <= 0:  # Target next Friday
-                days_ahead += 7
-            next_friday = today + datetime.timedelta(days_ahead)
-            
-            # Also include the Friday after that
-            following_friday = next_friday + datetime.timedelta(7)
-            
-            expirations = [
-                next_friday.strftime("%Y-%m-%d"),
-                following_friday.strftime("%Y-%m-%d")
-            ]
-        
-        params = {
-            "expirations[]": expirations
-        }
-        
-        result = self._make_request(endpoint, params)
-        
-        if result["error"]:
-            print(f"ATM chains error for {ticker}: {result['error']}")
-            return {"error": result["error"]}
-        
-        # Enhanced data processing
-        try:
-            response_data = result["data"]
-            print(f"ATM chains raw response for {ticker}:", response_data)
-            
-            if response_data and "data" in response_data:
-                chains_data = response_data["data"]
-                if isinstance(chains_data, list) and len(chains_data) > 0:
-                    print(f"Successfully got {len(chains_data)} ATM chains for {ticker}")
-                    return {"data": chains_data, "error": None}
-                else:
-                    print(f"Empty ATM chains array for {ticker}")
-                    return {"data": [], "error": "No ATM chains data available"}
-            else:
-                print(f"No ATM chains data in response for {ticker}")
-                return {"data": [], "error": "No ATM chains data found"}
-                    
-        except Exception as e:
-            error_msg = f"Error processing ATM chains for {ticker}: {str(e)}"
-            print(error_msg)
-            return {"error": error_msg}
+    def get_atm_chains(self, ticker: str) -> Dict:
+        """Get at-the-money option chains"""
+        endpoint = f"/api/stock/{ticker}/atm-chains"
+        return self._make_request(endpoint)
     
     # =================================================================
     # MARKET DATA METHODS
@@ -416,23 +512,31 @@ class UnusualWhalesClient:
         
         return data
 
+
+# ================================
+# UW ASYNC FETCH SUPPORT
+# ================================
+import aiohttp
+
+async def fetch_uw_async(endpoint: str, params: Dict = None) -> Dict:
+    """Async fetch for Unusual Whales API"""
+    if not UNUSUAL_WHALES_KEY:
+        return {"data": None, "error": "Missing UW API Key"}
+    try:
+        headers = {
+            "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
+            "accept": "application/json, text/plain"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.unusualwhales.com{endpoint}", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                resp.raise_for_status()
+                return {"data": await resp.json(), "error": None}
+    except Exception as e:
+        return {"data": None, "error": str(e)}
+
+
 # Initialize UW client
 uw_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
-
-def debug_atm_chains(ticker: str):
-    """Debug function for testing ATM chains"""
-    if not uw_client:
-        print("UW client not available")
-        return None
-        
-    print(f"Testing ATM chains for {ticker}...")
-    try:
-        atm_result = uw_client.get_atm_chains(ticker)
-        print(f"ATM chains result: {atm_result}")
-        return atm_result
-    except Exception as e:
-        print(f"Debug error: {e}")
-        return None
 
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
@@ -1111,8 +1215,154 @@ def assess_valuation(fundamentals: Dict) -> str:
     else:
         return "Fairly Valued"
 
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 # ENHANCED OPTIONS ANALYSIS WITH UW DATA
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 
 def get_enhanced_options_analysis(ticker: str) -> Dict:
@@ -1169,63 +1419,28 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 metrics["total_theta"] = greek_data.get("total_theta", 0)
                 metrics["total_vega"] = greek_data.get("total_vega", 0)
         
-        # Enhanced ATM chains analysis
+        # ATM chains analysis
         atm_chains = uw_data.get("atm_chains", {})
-        if atm_chains.get("data") and not atm_chains.get("error"):
+        if atm_chains.get("data"):
             chains_data = atm_chains["data"]
             if isinstance(chains_data, list) and len(chains_data) > 0:
-                total_call_volume = 0
-                total_put_volume = 0
-                total_call_oi = 0
-                total_put_oi = 0
+                call_chains = [c for c in chains_data if c.get("type", "").lower() == "call"]
+                put_chains = [c for c in chains_data if c.get("type", "").lower() == "put"]
                 
-                for chain in chains_data:
-                    try:
-                        volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
-                        oi = int(chain.get("open_interest", 0)) if chain.get("open_interest") else 0
-                        
-                        is_call = False
-                        if "option_symbol" in chain:
-                            option_symbol = chain["option_symbol"]
-                            is_call = "C" in option_symbol and "P" not in option_symbol
-                        elif "type" in chain:
-                            is_call = chain["type"].lower() == "call"
-                        elif "call_put" in chain:
-                            is_call = chain["call_put"].lower() == "call"
-                        
-                        if is_call:
-                            total_call_volume += volume
-                            total_call_oi += oi
-                        else:
-                            total_put_volume += volume
-                            total_put_oi += oi
-                            
-                    except Exception as e:
-                        print(f"Error processing ATM chain item: {e}")
-                        continue
+                if call_chains:
+                    total_call_volume = sum(c.get("volume", 0) for c in call_chains)
+                    total_call_oi = sum(c.get("open_interest", 0) for c in call_chains)
+                    metrics["atm_call_volume"] = total_call_volume
+                    metrics["atm_call_oi"] = total_call_oi
                 
-                metrics["atm_call_volume"] = total_call_volume
-                metrics["atm_put_volume"] = total_put_volume
-                metrics["atm_call_oi"] = total_call_oi
-                metrics["atm_put_oi"] = total_put_oi
+                if put_chains:
+                    total_put_volume = sum(c.get("volume", 0) for c in put_chains)
+                    total_put_oi = sum(c.get("open_interest", 0) for c in put_chains)
+                    metrics["atm_put_volume"] = total_put_volume
+                    metrics["atm_put_oi"] = total_put_oi
                 
-                if total_call_volume > 0:
-                    metrics["atm_put_call_ratio"] = total_put_volume / total_call_volume
-                else:
-                    metrics["atm_put_call_ratio"] = 0
-                    
-                print(f"ATM analysis complete: Calls={total_call_volume}, Puts={total_put_volume}")
-            else:
-                print("ATM chains data is empty or invalid format")
-                metrics["atm_chains_status"] = "No data"
-        else:
-            # Log the ATM chains error for debugging  
-            if atm_chains.get("error"):
-                metrics["atm_chains_error"] = atm_chains["error"]
-                print(f"ATM chains error: {atm_chains['error']}")
-            else:
-                print("No ATM chains data available")
-                metrics["atm_chains_status"] = "No data available"
+                if call_chains and put_chains:
+                    metrics["atm_put_call_ratio"] = metrics.get("atm_put_volume", 0) / max(metrics.get("atm_call_volume", 1), 1)
         
         return metrics
         
@@ -1362,8 +1577,154 @@ def calculate_options_sentiment(calls: pd.DataFrame, puts: pd.DataFrame) -> Dict
         "overall_sentiment": "Bullish" if sentiment_score > 0.1 else "Bearish" if sentiment_score < -0.1 else "Neutral"
     }
 
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 # PRIMARY DATA FUNCTION - UW FIRST, FALLBACK TO OTHERS
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 
 @st.cache_data(ttl=60)  # Cache for 60 seconds
@@ -1569,8 +1930,154 @@ def enhance_uw_stock_state_with_sessions(uw_stock_state: Dict, ticker: str, tz_z
         uw_stock_state.setdefault("postmarket_change", 0)
         return uw_stock_state
 
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 # NEWS AND MARKET DATA WITH UW INTEGRATION
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 
 @st.cache_data(ttl=600)
@@ -2692,7 +3199,6 @@ def generate_enhanced_options_summary(options: Dict) -> str:
         return f"Options Error: {options['error']}"
     
     if options.get("data_source") == "Unusual Whales":
-        # UW enhanced options metrics
         enhanced = options.get('enhanced_metrics', {})
         flow_alerts = enhanced.get('total_flow_alerts', 'N/A')
         sentiment = enhanced.get('flow_sentiment', 'Neutral')
@@ -2893,12 +3399,158 @@ def get_important_events() -> List[Dict]:
         st.error(f"Error fetching economic events: {str(e)}")
         return []
 
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 # MAIN APPLICATION
+
+# ========================================
+# OPTIONS FLOW TAB - 0DTE, SWING, LEAPS
+# ========================================
+with st.expander("🌀 Options Flow (Unusual Whales)"):
+    st.subheader("Live Options Flow")
+    subtab = st.radio("Select Flow Type", ["0DTE", "Swing", "LEAPS"], horizontal=True)
+
+    async def display_options_flow(ticker: str, subtab: str):
+        today = datetime.date.today()
+        expiry_range = {
+            "0DTE": (today, today),
+            "Swing": (today + datetime.timedelta(days=2), today + datetime.timedelta(days=30)),
+            "LEAPS": (today + datetime.timedelta(days=90), today + datetime.timedelta(days=365)),
+        }
+
+        expiry_start, expiry_end = expiry_range[subtab]
+        params = {
+            "start_date": expiry_start.isoformat(),
+            "end_date": expiry_end.isoformat()
+        }
+        endpoint = f"/api/stock/{{ticker}}/flow-per-strike"
+        flow_result = await fetch_uw_async(endpoint.replace("{ticker}", ticker), params)
+
+        if flow_result["error"]:
+            st.error(f"{subtab} Flow Error: {flow_result['error']}")
+        else:
+            df = pd.DataFrame(flow_result["data"].get("data", []))
+            if not df.empty:
+                st.dataframe(df)
+            else:
+                st.info("No flow data available for this timeframe.")
+
+    # Streamlit can't await directly, use asyncio.create_task inside asyncio.run
+    import streamlit.runtime.scriptrunner.script_run_context as context
+    import threading
+
+    def run_async_func():
+        ctx = context.get_script_run_ctx()
+        asyncio.run(display_options_flow(ticker=selected_ticker, subtab=subtab))
+
+    threading.Thread(target=run_async_func).start()
+
+
+
+# ========================================
+# EARNINGS TAB - UW ENHANCED
+# ========================================
+with st.expander("📊 Earnings Calendar (Unusual Whales)"):
+    st.subheader("Upcoming Earnings for Selected Ticker")
+    selected_ticker = st.selectbox("Select Ticker", CORE_TICKERS)
+
+    async def fetch_earnings_data(ticker: str):
+        endpoint = f"/api/stock/{ticker}/earnings"
+        return await fetch_uw_async(endpoint)
+
+    def run_earnings_async():
+        async def wrapper():
+            result = await fetch_earnings_data(selected_ticker)
+            if result["error"]:
+                st.error(f"Earnings Error: {result['error']}")
+            else:
+                earnings = result["data"].get("data", [])
+                if earnings:
+                    df = pd.DataFrame(earnings)
+                    st.dataframe(df)
+                else:
+                    st.info("No earnings data available.")
+        asyncio.run(wrapper())
+
+    threading.Thread(target=run_earnings_async).start()
+
+
 # =============================================================================
 
 # Main app
-st.title("🔥 AI Radar Pro – Live Trading Assistant with Unusual Whales")
+st.title("🔥 AI Radar Pro — Live Trading Assistant with Unusual Whales")
 
 # Timezone toggle (made smaller with column and smaller font)
 col_tz, _ = st.columns([1, 10])  # Allocate small space for TZ
@@ -2990,7 +3642,7 @@ if debug_mode:
             
             if uw_client:
                 # Test UW quote
-                uw_quote = uw_client.get_stock_state(debug_ticker)
+                uw_quote = uw_client.get_stock_quote(debug_ticker)
                 st.write(f"UW Quote: {'✅' if not uw_quote.get('error') else '❌'}")
                 
                 # Test UW flow
@@ -3001,12 +3653,8 @@ if debug_mode:
                 uw_greeks = uw_client.get_greek_exposure(debug_ticker)
                 st.write(f"UW Greeks: {'✅' if not uw_greeks.get('error') else '❌'}")
                 
-                # Test ATM Chains
-                uw_atm = uw_client.get_atm_chains(debug_ticker)
-                st.write(f"UW ATM Chains: {'✅' if not uw_atm.get('error') else '❌'}")
-                
                 if st.checkbox("Show UW Raw Data"):
-                    st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks, "atm": uw_atm})
+                    st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks})
             else:
                 st.error("UW Client not initialized")
             
@@ -3040,7 +3688,7 @@ tabs = st.tabs([
     "🔥 Catalyst Scanner", 
     "📈 Market Analysis", 
     "🤖 AI Playbooks", 
-    "🌍 Sector/ETF Tracking", 
+    "🌐 Sector/ETF Tracking", 
     "🎯 Options Flow", 
     "💰 Lottos", 
     "🗓️ Earnings Plays", 
@@ -3244,7 +3892,7 @@ with tabs[0]:
                 if quote.get('data_source') == 'Unusual Whales':
                     sess_col4.caption(f"🔥 Prev Close: ${quote.get('previous_close', 0):.2f}")
                 
-                with st.expander(f"🔍 Expand {ticker}"):
+                with st.expander(f"🔎 Expand {ticker}"):
                     news = get_finnhub_news(ticker)
                     if news:
                         st.write("### 📰 Catalysts (last 24h)")
@@ -3540,7 +4188,7 @@ with tabs[2]:
                 st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
     # Main market catalyst scan
-    st.markdown("### 🌍 Market-Wide Catalyst Scanner")
+    st.markdown("### 🌐 Market-Wide Catalyst Scanner")
     
     scan_col1, scan_col2 = st.columns([2, 1])
     with scan_col1:
@@ -3981,7 +4629,7 @@ with tabs[4]:
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
-    st.subheader("🌍 Sector/ETF Tracking")
+    st.subheader("🌐 Sector/ETF Tracking")
 
     # Add search and add functionality
     st.markdown("### 🔍 Search & Add ETFs")
