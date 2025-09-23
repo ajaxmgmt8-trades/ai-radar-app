@@ -416,26 +416,6 @@ class UnusualWhalesClient:
         
         return data
 
-
-# ================================
-# UW REQUESTS FETCH SUPPORT
-# ================================
-import requests
-
-def fetch_uw(endpoint: str, params: Dict = None) -> Dict:
-    """Synchronous fetch for Unusual Whales API using requests"""
-    try:
-        headers = {
-            "Authorization": f"Bearer {st.secrets['UNUSUAL_WHALES_KEY']}",
-            "accept": "application/json, text/plain"
-        }
-        response = requests.get(f"https://api.unusualwhales.com{endpoint}", headers=headers, params=params, timeout=15)
-        response.raise_for_status()
-        return {"data": response.json(), "error": None}
-    except Exception as e:
-        return {"data": None, "error": str(e)}
-
-
 # Initialize UW client
 uw_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
 
@@ -4753,63 +4733,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
-
-
-# ========================================
-# OPTIONS FLOW TAB (Requests Version)
-# ========================================
-if selected_tab == "Options Flow":
-    st.header("🌀 Options Flow (Unusual Whales)")
-    tabs = st.tabs(["0DTE", "Swing", "LEAPS"])
-
-    tab_ranges = {
-        "0DTE": (0, 0),
-        "Swing": (2, 90),
-        "LEAPS": (90, 365)
-    }
-
-    def render_flow_tab(tab_name):
-        with tabs[["0DTE", "Swing", "LEAPS"].index(tab_name)]:
-            st.subheader(f"{tab_name} Flow for {selected_ticker}")
-            today = datetime.date.today()
-            start_days, end_days = tab_ranges[tab_name]
-            params = {
-                "start_date": (today + datetime.timedelta(days=start_days)).isoformat(),
-                "end_date": (today + datetime.timedelta(days=end_days)).isoformat()
-            }
-            endpoint = f"/api/stock/{selected_ticker}/flow-per-strike"
-            result = fetch_uw(endpoint, params)
-
-            if result["error"]:
-                st.error(result["error"])
-            else:
-                df = pd.DataFrame(result["data"].get("data", []))
-                if df.empty:
-                    st.info("No data available.")
-                else:
-                    st.dataframe(df)
-
-    for name in ["0DTE", "Swing", "LEAPS"]:
-        render_flow_tab(name)
-
-
-
-# ========================================
-# EARNINGS TAB - UW ENHANCED (Requests)
-# ========================================
-if selected_tab == "Earnings":
-    st.header("📊 Earnings Calendar (Unusual Whales)")
-    st.subheader(f"Earnings for {selected_ticker}")
-    endpoint = f"/api/stock/{selected_ticker}/earnings"
-    result = fetch_uw(endpoint)
-    if result["error"]:
-        st.error(result["error"])
-    else:
-        earnings = result["data"].get("data", [])
-        if earnings:
-            df = pd.DataFrame(earnings)
-            st.dataframe(df)
-        else:
-            st.info("No earnings data found.")
 
