@@ -276,7 +276,7 @@ class UnusualWhalesClient:
         return {"error": error_msg}
     def debug_atm_chains(ticker: str):
         """Debug function for testing ATM chains"""
-        if not uw_client:
+    if not uw_client:
         print("UW client not available")
         return None
     
