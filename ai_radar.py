@@ -103,7 +103,7 @@ class UnusualWhalesClient:
         self.base_url = "https://api.unusualwhales.com"
         self.headers = {
             "Authorization": f"Bearer {api_key}",
-            "accept": "application/json, text/plain"
+            "Accept": "application/json, text/plain"
         }
         self.session = requests.Session()
         self.session.headers.update(self.headers)
@@ -231,10 +231,8 @@ class UnusualWhalesClient:
         return self._make_request(endpoint, params)
     
     def get_atm_chains(self, ticker: str, expirations: List[str] = None) -> Dict:
-        """Get at-the-money option chains with enhanced error handling"""
-        endpoint = f"/api/stock/{ticker.upper()}/atm-chains"
-        
-        console.log(f'Fetching ATM chains from:', endpoint)
+        """Get at-the-money option chains"""
+        endpoint = f"/api/stock/{ticker}/atm-chains"
         
         # If no expirations provided, get current and next Friday
         if not expirations:
@@ -257,32 +255,7 @@ class UnusualWhalesClient:
             "expirations[]": expirations
         }
         
-        result = self._make_request(endpoint, params)
-        if result["error"]:
-            print(f"ATM chains error for {ticker}: {result['error']}")
-            return {"error": result["error"]}
-        
-        # Enhanced data processing
-        try:
-            response_data = result["data"]
-            print(f"ATM chains raw response for {ticker}:", response_data)
-            
-            if response_data and "data" in response_data:
-                chains_data = response_data["data"]
-                if isinstance(chains_data, list) and len(chains_data) > 0:
-                    print(f"Successfully got {len(chains_data)} ATM chains for {ticker}")
-                    return {"data": chains_data, "error": None}
-                else:
-                    print(f"Empty ATM chains array for {ticker}")
-                    return {"data": [], "error": "No ATM chains data available"}
-            else:
-                print(f"No ATM chains data in response for {ticker}")
-                return {"data": [], "error": "No ATM chains data found"}
-        
-        except Exception as e:
-            error_msg = f"Error processing ATM chains for {ticker}: {str(e)}"
-            print(error_msg)
-            return {"error": error_msg}
+        return self._make_request(endpoint, params)
     
     # =================================================================
     # MARKET DATA METHODS
@@ -417,21 +390,6 @@ class UnusualWhalesClient:
 
 # Initialize UW client
 uw_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
-
-def debug_atm_chains(ticker: str):
-    """Debug function for testing ATM chains"""
-    if not uw_client:
-        print("UW client not available")
-        return None
-    
-    print(f"Testing ATM chains for {ticker}...")
-    try:
-        atm_result = uw_client.get_atm_chains(ticker)
-        print(f"ATM chains result: {atm_result}")
-        return atm_result
-    except Exception as e:
-        print(f"Debug error: {e}")
-        return None
 
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
@@ -1168,7 +1126,7 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 metrics["total_theta"] = greek_data.get("total_theta", 0)
                 metrics["total_vega"] = greek_data.get("total_vega", 0)
         
-        # Enhanced ATM chains analysis
+        # ATM chains analysis - Fixed for correct API response structure
         atm_chains = uw_data.get("atm_chains", {})
         if atm_chains.get("data") and not atm_chains.get("error"):
             chains_data = atm_chains["data"]
@@ -1179,29 +1137,19 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 total_put_oi = 0
                 
                 for chain in chains_data:
-                    try:
-                        volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
-                        oi = int(chain.get("open_interest", 0)) if chain.get("open_interest") else 0
+                    # Based on the actual API response structure
+                    if "option_symbol" in chain:
+                        option_symbol = chain["option_symbol"]
+                        volume = chain.get("volume", 0)
+                        oi = chain.get("open_interest", 0)
                         
-                        is_call = False
-                        if "option_symbol" in chain:
-                            option_symbol = chain["option_symbol"]
-                            is_call = "C" in option_symbol and "P" not in option_symbol
-                        elif "type" in chain:
-                            is_call = chain["type"].lower() == "call"
-                        elif "call_put" in chain:
-                            is_call = chain["call_put"].lower() == "call"
-                        
-                        if is_call:
+                        # Determine if it's a call or put based on option symbol
+                        if "C" in option_symbol:  # Call option
                             total_call_volume += volume
                             total_call_oi += oi
-                        else:
+                        elif "P" in option_symbol:  # Put option
                             total_put_volume += volume
                             total_put_oi += oi
-                            
-                    except Exception as e:
-                        print(f"Error processing ATM chain item: {e}")
-                        continue
                 
                 metrics["atm_call_volume"] = total_call_volume
                 metrics["atm_put_volume"] = total_put_volume
@@ -1212,17 +1160,10 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                     metrics["atm_put_call_ratio"] = total_put_volume / total_call_volume
                 else:
                     metrics["atm_put_call_ratio"] = 0
-                
-                print(f"ATM analysis complete: Calls={total_call_volume}, Puts={total_put_volume}")
-            else:
-                print("ATM chains data is empty or invalid format")
         else:
             # Log the ATM chains error for debugging
             if atm_chains.get("error"):
                 metrics["atm_chains_error"] = atm_chains["error"]
-                print(f"ATM chains error: {atm_chains['error']}")
-            else:
-                print("No ATM chains data available")
         
         return metrics
         
@@ -2997,10 +2938,6 @@ if debug_mode:
                 uw_greeks = uw_client.get_greek_exposure(debug_ticker)
                 st.write(f"UW Greeks: {'✅' if not uw_greeks.get('error') else '❌'}")
                 
-                # Test ATM Chains
-                uw_atm = uw_client.get_atm_chains(debug_ticker)
-                st.write(f"UW ATM Chains: {'✅' if not uw_atm.get('error') else '❌'}")
-                
                 if st.checkbox("Show UW Raw Data"):
                     st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks})
             else:
@@ -3036,7 +2973,7 @@ tabs = st.tabs([
     "🔥 Catalyst Scanner", 
     "📈 Market Analysis", 
     "🤖 AI Playbooks", 
-    "🌎 Sector/ETF Tracking", 
+    "🌍 Sector/ETF Tracking", 
     "🎯 Options Flow", 
     "💰 Lottos", 
     "🗓️ Earnings Plays", 
@@ -3240,7 +3177,7 @@ with tabs[0]:
                 if quote.get('data_source') == 'Unusual Whales':
                     sess_col4.caption(f"🔥 Prev Close: ${quote.get('previous_close', 0):.2f}")
                 
-                with st.expander(f"🔎 Expand {ticker}"):
+                with st.expander(f"🔍 Expand {ticker}"):
                     news = get_finnhub_news(ticker)
                     if news:
                         st.write("### 📰 Catalysts (last 24h)")
@@ -3536,7 +3473,7 @@ with tabs[2]:
                 st.error(f"Could not get quote for {search_catalyst_ticker}: {quote['error']}")
     
     # Main market catalyst scan
-    st.markdown("### 🌎 Market-Wide Catalyst Scanner")
+    st.markdown("### 🌍 Market-Wide Catalyst Scanner")
     
     scan_col1, scan_col2 = st.columns([2, 1])
     with scan_col1:
@@ -3977,7 +3914,7 @@ with tabs[4]:
 
 # TAB 6: Sector/ETF Tracking
 with tabs[5]:
-    st.subheader("🌎 Sector/ETF Tracking")
+    st.subheader("🌍 Sector/ETF Tracking")
 
     # Add search and add functionality
     st.markdown("### 🔍 Search & Add ETFs")
