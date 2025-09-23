@@ -231,8 +231,10 @@ class UnusualWhalesClient:
         return self._make_request(endpoint, params)
     
     def get_atm_chains(self, ticker: str, expirations: List[str] = None) -> Dict:
-        """Get at-the-money option chains"""
-        endpoint = f"/api/stock/{ticker}/atm-chains"
+        """Get at-the-money option chains with enhanced error handling"""
+        endpoint = f"/api/stock/{ticker.upper()}/atm-chains"
+        
+        print(f'Fetching ATM chains from:', endpoint)
         
         # If no expirations provided, get current and next Friday
         if not expirations:
@@ -255,7 +257,33 @@ class UnusualWhalesClient:
             "expirations[]": expirations
         }
         
-        return self._make_request(endpoint, params)
+        result = self._make_request(endpoint, params)
+        
+        if result["error"]:
+            print(f"ATM chains error for {ticker}: {result['error']}")
+            return {"error": result["error"]}
+        
+        # Enhanced data processing
+        try:
+            response_data = result["data"]
+            print(f"ATM chains raw response for {ticker}:", response_data)
+            
+            if response_data and "data" in response_data:
+                chains_data = response_data["data"]
+                if isinstance(chains_data, list) and len(chains_data) > 0:
+                    print(f"Successfully got {len(chains_data)} ATM chains for {ticker}")
+                    return {"data": chains_data, "error": None}
+                else:
+                    print(f"Empty ATM chains array for {ticker}")
+                    return {"data": [], "error": "No ATM chains data available"}
+            else:
+                print(f"No ATM chains data in response for {ticker}")
+                return {"data": [], "error": "No ATM chains data found"}
+                    
+        except Exception as e:
+            error_msg = f"Error processing ATM chains for {ticker}: {str(e)}"
+            print(error_msg)
+            return {"error": error_msg}
     
     # =================================================================
     # MARKET DATA METHODS
@@ -390,6 +418,21 @@ class UnusualWhalesClient:
 
 # Initialize UW client
 uw_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
+
+def debug_atm_chains(ticker: str):
+    """Debug function for testing ATM chains"""
+    if not uw_client:
+        print("UW client not available")
+        return None
+        
+    print(f"Testing ATM chains for {ticker}...")
+    try:
+        atm_result = uw_client.get_atm_chains(ticker)
+        print(f"ATM chains result: {atm_result}")
+        return atm_result
+    except Exception as e:
+        print(f"Debug error: {e}")
+        return None
 
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
@@ -1126,7 +1169,7 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 metrics["total_theta"] = greek_data.get("total_theta", 0)
                 metrics["total_vega"] = greek_data.get("total_vega", 0)
         
-        # ATM chains analysis - Fixed for correct API response structure
+        # Enhanced ATM chains analysis
         atm_chains = uw_data.get("atm_chains", {})
         if atm_chains.get("data") and not atm_chains.get("error"):
             chains_data = atm_chains["data"]
@@ -1137,19 +1180,29 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 total_put_oi = 0
                 
                 for chain in chains_data:
-                    # Based on the actual API response structure
-                    if "option_symbol" in chain:
-                        option_symbol = chain["option_symbol"]
-                        volume = chain.get("volume", 0)
-                        oi = chain.get("open_interest", 0)
+                    try:
+                        volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
+                        oi = int(chain.get("open_interest", 0)) if chain.get("open_interest") else 0
                         
-                        # Determine if it's a call or put based on option symbol
-                        if "C" in option_symbol:  # Call option
+                        is_call = False
+                        if "option_symbol" in chain:
+                            option_symbol = chain["option_symbol"]
+                            is_call = "C" in option_symbol and "P" not in option_symbol
+                        elif "type" in chain:
+                            is_call = chain["type"].lower() == "call"
+                        elif "call_put" in chain:
+                            is_call = chain["call_put"].lower() == "call"
+                        
+                        if is_call:
                             total_call_volume += volume
                             total_call_oi += oi
-                        elif "P" in option_symbol:  # Put option
+                        else:
                             total_put_volume += volume
                             total_put_oi += oi
+                            
+                    except Exception as e:
+                        print(f"Error processing ATM chain item: {e}")
+                        continue
                 
                 metrics["atm_call_volume"] = total_call_volume
                 metrics["atm_put_volume"] = total_put_volume
@@ -1160,10 +1213,19 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                     metrics["atm_put_call_ratio"] = total_put_volume / total_call_volume
                 else:
                     metrics["atm_put_call_ratio"] = 0
+                    
+                print(f"ATM analysis complete: Calls={total_call_volume}, Puts={total_put_volume}")
+            else:
+                print("ATM chains data is empty or invalid format")
+                metrics["atm_chains_status"] = "No data"
         else:
-            # Log the ATM chains error for debugging
+            # Log the ATM chains error for debugging  
             if atm_chains.get("error"):
                 metrics["atm_chains_error"] = atm_chains["error"]
+                print(f"ATM chains error: {atm_chains['error']}")
+            else:
+                print("No ATM chains data available")
+                metrics["atm_chains_status"] = "No data available"
         
         return metrics
         
@@ -2630,6 +2692,7 @@ def generate_enhanced_options_summary(options: Dict) -> str:
         return f"Options Error: {options['error']}"
     
     if options.get("data_source") == "Unusual Whales":
+        # UW enhanced options metrics
         enhanced = options.get('enhanced_metrics', {})
         flow_alerts = enhanced.get('total_flow_alerts', 'N/A')
         sentiment = enhanced.get('flow_sentiment', 'Neutral')
@@ -2938,8 +3001,12 @@ if debug_mode:
                 uw_greeks = uw_client.get_greek_exposure(debug_ticker)
                 st.write(f"UW Greeks: {'✅' if not uw_greeks.get('error') else '❌'}")
                 
+                # Test ATM Chains
+                uw_atm = uw_client.get_atm_chains(debug_ticker)
+                st.write(f"UW ATM Chains: {'✅' if not uw_atm.get('error') else '❌'}")
+                
                 if st.checkbox("Show UW Raw Data"):
-                    st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks})
+                    st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks, "atm": uw_atm})
             else:
                 st.error("UW Client not initialized")
             
