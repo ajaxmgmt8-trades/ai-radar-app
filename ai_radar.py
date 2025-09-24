@@ -201,6 +201,23 @@ class UnusualWhalesClient:
         
         return self._make_request(endpoint, params)
     
+    def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
+        """Get options volume data for ticker"""
+        endpoint = f"/api/stock/{ticker}/options-volume"
+        params = {"limit": limit}
+        return self._make_request(endpoint, params)
+    
+    def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
+        """Get hottest option chains"""
+        endpoint = "/api/screener/option-contracts"
+        params = {
+            "limit": limit,
+            "is_otm": "false"  # Include ITM contracts too
+        }
+        if date:
+            params["date"] = date
+        return self._make_request(endpoint, params)
+    
     def get_stock_flow_recent(self, ticker: str) -> Dict:
         """Get recent options flow for stock"""
         endpoint = f"/api/stock/{ticker}/flow-recent"
@@ -395,8 +412,27 @@ class UnusualWhalesClient:
         return self._make_request(endpoint)
     
     # =================================================================
-    # COMPREHENSIVE STOCK ANALYSIS
+    # COMPREHENSIVE STOCK ANALYSIS WITH ENHANCED FLOW DATA
     # =================================================================
+    
+    def get_comprehensive_flow_data(self, ticker: str) -> Dict:
+        """Get comprehensive flow data including alerts, volume, and hottest chains"""
+        today = datetime.date.today().isoformat()
+        
+        # Gather all flow-related data
+        data = {
+            "flow_alerts": self.get_flow_alerts(ticker),
+            "options_volume": self.get_options_volume(ticker),
+            "flow_recent": self.get_stock_flow_recent(ticker),
+            "flow_per_strike": self.get_flow_per_strike(ticker, today),
+            "greek_exposure": self.get_greek_exposure(ticker, today),
+            "greek_by_expiry": self.get_greek_exposure_by_expiry(ticker, today),
+            "atm_chains": self.get_atm_chains(ticker),
+            "timestamp": datetime.datetime.now().isoformat(),
+            "data_source": "Unusual Whales"
+        }
+        
+        return data
     
     def get_comprehensive_stock_data(self, ticker: str) -> Dict:
         """Get comprehensive stock analysis data"""
@@ -405,7 +441,9 @@ class UnusualWhalesClient:
         # Gather all relevant data
         data = {
             "quote": self.get_stock_state(ticker),
-            "flow_alerts": self.get_stock_flow_recent(ticker),
+            "flow_alerts": self.get_flow_alerts(ticker),
+            "options_volume": self.get_options_volume(ticker),
+            "flow_recent": self.get_stock_flow_recent(ticker),
             "greek_exposure": self.get_greek_exposure(ticker, today),
             "greek_by_expiry": self.get_greek_exposure_by_expiry(ticker, today),
             "flow_per_strike": self.get_flow_per_strike(ticker, today),
@@ -433,6 +471,306 @@ def debug_atm_chains(ticker: str):
     except Exception as e:
         print(f"Debug error: {e}")
         return None
+
+# =================================================================
+# ENHANCED FLOW ANALYSIS FUNCTIONS
+# =================================================================
+
+def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
+    """Analyze flow alerts data from UW"""
+    if flow_alerts_data.get("error"):
+        return {"error": flow_alerts_data["error"]}
+    
+    try:
+        alerts = flow_alerts_data.get("data", [])
+        if not alerts:
+            return {"summary": "No flow alerts found", "alerts": []}
+        
+        # Process alerts data
+        processed_alerts = []
+        call_alerts = []
+        put_alerts = []
+        
+        total_premium = 0
+        bullish_flow = 0
+        bearish_flow = 0
+        
+        for alert in alerts:
+            if isinstance(alert, dict):
+                alert_type = alert.get("type", "").lower()
+                premium = float(alert.get("total_premium", 0)) if alert.get("total_premium") else 0
+                volume = int(alert.get("volume", 0)) if alert.get("volume") else 0
+                
+                processed_alert = {
+                    "type": alert_type,
+                    "strike": alert.get("strike", 0),
+                    "premium": premium,
+                    "volume": volume,
+                    "ticker": alert.get("ticker", ticker),
+                    "expiry": alert.get("expiry", ""),
+                    "price": alert.get("price", 0),
+                    "underlying_price": alert.get("underlying_price", 0),
+                    "time": alert.get("created_at", ""),
+                    "is_sweep": alert.get("is_sweep", False),
+                    "is_opening": alert.get("all_opening", False)
+                }
+                
+                processed_alerts.append(processed_alert)
+                total_premium += premium
+                
+                if alert_type == "call":
+                    call_alerts.append(processed_alert)
+                    bullish_flow += premium
+                elif alert_type == "put":
+                    put_alerts.append(processed_alert)
+                    bearish_flow += premium
+        
+        # Calculate summary metrics
+        total_alerts = len(processed_alerts)
+        call_count = len(call_alerts)
+        put_count = len(put_alerts)
+        
+        flow_sentiment = "Neutral"
+        if bullish_flow > bearish_flow * 1.2:
+            flow_sentiment = "Bullish"
+        elif bearish_flow > bullish_flow * 1.2:
+            flow_sentiment = "Bearish"
+        
+        return {
+            "summary": {
+                "total_alerts": total_alerts,
+                "call_alerts": call_count,
+                "put_alerts": put_count,
+                "total_premium": total_premium,
+                "bullish_flow": bullish_flow,
+                "bearish_flow": bearish_flow,
+                "flow_sentiment": flow_sentiment
+            },
+            "alerts": processed_alerts,
+            "call_alerts": call_alerts,
+            "put_alerts": put_alerts,
+            "error": None
+        }
+        
+    except Exception as e:
+        return {"error": f"Error analyzing flow alerts: {str(e)}"}
+
+def analyze_options_volume(volume_data: Dict, ticker: str) -> Dict:
+    """Analyze options volume data from UW"""
+    if volume_data.get("error"):
+        return {"error": volume_data["error"]}
+    
+    try:
+        data = volume_data.get("data", [])
+        if not data:
+            return {"summary": "No volume data found", "volume_data": []}
+        
+        # Process volume data
+        processed_data = []
+        total_call_volume = 0
+        total_put_volume = 0
+        total_call_premium = 0
+        total_put_premium = 0
+        
+        for item in data:
+            if isinstance(item, dict):
+                avg_30_day_call_volume = float(item.get("avg_30_day_call_volume", 0)) if item.get("avg_30_day_call_volume") else 0
+                avg_30_day_put_volume = float(item.get("avg_30_day_put_volume", 0)) if item.get("avg_30_day_put_volume") else 0
+                call_volume = int(item.get("call_volume", 0)) if item.get("call_volume") else 0
+                put_volume = int(item.get("put_volume", 0)) if item.get("put_volume") else 0
+                
+                processed_item = {
+                    "date": item.get("date", ""),
+                    "call_volume": call_volume,
+                    "put_volume": put_volume,
+                    "avg_30_day_call_volume": avg_30_day_call_volume,
+                    "avg_30_day_put_volume": avg_30_day_put_volume,
+                    "call_volume_ratio": call_volume / max(avg_30_day_call_volume, 1),
+                    "put_volume_ratio": put_volume / max(avg_30_day_put_volume, 1),
+                    "bearish_premium": float(item.get("bearish_premium", 0)) if item.get("bearish_premium") else 0,
+                    "bullish_premium": float(item.get("bullish_premium", 0)) if item.get("bullish_premium") else 0,
+                    "call_premium": float(item.get("call_premium", 0)) if item.get("call_premium") else 0,
+                    "put_premium": float(item.get("put_premium", 0)) if item.get("put_premium") else 0,
+                    "net_call_premium": float(item.get("net_call_premium", 0)) if item.get("net_call_premium") else 0,
+                    "net_put_premium": float(item.get("net_put_premium", 0)) if item.get("net_put_premium") else 0
+                }
+                
+                processed_data.append(processed_item)
+                total_call_volume += call_volume
+                total_put_volume += put_volume
+                total_call_premium += processed_item["call_premium"]
+                total_put_premium += processed_item["put_premium"]
+        
+        # Calculate summary
+        put_call_ratio = total_put_volume / max(total_call_volume, 1)
+        premium_ratio = total_put_premium / max(total_call_premium, 1)
+        
+        return {
+            "summary": {
+                "total_call_volume": total_call_volume,
+                "total_put_volume": total_put_volume,
+                "put_call_ratio": put_call_ratio,
+                "total_call_premium": total_call_premium,
+                "total_put_premium": total_put_premium,
+                "premium_ratio": premium_ratio
+            },
+            "volume_data": processed_data,
+            "error": None
+        }
+        
+    except Exception as e:
+        return {"error": f"Error analyzing options volume: {str(e)}"}
+
+def get_hottest_chains_analysis() -> Dict:
+    """Get and analyze hottest option chains"""
+    if not uw_client:
+        return {"error": "UW client not available"}
+    
+    try:
+        chains_data = uw_client.get_hottest_chains()
+        if chains_data.get("error"):
+            return chains_data
+        
+        data = chains_data.get("data", [])
+        if not data:
+            return {"summary": "No hottest chains data found", "chains": []}
+        
+        processed_chains = []
+        total_volume = 0
+        total_premium = 0
+        
+        for chain in data:
+            if isinstance(chain, dict):
+                volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
+                premium = float(chain.get("total_premium", 0)) if chain.get("total_premium") else 0
+                
+                processed_chain = {
+                    "ticker": chain.get("ticker", ""),
+                    "strike": float(chain.get("strike", 0)) if chain.get("strike") else 0,
+                    "type": chain.get("type", ""),
+                    "volume": volume,
+                    "premium": premium,
+                    "expiry": chain.get("expiry", ""),
+                    "underlying_price": float(chain.get("underlying_price", 0)) if chain.get("underlying_price") else 0,
+                    "price": float(chain.get("price", 0)) if chain.get("price") else 0,
+                    "iv": float(chain.get("iv", 0)) if chain.get("iv") else 0
+                }
+                
+                processed_chains.append(processed_chain)
+                total_volume += volume
+                total_premium += premium
+        
+        # Sort by volume
+        processed_chains.sort(key=lambda x: x["volume"], reverse=True)
+        
+        return {
+            "summary": {
+                "total_chains": len(processed_chains),
+                "total_volume": total_volume,
+                "total_premium": total_premium
+            },
+            "chains": processed_chains,
+            "error": None
+        }
+        
+    except Exception as e:
+        return {"error": f"Error analyzing hottest chains: {str(e)}"}
+
+# =================================================================
+# AI ANALYSIS WITH ENHANCED FLOW DATA
+# =================================================================
+
+def generate_flow_analysis_prompt(ticker: str, flow_data: Dict, volume_data: Dict, hottest_chains: Dict) -> str:
+    """Generate comprehensive flow analysis prompt for AI"""
+    
+    prompt = f"""
+    COMPREHENSIVE OPTIONS FLOW ANALYSIS FOR {ticker}
+    
+    === FLOW ALERTS ANALYSIS ===
+    """
+    
+    if not flow_data.get("error"):
+        summary = flow_data.get("summary", {})
+        prompt += f"""
+        - Total Flow Alerts: {summary.get('total_alerts', 0)}
+        - Call Alerts: {summary.get('call_alerts', 0)}
+        - Put Alerts: {summary.get('put_alerts', 0)}
+        - Total Premium: ${summary.get('total_premium', 0):,.2f}
+        - Bullish Flow: ${summary.get('bullish_flow', 0):,.2f}
+        - Bearish Flow: ${summary.get('bearish_flow', 0):,.2f}
+        - Flow Sentiment: {summary.get('flow_sentiment', 'Neutral')}
+        
+        Top Flow Alerts:
+        """
+        
+        # Add top alerts
+        alerts = flow_data.get("alerts", [])
+        for alert in alerts[:5]:
+            prompt += f"""
+        - {alert['type'].upper()}: Strike ${alert['strike']}, Premium ${alert['premium']:,.2f}, Volume {alert['volume']}
+        """
+    else:
+        prompt += f"Flow Alerts Error: {flow_data['error']}\n"
+    
+    prompt += f"""
+    
+    === OPTIONS VOLUME ANALYSIS ===
+    """
+    
+    if not volume_data.get("error"):
+        vol_summary = volume_data.get("summary", {})
+        prompt += f"""
+        - Total Call Volume: {vol_summary.get('total_call_volume', 0):,}
+        - Total Put Volume: {vol_summary.get('total_put_volume', 0):,}
+        - Put/Call Ratio: {vol_summary.get('put_call_ratio', 0):.2f}
+        - Call Premium: ${vol_summary.get('total_call_premium', 0):,.2f}
+        - Put Premium: ${vol_summary.get('total_put_premium', 0):,.2f}
+        - Premium Ratio: {vol_summary.get('premium_ratio', 0):.2f}
+        """
+    else:
+        prompt += f"Volume Data Error: {volume_data['error']}\n"
+    
+    prompt += f"""
+    
+    === HOTTEST CHAINS ANALYSIS ===
+    """
+    
+    if not hottest_chains.get("error"):
+        chains_summary = hottest_chains.get("summary", {})
+        prompt += f"""
+        - Total Hottest Chains: {chains_summary.get('total_chains', 0)}
+        - Combined Volume: {chains_summary.get('total_volume', 0):,}
+        - Combined Premium: ${chains_summary.get('total_premium', 0):,.2f}
+        
+        Top Hottest Chains:
+        """
+        
+        chains = hottest_chains.get("chains", [])
+        for chain in chains[:5]:
+            prompt += f"""
+        - {chain['ticker']} {chain['type'].upper()}: Strike ${chain['strike']}, Volume {chain['volume']}, Premium ${chain['premium']:,.2f}
+        """
+    else:
+        prompt += f"Hottest Chains Error: {hottest_chains['error']}\n"
+    
+    prompt += f"""
+    
+    ANALYSIS REQUEST:
+    Based on this comprehensive options flow data, provide:
+    
+    1. **Flow Sentiment Analysis**: Overall bullish/bearish bias from the data
+    2. **Key Flow Patterns**: Notable unusual activity or patterns
+    3. **Volume Analysis**: How current volume compares to averages
+    4. **Premium Flow**: Where the big money is going
+    5. **Trading Opportunities**: Specific strikes and strategies
+    6. **Risk Assessment**: Key levels and timing considerations
+    7. **Institutional Activity**: Signs of smart money positioning
+    
+    Keep analysis under 400 words but be specific about actionable insights.
+    Focus on the most significant flow patterns and their trading implications.
+    """
+    
+    return prompt
 
 class GrokClient:
     """Enhanced Grok client for trading analysis"""
@@ -1127,6 +1465,7 @@ def get_enhanced_options_analysis(ticker: str) -> Dict:
         # Extract and analyze UW data
         analysis = {
             "uw_flow_alerts": uw_data.get("flow_alerts", {}),
+            "uw_options_volume": uw_data.get("options_volume", {}),
             "uw_greek_exposure": uw_data.get("greek_exposure", {}),
             "uw_greek_by_expiry": uw_data.get("greek_by_expiry", {}),
             "uw_flow_per_strike": uw_data.get("flow_per_strike", {}),
@@ -1158,6 +1497,18 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
                 metrics["call_flow_alerts"] = len(call_alerts)
                 metrics["put_flow_alerts"] = len(put_alerts)
                 metrics["flow_sentiment"] = "Bullish" if len(call_alerts) > len(put_alerts) else "Bearish" if len(put_alerts) > len(call_alerts) else "Neutral"
+        
+        # Options volume analysis
+        options_volume = uw_data.get("options_volume", {})
+        if options_volume.get("data"):
+            volume_data = options_volume["data"]
+            if isinstance(volume_data, list) and len(volume_data) > 0:
+                latest_volume = volume_data[0] if volume_data else {}
+                metrics["call_volume"] = latest_volume.get("call_volume", 0)
+                metrics["put_volume"] = latest_volume.get("put_volume", 0)
+                metrics["call_premium"] = latest_volume.get("call_premium", 0)
+                metrics["put_premium"] = latest_volume.get("put_premium", 0)
+                metrics["volume_put_call_ratio"] = latest_volume.get("put_volume", 0) / max(latest_volume.get("call_volume", 1), 1)
         
         # Greek exposure analysis
         greek_exposure = uw_data.get("greek_exposure", {})
@@ -2957,8 +3308,85 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
     except Exception as e:
         return {"error": f"Error fetching {timeframe} options for {ticker}: {str(e)}"}
 
+def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_data: Dict, volume_data: Dict, hottest_chains: Dict, timeframe: str) -> str:
+    """Generate timeframe-specific AI analysis with enhanced flow data"""
+    
+    if option_data.get("error"):
+        return f"Unable to analyze {timeframe} options: {option_data['error']}"
+    
+    calls = option_data.get("calls", pd.DataFrame())
+    puts = option_data.get("puts", pd.DataFrame())
+    days_to_exp = option_data.get("days_to_expiration", 0)
+    current_price = option_data.get("current_price", 0)
+    
+    # Calculate key metrics
+    total_call_volume = calls['volume'].sum() if not calls.empty else 0
+    total_put_volume = puts['volume'].sum() if not puts.empty else 0
+    avg_iv = (calls['impliedVolatility'].mean() + puts['impliedVolatility'].mean()) / 2 if not calls.empty and not puts.empty else 0
+    
+    # Generate enhanced flow analysis prompt
+    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains)
+    
+    # Create timeframe-specific prompt with flow integration
+    prompt = f"""
+    ENHANCED {timeframe} OPTIONS FLOW ANALYSIS FOR {ticker}:
+    
+    === BASIC OPTIONS DATA ===
+    Current Price: ${current_price:.2f}
+    Days to Expiration: {days_to_exp}
+    Timeframe Category: {timeframe}
+    
+    Options Metrics:
+    - Total Call Volume: {total_call_volume:,}
+    - Total Put Volume: {total_put_volume:,}
+    - Put/Call Volume Ratio: {total_put_volume/max(total_call_volume, 1):.2f}
+    - Average IV: {avg_iv:.1f}%
+    
+    Top 5 Call Strikes by Volume:
+    {calls.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not calls.empty else 'No call data'}
+    
+    Top 5 Put Strikes by Volume:
+    {puts.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not puts.empty else 'No put data'}
+    
+    {flow_prompt}
+    
+    === ANALYSIS REQUEST ===
+    Provide comprehensive {timeframe}-specific analysis covering:
+    
+    1. **Flow-Based Strategy**: How the unusual flow data impacts {timeframe} positioning
+    2. **Optimal Entry Timing**: When to enter {timeframe} positions based on flow patterns
+    3. **Key Strike Selection**: Which strikes show the most institutional interest
+    4. **Time Decay Considerations**: How flow patterns affect theta decay for {timeframe}
+    5. **Volume vs Open Interest**: What the flow tells us about new vs existing positions
+    6. **IV and Volatility Outlook**: How flow impacts implied volatility expectations
+    7. **Risk Management**: Position sizing and stops based on flow sentiment
+    8. **Catalyst Timing**: How to time {timeframe} trades around expected catalysts
+    
+    Tailor advice specifically for {timeframe} characteristics with flow-based insights.
+    Keep analysis under 400 words but be actionable and flow-focused.
+    """
+    
+    # Use selected AI model for enhanced analysis
+    if st.session_state.ai_model == "Multi-AI":
+        analyses = multi_ai.multi_ai_consensus_enhanced(prompt)
+        if analyses:
+            result = f"## 🤖 Enhanced Multi-AI {timeframe} Flow Analysis\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model}:\n{analysis}\n\n---\n\n"
+            return result
+        else:
+            return f"No AI models available for {timeframe} analysis."
+    elif st.session_state.ai_model == "OpenAI" and openai_client:
+        return multi_ai.analyze_with_openai(prompt)
+    elif st.session_state.ai_model == "Gemini" and gemini_model:
+        return multi_ai.analyze_with_gemini(prompt)
+    elif st.session_state.ai_model == "Grok" and grok_enhanced:
+        return multi_ai.analyze_with_grok(prompt)
+    else:
+        return f"No AI model configured for {timeframe} analysis."
+
 def analyze_timeframe_options(ticker: str, option_data: Dict, uw_data: Dict, timeframe: str) -> str:
-    """Generate timeframe-specific AI analysis"""
+    """Generate timeframe-specific AI analysis (backward compatibility)"""
     
     if option_data.get("error"):
         return f"Unable to analyze {timeframe} options: {option_data['error']}"
@@ -3179,7 +3607,7 @@ with col4:
     status = "🟢 Open" if market_open else "🔴 Closed"
     st.write(f"**{status}** | {current_time} {tz_label}")
 
-# Create tabs - Updated with new Options Flow tab and renamed 0DTE tab
+# Create tabs - Updated with enhanced Options Flow integration
 tabs = st.tabs([
     "📊 Live Quotes", 
     "📋 Watchlist Manager", 
@@ -4176,10 +4604,10 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: Enhanced Options Flow with Timeframes
+# TAB 7: Enhanced Options Flow with UW Integration
 with tabs[6]:
-    st.subheader("🎯 Options Flow Analysis")
-    st.markdown("**Advanced options flow analysis with timeframe-specific strategies using Unusual Whales data.**")
+    st.subheader("🎯 Enhanced Options Flow Analysis")
+    st.markdown("**Advanced options flow analysis with Unusual Whales integration and timeframe-specific strategies.**")
 
     # Ticker selection
     col1, col2 = st.columns([3, 1])
@@ -4192,14 +4620,7 @@ with tabs[6]:
 
     # Get base data
     quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
-    uw_data = None
     
-    if uw_client:
-        with st.spinner(f"Fetching Unusual Whales data for {flow_ticker}..."):
-            uw_data = uw_client.get_comprehensive_stock_data(flow_ticker)
-    else:
-        st.error("🔥 Unusual Whales API required for premium options flow analysis")
-
     if not quote.get("error"):
         # Basic quote info
         col1, col2, col3, col4 = st.columns(4)
@@ -4208,15 +4629,101 @@ with tabs[6]:
         col3.metric("Data Source", quote.get('data_source', 'Unknown'))
         col4.metric("Last Updated", quote['last_updated'][-8:])
 
-        # Create the 3 timeframe tabs
+        # Enhanced UW Flow Analysis Section
+        if uw_client:
+            st.markdown("### 🔥 Unusual Whales Flow Intelligence")
+            
+            with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
+                # Get comprehensive flow data
+                flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
+                options_volume_data = uw_client.get_options_volume(flow_ticker)
+                hottest_chains_data = get_hottest_chains_analysis()
+                
+                # Analyze the data
+                flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
+                volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
+                
+                # Display UW Flow Alerts
+                st.markdown("#### 🔥 Flow Alerts")
+                if not flow_analysis.get("error"):
+                    summary = flow_analysis.get("summary", {})
+                    
+                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
+                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
+                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
+                    alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
+                    
+                    # Premium metrics
+                    prem_col1, prem_col2, prem_col3 = st.columns(3)
+                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
+                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
+                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
+                    
+                    # Display top alerts
+                    if flow_analysis.get("alerts"):
+                        with st.expander("📋 Recent Flow Alerts"):
+                            alerts_df = pd.DataFrame(flow_analysis["alerts"])
+                            if not alerts_df.empty:
+                                # Sort by premium
+                                alerts_df = alerts_df.sort_values('premium', ascending=False)
+                                st.dataframe(alerts_df.head(10), use_container_width=True)
+                else:
+                    st.info(f"Flow Alerts: {flow_analysis.get('error', 'No data available')}")
+                
+                # Display UW Volume Analysis
+                st.markdown("#### 📊 Options Volume Analysis")
+                if not volume_analysis.get("error"):
+                    vol_summary = volume_analysis.get("summary", {})
+                    
+                    vol_col1, vol_col2, vol_col3, vol_col4 = st.columns(4)
+                    vol_col1.metric("Call Volume", f"{vol_summary.get('total_call_volume', 0):,}")
+                    vol_col2.metric("Put Volume", f"{vol_summary.get('total_put_volume', 0):,}")
+                    vol_col3.metric("P/C Ratio", f"{vol_summary.get('put_call_ratio', 0):.2f}")
+                    vol_col4.metric("Premium Ratio", f"{vol_summary.get('premium_ratio', 0):.2f}")
+                    
+                    # Display volume data
+                    if volume_analysis.get("volume_data"):
+                        with st.expander("📈 Volume Details"):
+                            volume_df = pd.DataFrame(volume_analysis["volume_data"])
+                            if not volume_df.empty:
+                                st.dataframe(volume_df, use_container_width=True)
+                else:
+                    st.info(f"Volume Analysis: {volume_analysis.get('error', 'No data available')}")
+                
+                # Display Hottest Chains
+                st.markdown("#### 🌡️ Hottest Chains")
+                if not hottest_chains_data.get("error"):
+                    chains_summary = hottest_chains_data.get("summary", {})
+                    
+                    chain_col1, chain_col2, chain_col3 = st.columns(3)
+                    chain_col1.metric("Total Chains", chains_summary.get("total_chains", 0))
+                    chain_col2.metric("Combined Volume", f"{chains_summary.get('total_volume', 0):,}")
+                    chain_col3.metric("Combined Premium", f"${chains_summary.get('total_premium', 0):,.0f}")
+                    
+                    if hottest_chains_data.get("chains"):
+                        with st.expander("🔥 Top Hottest Chains"):
+                            chains_df = pd.DataFrame(hottest_chains_data["chains"][:20])  # Top 20
+                            if not chains_df.empty:
+                                st.dataframe(chains_df, use_container_width=True)
+                else:
+                    st.info(f"Hottest Chains: {hottest_chains_data.get('error', 'No data available')}")
+        else:
+            st.error("🔥 Unusual Whales API required for premium options flow analysis")
+            st.info("Configure your Unusual Whales API key to access enhanced flow data")
+            flow_analysis = {"error": "UW not available"}
+            volume_analysis = {"error": "UW not available"}
+            hottest_chains_data = {"error": "UW not available"}
+
+        # Create the 3 timeframe tabs with enhanced flow integration
         timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
 
-        # 0DTE Tab
+        # 0DTE Tab with Flow Integration
         with timeframe_tabs[0]:
             st.markdown("### 🎯 0DTE Options (Same Day Expiration)")
-            st.caption("High-risk, high-reward same-day expiration plays")
+            st.caption("High-risk, high-reward same-day expiration plays with flow analysis")
             
-            with st.spinner("Loading 0DTE options..."):
+            with st.spinner("Loading 0DTE options and flow data..."):
                 dte_options = get_options_by_timeframe(flow_ticker, "0DTE", st.session_state.selected_tz)
             
             if dte_options.get("error"):
@@ -4229,12 +4736,26 @@ with tabs[6]:
                 calls_0dte = dte_options["calls"]
                 puts_0dte = dte_options["puts"]
                 
-                # 0DTE Summary
+                # 0DTE Summary with Flow Integration
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Call Options", len(calls_0dte))
                 col2.metric("Put Options", len(puts_0dte))
                 col3.metric("Total Call Volume", int(calls_0dte['volume'].sum()) if not calls_0dte.empty else 0)
                 col4.metric("Total Put Volume", int(puts_0dte['volume'].sum()) if not puts_0dte.empty else 0)
+                
+                # Enhanced AI Analysis for 0DTE with Flow Data
+                st.markdown("### 🤖 Enhanced AI 0DTE Flow Analysis")
+                with st.spinner("Generating comprehensive 0DTE flow strategy..."):
+                    if uw_client and not flow_analysis.get("error"):
+                        # Use enhanced flow analysis
+                        dte_analysis = analyze_timeframe_options_with_flow(
+                            flow_ticker, dte_options, flow_analysis, volume_analysis, hottest_chains_data, "0DTE"
+                        )
+                    else:
+                        # Fallback to standard analysis
+                        dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, {}, "0DTE")
+                    
+                    st.markdown(dte_analysis)
                 
                 # 0DTE Options Display
                 if not calls_0dte.empty or not puts_0dte.empty:
@@ -4258,12 +4779,6 @@ with tabs[6]:
                         else:
                             st.info("No 0DTE put options")
                 
-                # AI Analysis for 0DTE
-                st.markdown("### 🤖 AI 0DTE Analysis")
-                with st.spinner("Generating 0DTE strategy..."):
-                    dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, uw_data, "0DTE")
-                    st.markdown(dte_analysis)
-                
                 # 0DTE Risk Warning
                 with st.expander("⚠️ 0DTE Risk Warning"):
                     st.markdown("""
@@ -4275,12 +4790,12 @@ with tabs[6]:
                     - Use tiny position sizes
                     """)
 
-        # Swing Tab  
+        # Swing Tab with Flow Integration
         with timeframe_tabs[1]:
             st.markdown("### 📈 Swing Options (2-89 Days)")
-            st.caption("Medium-term plays with balanced risk/reward")
+            st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
-            with st.spinner("Loading swing options..."):
+            with st.spinner("Loading swing options and flow analysis..."):
                 swing_options = get_options_by_timeframe(flow_ticker, "Swing", st.session_state.selected_tz)
             
             if swing_options.get("error"):
@@ -4298,6 +4813,18 @@ with tabs[6]:
                 col2.metric("Put Options", len(puts_swing))
                 col3.metric("Avg Call IV", f"{calls_swing['impliedVolatility'].mean():.1f}%" if not calls_swing.empty else "N/A")
                 col4.metric("Avg Put IV", f"{puts_swing['impliedVolatility'].mean():.1f}%" if not puts_swing.empty else "N/A")
+                
+                # Enhanced AI Analysis for Swing with Flow Data
+                st.markdown("### 🤖 Enhanced AI Swing Flow Analysis")
+                with st.spinner("Generating comprehensive swing flow strategy..."):
+                    if uw_client and not flow_analysis.get("error"):
+                        swing_analysis = analyze_timeframe_options_with_flow(
+                            flow_ticker, swing_options, flow_analysis, volume_analysis, hottest_chains_data, "Swing"
+                        )
+                    else:
+                        swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, {}, "Swing")
+                    
+                    st.markdown(swing_analysis)
                 
                 # Swing Options Display
                 if not calls_swing.empty or not puts_swing.empty:
@@ -4318,30 +4845,13 @@ with tabs[6]:
                             st.dataframe(top_puts, use_container_width=True)
                         else:
                             st.info("No swing put options")
-                
-                # Show UW Flow Data if available
-                if uw_data and not uw_data.get("error"):
-                    st.markdown("### 🔥 Unusual Whales Flow (All Timeframes)")
-                    enhanced = uw_data.get('enhanced_metrics', {})
-                    if enhanced:
-                        uw_col1, uw_col2, uw_col3, uw_col4 = st.columns(4)
-                        uw_col1.metric("Flow Alerts", enhanced.get('total_flow_alerts', 'N/A'))
-                        uw_col2.metric("Flow Sentiment", enhanced.get('flow_sentiment', 'Neutral'))
-                        uw_col3.metric("ATM P/C Ratio", f"{enhanced.get('atm_put_call_ratio', 0):.2f}")
-                        uw_col4.metric("Total Delta", enhanced.get('total_delta', 'N/A'))
-                
-                # AI Analysis for Swing
-                st.markdown("### 🤖 AI Swing Analysis")
-                with st.spinner("Generating swing strategy..."):
-                    swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, uw_data, "Swing")
-                    st.markdown(swing_analysis)
 
-        # LEAPS Tab
+        # LEAPS Tab with Flow Integration
         with timeframe_tabs[2]:
             st.markdown("### 📊 LEAPS Options (90+ Days)")
-            st.caption("Long-term strategic positions with lower time decay")
+            st.caption("Long-term strategic positions with lower time decay and institutional flow insights")
             
-            with st.spinner("Loading LEAPS options..."):
+            with st.spinner("Loading LEAPS options and flow analysis..."):
                 leaps_options = get_options_by_timeframe(flow_ticker, "LEAPS", st.session_state.selected_tz)
             
             if leaps_options.get("error"):
@@ -4361,6 +4871,18 @@ with tabs[6]:
                 total_put_oi = int(puts_leaps['openInterest'].sum()) if not puts_leaps.empty else 0
                 col3.metric("Call Open Interest", f"{total_call_oi:,}")
                 col4.metric("Put Open Interest", f"{total_put_oi:,}")
+                
+                # Enhanced AI Analysis for LEAPS with Flow Data
+                st.markdown("### 🤖 Enhanced AI LEAPS Flow Analysis")
+                with st.spinner("Generating comprehensive LEAPS flow strategy..."):
+                    if uw_client and not flow_analysis.get("error"):
+                        leaps_analysis = analyze_timeframe_options_with_flow(
+                            flow_ticker, leaps_options, flow_analysis, volume_analysis, hottest_chains_data, "LEAPS"
+                        )
+                    else:
+                        leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, {}, "LEAPS")
+                    
+                    st.markdown(leaps_analysis)
                 
                 # LEAPS Options Display  
                 if not calls_leaps.empty or not puts_leaps.empty:
@@ -4390,12 +4912,6 @@ with tabs[6]:
                             days_out = (datetime.datetime.strptime(exp, '%Y-%m-%d').date() - datetime.date.today()).days
                             st.write(f"• {exp} ({days_out} days)")
                 
-                # AI Analysis for LEAPS
-                st.markdown("### 🤖 AI LEAPS Analysis")
-                with st.spinner("Generating LEAPS strategy..."):
-                    leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, uw_data, "LEAPS")
-                    st.markdown(leaps_analysis)
-                
                 # LEAPS Strategy Guide
                 with st.expander("💡 LEAPS Strategy Guide"):
                     st.markdown("""
@@ -4415,24 +4931,34 @@ with tabs[6]:
     else:
         st.error(f"Could not get quote data for {flow_ticker}: {quote['error']}")
 
-# TAB 8: Lottos (Renamed from 0DTE & Lottos)
+# TAB 8: Enhanced Lottos with Flow Analysis
 with tabs[7]:
-    st.subheader("💰 Lotto Plays")
-    st.markdown("**High-risk, high-reward options under $1.00. Monitor for unusual activity and potential explosive moves.**")
+    st.subheader("💰 Enhanced Lotto Plays with Flow Intelligence")
+    st.markdown("**High-risk, high-reward options under $1.00 with Unusual Whales flow analysis for better edge detection.**")
 
     # Ticker selection
     col1, col2 = st.columns([3, 1])
     with col1:
         lotto_ticker = st.selectbox("Select Ticker for Lotto Analysis", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="lotto_ticker")
     with col2:
-        if st.button("Find Lottos", key="find_lottos"):
+        if st.button("Find Enhanced Lottos", key="find_enhanced_lottos"):
             st.cache_data.clear()
             st.rerun()
 
-    # Fetch option chain for lotto analysis
-    with st.spinner(f"Searching for lotto opportunities in {lotto_ticker}..."):
+    # Fetch comprehensive data for lotto analysis
+    with st.spinner(f"Gathering comprehensive lotto intelligence for {lotto_ticker}..."):
         option_chain = get_option_chain(lotto_ticker, st.session_state.selected_tz)
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
+        
+        # Get UW flow data if available
+        if uw_client:
+            flow_alerts_data = uw_client.get_flow_alerts(lotto_ticker)
+            options_volume_data = uw_client.get_options_volume(lotto_ticker)
+            flow_analysis = analyze_flow_alerts(flow_alerts_data, lotto_ticker)
+            volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
+        else:
+            flow_analysis = {"error": "UW not available"}
+            volume_analysis = {"error": "UW not available"}
 
     if option_chain.get("error"):
         st.error(option_chain["error"])
@@ -4441,7 +4967,7 @@ with tabs[7]:
         expiration = option_chain["expiration"]
         is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         
-        st.markdown(f"**Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
         # Filter for lotto plays (options under $1.00)
@@ -4458,16 +4984,42 @@ with tabs[7]:
         if not lotto_puts.empty:
             lotto_puts = lotto_puts.sort_values('volume', ascending=False)
 
-        # Summary metrics
-        col1, col2, col3, col4 = st.columns(4)
+        # Enhanced Summary metrics with Flow Intelligence
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Current Price", f"${current_price:.2f}", f"{quote['change_percent']:+.2f}%")
         col2.metric("Lotto Calls", len(lotto_calls))
         col3.metric("Lotto Puts", len(lotto_puts))
         col4.metric("Total Lotto Volume", int(lotto_calls['volume'].sum() + lotto_puts['volume'].sum()) if not lotto_calls.empty and not lotto_puts.empty else 0)
+        
+        # Flow Intelligence Summary
+        if not flow_analysis.get("error"):
+            flow_summary = flow_analysis.get("summary", {})
+            col5.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+        else:
+            col5.metric("Flow Alerts", "N/A")
 
-        # AI Analysis for Lotto Strategy
-        st.markdown("### 🤖 AI Lotto Strategy")
-        with st.spinner("Generating lotto analysis..."):
+        # UW Flow Intelligence for Lottos
+        if uw_client and not flow_analysis.get("error"):
+            st.markdown("### 🔥 Unusual Whales Flow Intelligence")
+            
+            flow_summary = flow_analysis.get("summary", {})
+            flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
+            flow_col1.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
+            flow_col2.metric("Total Premium", f"${flow_summary.get('total_premium', 0):,.0f}")
+            flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
+            flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
+            
+            # Show recent flow alerts that might affect lotto plays
+            if flow_analysis.get("alerts"):
+                with st.expander("🚨 Recent Flow Alerts (Lotto Context)"):
+                    st.caption("Recent flow alerts that might indicate institutional positioning affecting lotto plays")
+                    alerts_df = pd.DataFrame(flow_analysis["alerts"][:10])
+                    if not alerts_df.empty:
+                        st.dataframe(alerts_df, use_container_width=True)
+
+        # Enhanced AI Analysis for Lotto Strategy with Flow Data
+        st.markdown("### 🤖 Enhanced AI Lotto Strategy with Flow Intelligence")
+        with st.spinner("Generating enhanced lotto analysis with flow data..."):
             # Get comprehensive data for lotto analysis
             if uw_client:
                 options_analysis = get_enhanced_options_analysis(lotto_ticker)
@@ -4476,15 +5028,31 @@ with tabs[7]:
             
             tech_analysis = get_comprehensive_technical_analysis(lotto_ticker)
             
-            # Create lotto-specific prompt
+            # Create enhanced lotto-specific prompt with flow data
+            if not flow_analysis.get("error"):
+                flow_context = f"""
+                🔥 UNUSUAL WHALES FLOW INTELLIGENCE:
+                - Flow Alerts: {flow_summary.get('total_alerts', 0)}
+                - Flow Sentiment: {flow_summary.get('flow_sentiment', 'Neutral')}
+                - Total Premium: ${flow_summary.get('total_premium', 0):,.0f}
+                - Bullish vs Bearish Flow: ${flow_summary.get('bullish_flow', 0):,.0f} vs ${flow_summary.get('bearish_flow', 0):,.0f}
+                
+                Recent Flow Patterns:
+                {pd.DataFrame(flow_analysis.get('alerts', [])[:5])[['type', 'strike', 'premium', 'volume']].to_string(index=False) if flow_analysis.get('alerts') else 'No recent alerts'}
+                """
+            else:
+                flow_context = "Flow data unavailable - using standard analysis"
+            
             lotto_summary = f"""
-            Lotto Options Analysis for {lotto_ticker}:
+            ENHANCED LOTTO ANALYSIS FOR {lotto_ticker}:
             
             Current Price: ${current_price:.2f} ({quote['change_percent']:+.2f}%)
             Expiration: {expiration} {'(0DTE - Same Day Expiry!)' if is_0dte else ''}
             
             Available Lotto Calls (≤$1.00): {len(lotto_calls)}
             Available Lotto Puts (≤$1.00): {len(lotto_puts)}
+            
+            {flow_context}
             
             Most Active Lotto Calls:
             {lotto_calls[['strike', 'lastPrice', 'volume', 'moneyness']].head(5).to_string(index=False) if not lotto_calls.empty else 'None'}
@@ -4494,24 +5062,25 @@ with tabs[7]:
             
             Technical Context: {generate_technical_summary(tech_analysis)}
             
-            Provide lotto trading strategy covering:
-            1. Best lotto opportunities (specific strikes and reasons)
-            2. Probability assessment and risk warnings
-            3. Entry timing and conditions
-            4. Quick exit strategy (these expire soon!)
-            5. Position sizing for high-risk plays
-            6. Catalysts that could trigger explosive moves
+            Provide enhanced lotto trading strategy covering:
+            1. Best lotto opportunities based on FLOW INTELLIGENCE (specific strikes and reasons)
+            2. How unusual flow patterns affect lotto probability assessment
+            3. Flow-based entry timing and conditions
+            4. Quick exit strategy leveraging flow sentiment
+            5. Position sizing for high-risk plays with flow context
+            6. Catalysts that could trigger explosive moves based on institutional positioning
+            7. Flow pattern warnings and risk factors
             
-            Remember: These are high-risk, high-reward plays. Most will expire worthless.
-            Keep analysis under 300 words but be specific about the best opportunities.
+            Focus heavily on how the unusual flow data impacts lotto selection and timing.
+            Keep analysis under 400 words but be specific about flow-based opportunities.
             """
             
             lotto_analysis = ai_playbook(lotto_ticker, quote["change_percent"], lotto_summary, options_analysis)
             st.markdown(lotto_analysis)
 
-        # Display lotto opportunities
+        # Display enhanced lotto opportunities
         if not lotto_calls.empty or not lotto_puts.empty:
-            st.markdown("### 🎰 Lotto Opportunities")
+            st.markdown("### 🎰 Enhanced Lotto Opportunities")
             
             col1, col2 = st.columns(2)
             
@@ -4541,8 +5110,8 @@ with tabs[7]:
                 else:
                     st.info("No put options under $1.00 available")
 
-            # Unusual activity in lottos
-            st.markdown("### 🔥 Unusual Lotto Activity")
+            # Enhanced unusual activity in lottos with flow correlation
+            st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
             unusual_lottos = []
             
             # Check for unusual volume in lotto calls
@@ -4557,7 +5126,8 @@ with tabs[7]:
                             'volume': call['volume'],
                             'oi': call['openInterest'],
                             'vol_oi_ratio': vol_oi_ratio,
-                            'moneyness': call['moneyness']
+                            'moneyness': call['moneyness'],
+                            'flow_correlation': 'Check flow alerts for this strike level'
                         })
             
             # Check for unusual volume in lotto puts
@@ -4572,23 +5142,27 @@ with tabs[7]:
                             'volume': put['volume'],
                             'oi': put['openInterest'],
                             'vol_oi_ratio': vol_oi_ratio,
-                            'moneyness': put['moneyness']
+                            'moneyness': put['moneyness'],
+                            'flow_correlation': 'Check flow alerts for this strike level'
                         })
             
             if unusual_lottos:
-                st.success(f"Found {len(unusual_lottos)} unusual lotto activities!")
+                st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
                 unusual_df = pd.DataFrame(unusual_lottos)
                 unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
                 st.dataframe(unusual_df, use_container_width=True)
+                
+                if not flow_analysis.get("error") and flow_analysis.get("alerts"):
+                    st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
             else:
-                st.info("No unusual lotto activity detected")
+                st.info("No unusual lotto activity detected with current criteria")
 
         else:
             st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
             st.info("Try a different ticker or check if options are available for this expiration")
 
-        # Risk Warning
-        with st.expander("⚠️ Lotto Trading Risk Warning"):
+        # Enhanced Risk Warning
+        with st.expander("⚠️ Enhanced Lotto Trading Risk Warning"):
             st.markdown("""
             **EXTREME RISK WARNING FOR LOTTO PLAYS:**
             
@@ -4598,12 +5172,19 @@ with tabs[7]:
             🚨 **Quick Exits**: Set profit targets and stick to them
             🚨 **No Emotional Trading**: These are mathematical probability plays
             
-            **Best Practices:**
+            **Enhanced Best Practices with Flow Intelligence:**
             ✅ Risk only 1-2% of portfolio on lottos
-            ✅ Have specific profit targets (50-100%+)
-            ✅ Exit quickly if trade moves against you
-            ✅ Look for catalysts that could cause large moves
+            ✅ Use flow alerts to time entries - unusual activity may indicate edge
+            ✅ Monitor flow sentiment changes throughout the day
+            ✅ Exit quickly if flow pattern changes against position
+            ✅ Look for flow confirmation at key technical levels
             ✅ Understand that 80-90% of these trades will lose money
+            ✅ Use UW flow data as additional confirmation, not primary signal
+            
+            **Flow Intelligence Guidelines:**
+            - Heavy call flow + bullish technical setup = higher probability lotto calls
+            - Put flow alerts near resistance = potential lotto put opportunities
+            - Conflicting flow vs. technical signals = avoid or reduce position size
             """)
 
 # TAB 9: Earnings Plays
