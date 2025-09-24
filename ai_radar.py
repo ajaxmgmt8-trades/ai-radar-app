@@ -2340,15 +2340,15 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     total_score = explosive_score + bullish_score + bearish_score
     
     if explosive_score >= 2:
-        return "ðŸš€ EXPLOSIVE", min(95, 60 + explosive_score * 10)
+        return "EXPLOSIVE", min(95, 60 + explosive_score * 10)
     elif explosive_score >= 1:
         return "Bullish", min(85, 50 + explosive_score * 15)
     elif bearish_score >= 2:
-        return "ðŸ"‰ Bearish", min(80, 40 + bearish_score * 15)
+        return "Bearish", min(80, 40 + bearish_score * 15)
     elif bullish_score >= 2:
-        return "ðŸ"ˆ Bullish", min(75, 35 + bullish_score * 10)
+        return "Bullish", min(75, 35 + bullish_score * 10)
     else:
-        return "âšª Neutral", max(10, min(50, total_score * 5))
+        return "Neutral", max(10, min(50, total_score * 5))
 
 # New function to fetch option chain data
 @st.cache_data(ttl=180)  # Cache for 3 minutes (reduced from 5)
