@@ -4115,7 +4115,8 @@ st.markdown(
     f"🔥 AI Radar Pro with Unusual Whales Integration | Data: {footer_text} | {ai_footer} | {live_status}"
     "</div>",
     unsafe_allow_html=True
-)technical.get('support_resistance', {}).get('support', 0):.2f}\n"
+)
+            tech_summary += f"- Support: ${support_val:.2f}\n"
             tech_summary += f"- Resistance: ${technical.get('support_resistance', {}).get('resistance', 0):.2f}\n"
         # Enhanced technical from Twelve Data
         if "rsi" in technical:
