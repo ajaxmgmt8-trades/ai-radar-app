@@ -2342,7 +2342,7 @@ def analyze_news_sentiment(title: str, summary: str = "") -> tuple:
     if explosive_score >= 2:
         return "ðŸš€ EXPLOSIVE", min(95, 60 + explosive_score * 10)
     elif explosive_score >= 1:
-        return "ðŸ"ˆ Bullish", min(85, 50 + explosive_score * 15)
+        return "Bullish", min(85, 50 + explosive_score * 15)
     elif bearish_score >= 2:
         return "ðŸ"‰ Bearish", min(80, 40 + bearish_score * 15)
     elif bullish_score >= 2:
