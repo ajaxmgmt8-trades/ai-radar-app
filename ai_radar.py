@@ -2894,6 +2894,152 @@ def get_important_events() -> List[Dict]:
         return []
 
 # =============================================================================
+# HELPER FUNCTIONS FOR TIMEFRAME OPTIONS ANALYSIS
+# =============================================================================
+
+@st.cache_data(ttl=300)
+def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dict:
+    """Get options filtered by timeframe (0DTE, Swing, LEAPS)"""
+    try:
+        stock = yf.Ticker(ticker)
+        expirations = stock.options
+        if not expirations:
+            return {"error": f"No options data available for {ticker}"}
+
+        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
+        expiration_dates = []
+        
+        for exp in expirations:
+            exp_date = datetime.datetime.strptime(exp, '%Y-%m-%d').date()
+            days_to_exp = (exp_date - today).days
+            
+            if timeframe == "0DTE" and days_to_exp == 0:
+                expiration_dates.append(exp)
+            elif timeframe == "Swing" and 2 <= days_to_exp <= 89:
+                expiration_dates.append(exp)
+            elif timeframe == "LEAPS" and days_to_exp >= 90:
+                expiration_dates.append(exp)
+        
+        if not expiration_dates:
+            return {"error": f"No {timeframe} options available for {ticker}"}
+
+        # Get closest expiration in timeframe
+        target_expiration = min(expiration_dates, key=lambda x: abs((datetime.datetime.strptime(x, '%Y-%m-%d').date() - today).days))
+        
+        # Fetch option chain
+        option_chain = stock.option_chain(target_expiration)
+        calls = option_chain.calls
+        puts = option_chain.puts
+
+        # Clean and format data
+        calls = calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        puts = puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
+        
+        # Determine moneyness
+        current_price = get_live_quote(ticker, tz).get('last', 0)
+        calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
+        puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
+
+        # Convert IV to percentage
+        calls['impliedVolatility'] = calls['impliedVolatility'] * 100
+        puts['impliedVolatility'] = puts['impliedVolatility'] * 100
+
+        return {
+            "calls": calls,
+            "puts": puts,
+            "expiration": target_expiration,
+            "current_price": current_price,
+            "days_to_expiration": (datetime.datetime.strptime(target_expiration, '%Y-%m-%d').date() - today).days,
+            "timeframe": timeframe,
+            "all_expirations": expiration_dates,
+            "error": None
+        }
+    except Exception as e:
+        return {"error": f"Error fetching {timeframe} options for {ticker}: {str(e)}"}
+
+def analyze_timeframe_options(ticker: str, option_data: Dict, uw_data: Dict, timeframe: str) -> str:
+    """Generate timeframe-specific AI analysis"""
+    
+    if option_data.get("error"):
+        return f"Unable to analyze {timeframe} options: {option_data['error']}"
+    
+    calls = option_data.get("calls", pd.DataFrame())
+    puts = option_data.get("puts", pd.DataFrame())
+    days_to_exp = option_data.get("days_to_expiration", 0)
+    current_price = option_data.get("current_price", 0)
+    
+    # Calculate key metrics
+    total_call_volume = calls['volume'].sum() if not calls.empty else 0
+    total_put_volume = puts['volume'].sum() if not puts.empty else 0
+    avg_iv = (calls['impliedVolatility'].mean() + puts['impliedVolatility'].mean()) / 2 if not calls.empty and not puts.empty else 0
+    
+    # Get UW enhanced metrics if available
+    uw_metrics = ""
+    if uw_data and not uw_data.get("error"):
+        enhanced = uw_data.get('enhanced_metrics', {})
+        uw_metrics = f"""
+        🔥 Unusual Whales Flow Data:
+        - Flow Alerts: {enhanced.get('total_flow_alerts', 'N/A')}
+        - Flow Sentiment: {enhanced.get('flow_sentiment', 'Neutral')}
+        - ATM P/C Ratio: {enhanced.get('atm_put_call_ratio', 'N/A')}
+        - Total Delta: {enhanced.get('total_delta', 'N/A')}
+        - Total Gamma: {enhanced.get('total_gamma', 'N/A')}
+        """
+    
+    # Create timeframe-specific prompt
+    prompt = f"""
+    {timeframe} Options Analysis for {ticker}:
+    
+    Current Price: ${current_price:.2f}
+    Days to Expiration: {days_to_exp}
+    Timeframe Category: {timeframe}
+    
+    Options Metrics:
+    - Total Call Volume: {total_call_volume:,}
+    - Total Put Volume: {total_put_volume:,}
+    - Put/Call Volume Ratio: {total_put_volume/max(total_call_volume, 1):.2f}
+    - Average IV: {avg_iv:.1f}%
+    
+    {uw_metrics}
+    
+    Top 5 Call Strikes by Volume:
+    {calls.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not calls.empty else 'No call data'}
+    
+    Top 5 Put Strikes by Volume:
+    {puts.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not puts.empty else 'No put data'}
+    
+    Provide {timeframe}-specific analysis covering:
+    1. Optimal strategy for this timeframe ({days_to_exp} days)
+    2. Key levels and price targets
+    3. Time decay considerations
+    4. IV and volatility outlook
+    5. Risk management for this timeframe
+    6. Entry/exit timing strategies
+    
+    Tailor advice specifically for {timeframe} characteristics.
+    Keep analysis under 300 words but be actionable.
+    """
+    
+    # Use selected AI model
+    if st.session_state.ai_model == "Multi-AI":
+        analyses = multi_ai.multi_ai_consensus_enhanced(prompt)
+        if analyses:
+            result = f"## 🤖 Multi-AI {timeframe} Analysis\n\n"
+            for model, analysis in analyses.items():
+                result += f"### {model}:\n{analysis}\n\n---\n\n"
+            return result
+        else:
+            return f"No AI models available for {timeframe} analysis."
+    elif st.session_state.ai_model == "OpenAI" and openai_client:
+        return multi_ai.analyze_with_openai(prompt)
+    elif st.session_state.ai_model == "Gemini" and gemini_model:
+        return multi_ai.analyze_with_gemini(prompt)
+    elif st.session_state.ai_model == "Grok" and grok_enhanced:
+        return multi_ai.analyze_with_grok(prompt)
+    else:
+        return f"No AI model configured for {timeframe} analysis."
+
+# =============================================================================
 # MAIN APPLICATION
 # =============================================================================
 
@@ -4030,208 +4176,244 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: NEW Options Flow Tab
+# TAB 7: Enhanced Options Flow with Timeframes
 with tabs[6]:
     st.subheader("🎯 Options Flow Analysis")
-    st.markdown("**Advanced options flow analysis using Unusual Whales data for institutional tracking and order flow insights.**")
+    st.markdown("**Advanced options flow analysis with timeframe-specific strategies using Unusual Whales data.**")
 
     # Ticker selection
     col1, col2 = st.columns([3, 1])
     with col1:
         flow_ticker = st.selectbox("Select Ticker for Options Flow", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="flow_ticker")
     with col2:
-        if st.button("Analyze Flow", key="analyze_flow"):
+        if st.button("Refresh All Data", key="refresh_flow_data"):
             st.cache_data.clear()
             st.rerun()
 
-    if not uw_client:
-        st.error("🔥 Unusual Whales API required for advanced options flow analysis")
-        st.info("This tab provides premium options flow data including:")
-        st.write("• Real-time flow alerts")
-        st.write("• Greek exposure by strike and expiry")
-        st.write("• Institutional order flow tracking")
-        st.write("• ATM chains analysis")
-        st.write("• Volume vs Open Interest analysis")
-        st.info("Please configure your Unusual Whales API key to access these features.")
-    else:
-        with st.spinner(f"Fetching comprehensive options flow data for {flow_ticker}..."):
-            # Get enhanced UW options data
+    # Get base data
+    quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
+    uw_data = None
+    
+    if uw_client:
+        with st.spinner(f"Fetching Unusual Whales data for {flow_ticker}..."):
             uw_data = uw_client.get_comprehensive_stock_data(flow_ticker)
-            quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
+    else:
+        st.error("🔥 Unusual Whales API required for premium options flow analysis")
 
-        if not quote.get("error"):
-            st.success(f"🔥 Unusual Whales Options Flow Analysis for {flow_ticker}")
-            st.markdown(f"**Current Price:** ${quote['last']:.2f} | **Source:** {quote.get('data_source', 'Unknown')}")
+    if not quote.get("error"):
+        # Basic quote info
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+        col2.metric("Volume", f"{quote['volume']:,}")
+        col3.metric("Data Source", quote.get('data_source', 'Unknown'))
+        col4.metric("Last Updated", quote['last_updated'][-8:])
 
-            # Display basic metrics
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-            col2.metric("Volume", f"{quote['volume']:,}")
-            col3.metric("Data Source", quote.get('data_source', 'Unknown'))
-            col4.metric("Last Updated", quote['last_updated'][-8:])  # Show just time
+        # Create the 3 timeframe tabs
+        timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
 
-            # Flow Alerts Section
-            st.markdown("### 🚨 Flow Alerts")
-            flow_alerts = uw_data.get("flow_alerts", {})
-            if flow_alerts.get("error"):
-                st.error(f"Flow Alerts Error: {flow_alerts['error']}")
+        # 0DTE Tab
+        with timeframe_tabs[0]:
+            st.markdown("### 🎯 0DTE Options (Same Day Expiration)")
+            st.caption("High-risk, high-reward same-day expiration plays")
+            
+            with st.spinner("Loading 0DTE options..."):
+                dte_options = get_options_by_timeframe(flow_ticker, "0DTE", st.session_state.selected_tz)
+            
+            if dte_options.get("error"):
+                st.error(dte_options["error"])
+                st.info("0DTE options may not be available for this ticker or may have already expired.")
             else:
-                flow_data = flow_alerts.get("data", [])
-                if flow_data and isinstance(flow_data, list):
-                    st.success(f"Found {len(flow_data)} flow alerts")
+                # 0DTE specific metrics
+                st.success(f"0DTE Options Expiring: {dte_options['expiration']} ({dte_options['days_to_expiration']} days)")
+                
+                calls_0dte = dte_options["calls"]
+                puts_0dte = dte_options["puts"]
+                
+                # 0DTE Summary
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Call Options", len(calls_0dte))
+                col2.metric("Put Options", len(puts_0dte))
+                col3.metric("Total Call Volume", int(calls_0dte['volume'].sum()) if not calls_0dte.empty else 0)
+                col4.metric("Total Put Volume", int(puts_0dte['volume'].sum()) if not puts_0dte.empty else 0)
+                
+                # 0DTE Options Display
+                if not calls_0dte.empty or not puts_0dte.empty:
+                    col1, col2 = st.columns(2)
                     
-                    # Create DataFrame for display
-                    if len(flow_data) > 0:
-                        flow_df = pd.DataFrame(flow_data)
-                        
-                        # Display top flow alerts
-                        st.markdown("#### Recent Flow Alerts")
-                        display_cols = ['symbol', 'type', 'strike', 'expiry', 'size', 'premium', 'time'] if all(col in flow_df.columns for col in ['symbol', 'type', 'strike', 'expiry', 'size', 'premium', 'time']) else flow_df.columns[:7]
-                        st.dataframe(flow_df[display_cols].head(10), use_container_width=True)
-                        
-                        # Summary stats
-                        if 'type' in flow_df.columns:
-                            call_count = len(flow_df[flow_df['type'].str.lower() == 'call'])
-                            put_count = len(flow_df[flow_df['type'].str.lower() == 'put'])
-                            
-                            summary_col1, summary_col2, summary_col3 = st.columns(3)
-                            summary_col1.metric("Total Alerts", len(flow_data))
-                            summary_col2.metric("Call Alerts", call_count)
-                            summary_col3.metric("Put Alerts", put_count)
-                else:
-                    st.info("No flow alerts found for this ticker")
-
-            # Greek Exposure Section
-            st.markdown("### 📊 Greek Exposure Analysis")
-            greek_exposure = uw_data.get("greek_exposure", {})
-            if greek_exposure.get("error"):
-                st.error(f"Greek Exposure Error: {greek_exposure['error']}")
-            else:
-                greek_data = greek_exposure.get("data", {})
-                if greek_data and isinstance(greek_data, dict):
-                    greek_col1, greek_col2, greek_col3, greek_col4 = st.columns(4)
-                    greek_col1.metric("Total Delta", f"{greek_data.get('total_delta', 0):,.0f}")
-                    greek_col2.metric("Total Gamma", f"{greek_data.get('total_gamma', 0):,.0f}")
-                    greek_col3.metric("Total Theta", f"{greek_data.get('total_theta', 0):,.0f}")
-                    greek_col4.metric("Total Vega", f"{greek_data.get('total_vega', 0):,.0f}")
-                else:
-                    st.info("No Greek exposure data available")
-
-            # Greek Exposure by Expiry
-            st.markdown("### 📅 Greek Exposure by Expiry")
-            greek_by_expiry = uw_data.get("greek_by_expiry", {})
-            if greek_by_expiry.get("error"):
-                st.error(f"Greek by Expiry Error: {greek_by_expiry['error']}")
-            else:
-                expiry_data = greek_by_expiry.get("data", [])
-                if expiry_data and isinstance(expiry_data, list):
-                    expiry_df = pd.DataFrame(expiry_data)
-                    if not expiry_df.empty:
-                        st.dataframe(expiry_df.head(10), use_container_width=True)
-                    else:
-                        st.info("No expiry breakdown available")
-                else:
-                    st.info("No Greek exposure by expiry data available")
-
-            # Flow Per Strike
-            st.markdown("### 🎯 Flow Per Strike")
-            flow_per_strike = uw_data.get("flow_per_strike", {})
-            if flow_per_strike.get("error"):
-                st.error(f"Flow Per Strike Error: {flow_per_strike['error']}")
-            else:
-                strike_data = flow_per_strike.get("data", [])
-                if strike_data and isinstance(strike_data, list):
-                    strike_df = pd.DataFrame(strike_data)
-                    if not strike_df.empty:
-                        st.dataframe(strike_df.head(15), use_container_width=True)
-                    else:
-                        st.info("No flow per strike data available")
-                else:
-                    st.info("No flow per strike data available")
-
-            # ATM Chains
-            st.markdown("### ⚡ At-The-Money Chains")
-            atm_chains = uw_data.get("atm_chains", {})
-            if atm_chains.get("error"):
-                st.error(f"ATM Chains Error: {atm_chains['error']}")
-            else:
-                atm_data = atm_chains.get("data", [])
-                if atm_data and isinstance(atm_data, list):
-                    atm_df = pd.DataFrame(atm_data)
-                    if not atm_df.empty:
-                        # Separate calls and puts
-                        if 'type' in atm_df.columns:
-                            calls_df = atm_df[atm_df['type'].str.lower() == 'call']
-                            puts_df = atm_df[atm_df['type'].str.lower() == 'put']
-                            
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.markdown("#### Calls")
-                                if not calls_df.empty:
-                                    st.dataframe(calls_df.head(10), use_container_width=True)
-                                else:
-                                    st.info("No call data")
-                            
-                            with col2:
-                                st.markdown("#### Puts")
-                                if not puts_df.empty:
-                                    st.dataframe(puts_df.head(10), use_container_width=True)
-                                else:
-                                    st.info("No put data")
+                    with col1:
+                        st.markdown("#### 📞 0DTE Calls")
+                        if not calls_0dte.empty:
+                            # Show top calls by volume
+                            top_calls = calls_0dte.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_calls, use_container_width=True)
                         else:
-                            st.dataframe(atm_df.head(10), use_container_width=True)
-                    else:
-                        st.info("No ATM chains data available")
-                else:
-                    st.info("No ATM chains data available")
+                            st.info("No 0DTE call options")
+                    
+                    with col2:
+                        st.markdown("#### 📞 0DTE Puts")
+                        if not puts_0dte.empty:
+                            # Show top puts by volume
+                            top_puts = puts_0dte.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_puts, use_container_width=True)
+                        else:
+                            st.info("No 0DTE put options")
+                
+                # AI Analysis for 0DTE
+                st.markdown("### 🤖 AI 0DTE Analysis")
+                with st.spinner("Generating 0DTE strategy..."):
+                    dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, uw_data, "0DTE")
+                    st.markdown(dte_analysis)
+                
+                # 0DTE Risk Warning
+                with st.expander("⚠️ 0DTE Risk Warning"):
+                    st.markdown("""
+                    **EXTREME RISK - 0DTE OPTIONS:**
+                    - Expire TODAY - no time for recovery
+                    - Massive time decay throughout the day
+                    - Can lose 100% value in minutes
+                    - Only for experienced traders
+                    - Use tiny position sizes
+                    """)
 
-            # AI Analysis for Options Flow
-            st.markdown("### 🤖 AI Options Flow Analysis")
-            with st.spinner("Generating AI analysis of options flow..."):
-                # Prepare comprehensive options flow summary for AI
-                enhanced_metrics = analyze_uw_options_data(uw_data)
+        # Swing Tab  
+        with timeframe_tabs[1]:
+            st.markdown("### 📈 Swing Options (2-89 Days)")
+            st.caption("Medium-term plays with balanced risk/reward")
+            
+            with st.spinner("Loading swing options..."):
+                swing_options = get_options_by_timeframe(flow_ticker, "Swing", st.session_state.selected_tz)
+            
+            if swing_options.get("error"):
+                st.error(swing_options["error"])
+            else:
+                # Swing specific metrics
+                st.success(f"Swing Options Expiring: {swing_options['expiration']} ({swing_options['days_to_expiration']} days)")
                 
-                flow_summary = f"""
-                Options Flow Analysis for {flow_ticker}:
+                calls_swing = swing_options["calls"]
+                puts_swing = swing_options["puts"]
                 
-                Current Price: ${quote['last']:.2f} ({quote['change_percent']:+.2f}%)
+                # Swing Summary
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Call Options", len(calls_swing))
+                col2.metric("Put Options", len(puts_swing))
+                col3.metric("Avg Call IV", f"{calls_swing['impliedVolatility'].mean():.1f}%" if not calls_swing.empty else "N/A")
+                col4.metric("Avg Put IV", f"{puts_swing['impliedVolatility'].mean():.1f}%" if not puts_swing.empty else "N/A")
                 
-                Flow Alerts: {enhanced_metrics.get('total_flow_alerts', 'N/A')}
-                Call/Put Flow Sentiment: {enhanced_metrics.get('flow_sentiment', 'Neutral')}
+                # Swing Options Display
+                if not calls_swing.empty or not puts_swing.empty:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📈 Swing Calls")
+                        if not calls_swing.empty:
+                            top_calls = calls_swing.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_calls, use_container_width=True)
+                        else:
+                            st.info("No swing call options")
+                    
+                    with col2:
+                        st.markdown("#### 📉 Swing Puts") 
+                        if not puts_swing.empty:
+                            top_puts = puts_swing.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_puts, use_container_width=True)
+                        else:
+                            st.info("No swing put options")
                 
-                Greek Exposure:
-                - Total Delta: {enhanced_metrics.get('total_delta', 'N/A')}
-                - Total Gamma: {enhanced_metrics.get('total_gamma', 'N/A')}
-                - Total Theta: {enhanced_metrics.get('total_theta', 'N/A')}
-                - Total Vega: {enhanced_metrics.get('total_vega', 'N/A')}
+                # Show UW Flow Data if available
+                if uw_data and not uw_data.get("error"):
+                    st.markdown("### 🔥 Unusual Whales Flow (All Timeframes)")
+                    enhanced = uw_data.get('enhanced_metrics', {})
+                    if enhanced:
+                        uw_col1, uw_col2, uw_col3, uw_col4 = st.columns(4)
+                        uw_col1.metric("Flow Alerts", enhanced.get('total_flow_alerts', 'N/A'))
+                        uw_col2.metric("Flow Sentiment", enhanced.get('flow_sentiment', 'Neutral'))
+                        uw_col3.metric("ATM P/C Ratio", f"{enhanced.get('atm_put_call_ratio', 0):.2f}")
+                        uw_col4.metric("Total Delta", enhanced.get('total_delta', 'N/A'))
                 
-                ATM Analysis:
-                - ATM Call Volume: {enhanced_metrics.get('atm_call_volume', 'N/A')}
-                - ATM Put Volume: {enhanced_metrics.get('atm_put_volume', 'N/A')}
-                - ATM P/C Ratio: {enhanced_metrics.get('atm_put_call_ratio', 'N/A')}
+                # AI Analysis for Swing
+                st.markdown("### 🤖 AI Swing Analysis")
+                with st.spinner("Generating swing strategy..."):
+                    swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, uw_data, "Swing")
+                    st.markdown(swing_analysis)
+
+        # LEAPS Tab
+        with timeframe_tabs[2]:
+            st.markdown("### 📊 LEAPS Options (90+ Days)")
+            st.caption("Long-term strategic positions with lower time decay")
+            
+            with st.spinner("Loading LEAPS options..."):
+                leaps_options = get_options_by_timeframe(flow_ticker, "LEAPS", st.session_state.selected_tz)
+            
+            if leaps_options.get("error"):
+                st.error(leaps_options["error"])
+            else:
+                # LEAPS specific metrics
+                st.success(f"LEAPS Options Expiring: {leaps_options['expiration']} ({leaps_options['days_to_expiration']} days)")
                 
-                Based on this Unusual Whales options flow data, provide:
-                1. Overall options sentiment and institutional positioning
-                2. Key price levels where flow is concentrated
-                3. Unusual activity and what it suggests
-                4. Trading opportunities based on flow patterns
-                5. Risk factors to watch
+                calls_leaps = leaps_options["calls"]
+                puts_leaps = leaps_options["puts"]
                 
-                Keep analysis under 300 words but be specific about actionable insights.
-                """
+                # LEAPS Summary
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Call Options", len(calls_leaps))
+                col2.metric("Put Options", len(puts_leaps))
+                total_call_oi = int(calls_leaps['openInterest'].sum()) if not calls_leaps.empty else 0
+                total_put_oi = int(puts_leaps['openInterest'].sum()) if not puts_leaps.empty else 0
+                col3.metric("Call Open Interest", f"{total_call_oi:,}")
+                col4.metric("Put Open Interest", f"{total_put_oi:,}")
                 
-                if st.session_state.ai_model == "Multi-AI":
-                    analyses = multi_ai.multi_ai_consensus_enhanced(flow_summary)
-                    if analyses:
-                        for model, analysis in analyses.items():
-                            st.markdown(f"**{model} Flow Analysis:**")
-                            st.markdown(analysis)
-                            st.markdown("---")
-                else:
-                    flow_analysis = ai_playbook(flow_ticker, quote["change_percent"], "Options flow analysis", uw_data)
-                    st.markdown(flow_analysis)
-        else:
-            st.error(f"Could not get quote data for {flow_ticker}: {quote['error']}")
+                # LEAPS Options Display  
+                if not calls_leaps.empty or not puts_leaps.empty:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### 📊 LEAPS Calls")
+                        if not calls_leaps.empty:
+                            # For LEAPS, show by open interest as it's more relevant
+                            top_calls = calls_leaps.nlargest(10, 'openInterest')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_calls, use_container_width=True)
+                        else:
+                            st.info("No LEAPS call options")
+                    
+                    with col2:
+                        st.markdown("#### 📊 LEAPS Puts")
+                        if not puts_leaps.empty:
+                            top_puts = puts_leaps.nlargest(10, 'openInterest')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
+                            st.dataframe(top_puts, use_container_width=True)
+                        else:
+                            st.info("No LEAPS put options")
+                
+                # Show all available LEAPS expirations
+                if leaps_options.get("all_expirations"):
+                    with st.expander("📅 All LEAPS Expirations Available"):
+                        for exp in leaps_options["all_expirations"]:
+                            days_out = (datetime.datetime.strptime(exp, '%Y-%m-%d').date() - datetime.date.today()).days
+                            st.write(f"• {exp} ({days_out} days)")
+                
+                # AI Analysis for LEAPS
+                st.markdown("### 🤖 AI LEAPS Analysis")
+                with st.spinner("Generating LEAPS strategy..."):
+                    leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, uw_data, "LEAPS")
+                    st.markdown(leaps_analysis)
+                
+                # LEAPS Strategy Guide
+                with st.expander("💡 LEAPS Strategy Guide"):
+                    st.markdown("""
+                    **LEAPS (Long-term Equity AnticiPation Securities) Benefits:**
+                    - Lower time decay (theta) impact
+                    - More time for thesis to play out
+                    - Can be used for stock replacement strategies
+                    - Better for fundamental-based trades
+                    - Less sensitive to short-term volatility
+                    
+                    **Common LEAPS Strategies:**
+                    - Buy deep ITM calls as stock replacement
+                    - Sell covered calls against LEAPS (poor man's covered call)
+                    - Long-term protective puts for portfolio hedging
+                    """)
+
+    else:
+        st.error(f"Could not get quote data for {flow_ticker}: {quote['error']}")
 
 # TAB 8: Lottos (Renamed from 0DTE & Lottos)
 with tabs[7]:
@@ -4733,4 +4915,3 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
-
