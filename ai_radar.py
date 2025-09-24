@@ -2606,7 +2606,11 @@ def construct_comprehensive_analysis_prompt(ticker: str, quote: Dict, technical:
         tech_summary += f"Technical Error: {technical['error']}\n"
     else:
         if "short_term" in technical:
-            tech_summary += f"- RSI: {technical['short_term'].get('rsi', 'N/A'):.1f}\n"
+            rsi_value = technical['short_term'].get('rsi', 'N/A')
+            if rsi_value != 'N/A':
+                tech_summary += f"- RSI: {rsi_value:.1f}\n"
+            else:
+                tech_summary += f"- RSI: {rsi_value}\n"
             tech_summary += f"- SMA20: ${technical['short_term'].get('sma_20', 0):.2f}\n"
             tech_summary += f"- MACD: {technical['short_term'].get('macd', 0):.3f}\n"
         if "trend_analysis" in technical:
