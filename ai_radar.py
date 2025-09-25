@@ -752,7 +752,7 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
                 "error": None
             }
         
-        except Exception as e:                                    
+    except Exception as e:                                    
             return {"error": f"Error analyzing options volume: {str(e)}"}   
             
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
@@ -3554,6 +3554,46 @@ def get_uw_market_screener_movers():
             unique_movers[ticker] = mover
     
     return sorted(unique_movers.values(), key=lambda x: abs(x["change_pct"]), reverse=True)
+def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
+    """Analyze hottest chains data from UW"""
+    if hottest_chains_data.get("error"):
+        return {"error": hottest_chains_data["error"]}
+    
+    try:
+        # Handle double-nested data structure (same as other UW endpoints)
+        data = hottest_chains_data.get("data", {})
+        if isinstance(data, dict) and "data" in data:
+            chains = data["data"]  # Double nested
+        elif isinstance(data, list):
+            chains = data  # Single nested
+        else:
+            chains = []
+        
+        if not chains:
+            return {"summary": "No hottest chains data", "chains": []}
+        
+        total_volume = 0
+        total_premium = 0
+        
+        for chain in chains:
+            if isinstance(chain, dict):
+                volume = int(chain.get("volume", 0))
+                premium = float(chain.get("premium", 0))
+                total_volume += volume
+                total_premium += premium
+        
+        return {
+            "summary": {
+                "total_chains": len(chains),
+                "combined_volume": total_volume,
+                "combined_premium": total_premium
+            },
+            "chains": chains[:10],  # Top 10 chains
+            "error": None
+        }
+        
+    except Exception as e:
+        return {"error": f"Error analyzing hottest chains: {str(e)}"}
 # =============================================================================
 # MAIN APPLICATION
 # =============================================================================
