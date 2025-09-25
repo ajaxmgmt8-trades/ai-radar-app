@@ -5280,6 +5280,8 @@ with tabs[7]:
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
             hottest_chains_data = uw_client.get_hottest_chains()
             hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
+            # ADD THIS DEBUG LINE:
+            st.write(f"DEBUG: Hottest chains analysis = {hottest_chains_analysis}")
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
