@@ -4831,7 +4831,7 @@ with tabs[6]:
                 options_volume_data = uw_client.get_options_volume(flow_ticker)
                 st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
                 
-                hottest_chains_data = get_hottest_chains_analysis()
+                hottest_chains_data = uw_client.get_hottest_chains()
                 st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
                 
                 # Test individual UW calls
