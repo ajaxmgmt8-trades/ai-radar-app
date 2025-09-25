@@ -754,19 +754,20 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
     """Get hottest option chains - loosened filters"""
-    endpoint = "/api/screener/option-contracts"
-    params = {
-        "limit": min(limit, 250),
-        "order": "volume",
-        "order_direction": "desc",
-        # Much looser filters
-        "min_volume": 100,  # Reduced from 200
-        "min_premium": 1000,  # Reduced from 5000  
-        # Remove most restrictive filters to start
-    }
-    if date:
-        params["date"] = date
-    return self._make_request(endpoint, params)
+    try:
+        endpoint = "/api/screener/option-contracts"
+        params = {
+            "limit": min(limit, 250),
+            "order": "volume",
+            "order_direction": "desc",
+            "min_volume": 100,
+            "min_premium": 1000
+        }
+        if date:
+            params["date"] = date
+        return self._make_request(endpoint, params)
+    except Exception as e:
+        return {"error": f"Error getting hottest chains: {str(e)}"}
 
 # =================================================================
 # AI ANALYSIS WITH ENHANCED FLOW DATA
