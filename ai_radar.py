@@ -5027,16 +5027,16 @@ with tabs[6]:
                 # Display Hottest Chains
                 st.markdown("#### 🌡️ Hottest Chains")
                 if not hottest_chains_data.get("error"):
-                    chains_summary = hottest_chains_data.get("summary", {})
+                    chains_summary = hottest_chains_analysis.get("summary", {})
                     
                     chain_col1, chain_col2, chain_col3 = st.columns(3)
                     chain_col1.metric("Total Chains", chains_summary.get("total_chains", 0))
                     chain_col2.metric("Combined Volume", f"{chains_summary.get('total_volume', 0):,}")
                     chain_col3.metric("Combined Premium", f"${chains_summary.get('total_premium', 0):,.0f}")
                     
-                    if hottest_chains_data.get("chains"):
+                    if hottest_chains_analysis.get("chains"):
                         with st.expander("🔥 Top Hottest Chains"):
-                            chains_df = pd.DataFrame(hottest_chains_data["chains"][:20])  # Top 20
+                            chains_df = pd.DataFrame(hottest_chains_analysis["chains"][:20])
                             if not chains_df.empty:
                                 st.dataframe(chains_df, use_container_width=True)
                 else:
