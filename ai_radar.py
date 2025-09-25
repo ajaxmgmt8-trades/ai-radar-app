@@ -204,7 +204,7 @@ class UnusualWhalesClient:
         endpoint = f"/api/stock/{ticker}/options-volume"
         params = {"limit": limit}
         return self._make_request(endpoint, params)
-   def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
+    def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
         """Get hottest option chains"""
         endpoint = "/api/screener/option-contracts"
         params = {
