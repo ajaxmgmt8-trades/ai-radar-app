@@ -3864,7 +3864,7 @@ with tabs[0]:
     st.markdown(f"**Current Session:** {market_session}")
 
     # Auto-load market movers with enhanced data
-    if 'enhanced_movers_data' not in st.session_state or time.time() - st.session_state.get('last_enhanced_scan', 0) > 90:
+    if 'enhanced_movers_data' not in st.session_state:
         with st.spinner("Loading top market movers with full data..."):
             try:
                 if uw_client:
@@ -4029,7 +4029,7 @@ with tabs[0]:
         # Cache info
         if st.session_state.get('last_enhanced_scan'):
             last_scan = time.time() - st.session_state.last_enhanced_scan
-            st.caption(f"Enhanced data last updated: {last_scan:.0f} seconds ago (refreshes every 90 seconds)")
+            st.caption(f"Market movers loaded at page load (refresh page for updated data)")
             
     else:
         st.info("No significant market movers found")
