@@ -726,12 +726,8 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
         
         if isinstance(volume_record, dict):
             # Extract volume numbers properly
-            # Add this right after your existing debug line:
-            st.write(f"DEBUG: call_volume raw = {volume_record.get('call_volume')}, put_volume raw = {volume_record.get('put_volume')}")
-            call_volume = int(float(volume_record.get("call_volume", 0)))
+            call_volume = int(float(volume_record.get("call_volume", 0)))  # Convert string to int
             put_volume = int(float(volume_record.get("put_volume", 0)))
-            # ADD THIS NEW DEBUG LINE:
-            st.write(f"DEBUG: After conversion: call_volume = {call_volume}, put_volume = {put_volume}")
             call_premium = float(volume_record.get("call_premium", 0))
             put_premium = float(volume_record.get("put_premium", 0))
             
@@ -740,8 +736,8 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             
             return {
                 "summary": {
-                    "total_call_volume": call_volume,        # Changed from 'call_volume'
-                    "total_put_volume": put_volume,          # Changed from 'put_volume'  
+                    "call_volume": call_volume,
+                    "put_volume": put_volume,
                     "put_call_ratio": put_call_ratio,
                     "call_premium": call_premium,
                     "put_premium": put_premium,
@@ -3589,8 +3585,8 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         return {
             "summary": {
                 "total_chains": len(chains),
-                "total_volume": total_volume,        # Changed from 'combined_volume' 
-                "total_premium": total_premium,      # Changed from 'combined_premium'
+                "combined_volume": total_volume,
+                "combined_premium": total_premium
             },
             "chains": chains[:10],  # Top 10 chains
             "error": None
@@ -4906,9 +4902,19 @@ with tabs[6]:
                     st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
                     st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
                 
-                options_volume_data = uw_client.get_options_volume(flow_ticker) 
+                options_volume_data = uw_client.get_options_volume(flow_ticker)
+                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
+                
                 hottest_chains_data = uw_client.get_hottest_chains()
-                hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
+                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
+                
+                # Test individual UW calls
+                st.write("**Testing individual UW endpoints:**")
+                try:
+                    test_stock_state = uw_client.get_stock_state(flow_ticker)
+                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
+                except Exception as e:
+                    st.write(f"Stock state error: {str(e)}")
                 
                 # Raw data inspection
                 with st.expander("🔬 Raw API Responses"):
@@ -5006,16 +5012,16 @@ with tabs[6]:
                 # Display Hottest Chains
                 st.markdown("#### 🌡️ Hottest Chains")
                 if not hottest_chains_data.get("error"):
-                    chains_summary = hottest_chains_analysis.get("summary", {})
+                    chains_summary = hottest_chains_data.get("summary", {})
                     
                     chain_col1, chain_col2, chain_col3 = st.columns(3)
                     chain_col1.metric("Total Chains", chains_summary.get("total_chains", 0))
                     chain_col2.metric("Combined Volume", f"{chains_summary.get('total_volume', 0):,}")
                     chain_col3.metric("Combined Premium", f"${chains_summary.get('total_premium', 0):,.0f}")
                     
-                    if hottest_chains_analysis.get("chains"):
+                    if hottest_chains_data.get("chains"):
                         with st.expander("🔥 Top Hottest Chains"):
-                            chains_df = pd.DataFrame(hottest_chains_analysis["chains"][:20])
+                            chains_df = pd.DataFrame(hottest_chains_data["chains"][:20])  # Top 20
                             if not chains_df.empty:
                                 st.dataframe(chains_df, use_container_width=True)
                 else:
@@ -5268,14 +5274,10 @@ with tabs[7]:
             options_volume_data = uw_client.get_options_volume(lotto_ticker)
             flow_analysis = analyze_flow_alerts(flow_alerts_data, lotto_ticker)
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
-            hottest_chains_data = uw_client.get_hottest_chains()
-            hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-            # ADD THIS DEBUG LINE:
-            st.write(f"DEBUG: Hottest chains analysis = {hottest_chains_analysis}")
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
-            hottest_chains_analysis = {"error": "UW not available"}
+
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
@@ -5810,4 +5812,5 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
 
