@@ -3978,8 +3978,20 @@ with tabs[0]:
                             opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                             opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
                     
-                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
-                
+                        if uw_client:
+                            # ... existing UW code ...
+                            opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
+                            
+                            # Create options_data and call ai_playbook here
+                            options_data = {'flow_alerts': total_alerts, 'flow_sentiment': flow_sentiment, 'put_call_ratio': pc_ratio}
+                            st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
+                            
+                        else:
+                            # ... existing non-UW code ...
+                            opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
+                            
+                            # Call ai_playbook here too
+                            st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
                 st.divider()
 
   # Enhanced Auto-loading Market Movers with Full Data
