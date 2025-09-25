@@ -595,11 +595,19 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         return {"error": flow_alerts_data["error"]}
     
     try:
-        alerts = flow_alerts_data.get("data", [])
+        # FIX: Handle double-nested data structure
+        data = flow_alerts_data.get("data", {})
+        if isinstance(data, dict) and "data" in data:
+            alerts = data["data"]  # Double nested: data.data
+        elif isinstance(data, list):
+            alerts = data  # Single nested: data
+        else:
+            alerts = []
+        
         if not alerts:
             return {"summary": "No flow alerts found", "alerts": []}
         
-        # Process alerts data
+        # Process alerts data (rest of function stays the same)
         processed_alerts = []
         call_alerts = []
         put_alerts = []
@@ -611,7 +619,15 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         for alert in alerts:
             if isinstance(alert, dict):
                 alert_type = alert.get("type", "").lower()
-                premium = float(alert.get("total_premium", 0)) if alert.get("total_premium") else 0
+                
+                # Fix premium extraction
+                premium = 0
+                if alert.get("total_premium"):
+                    try:
+                        premium = float(alert["total_premium"])
+                    except:
+                        premium = 0
+                
                 volume = int(alert.get("volume", 0)) if alert.get("volume") else 0
                 
                 processed_alert = {
@@ -624,8 +640,8 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
                     "price": alert.get("price", 0),
                     "underlying_price": alert.get("underlying_price", 0),
                     "time": alert.get("created_at", ""),
-                    "is_sweep": alert.get("is_sweep", False),
-                    "is_opening": alert.get("all_opening", False)
+                    "is_sweep": alert.get("has_sweep", False),
+                    "is_opening": alert.get("all_opening_trades", False)
                 }
                 
                 processed_alerts.append(processed_alert)
@@ -638,7 +654,7 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
                     put_alerts.append(processed_alert)
                     bearish_flow += premium
         
-        # Calculate summary metrics
+        # Calculate summary metrics (rest stays the same)
         total_alerts = len(processed_alerts)
         call_count = len(call_alerts)
         put_count = len(put_alerts)
