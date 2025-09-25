@@ -4013,7 +4013,8 @@ with tabs[0]:
                 sess_col1.caption(f"**PM:** {mover['premarket_change']:+.2f}%")
                 sess_col2.caption(f"**Day:** {mover['intraday_change']:+.2f}%")
                 sess_col3.caption(f"**AH:** {mover['postmarket_change']:+.2f}%")
-                sess_col4.caption(f"**Sector:** {mover['sector']} | Updated: {mover['last_updated'][-8:]}")
+                current_time_display = current_tz.strftime("%I:%M:%S %p") 
+                sess_col4.caption(f"**Sector:** {mover['sector']} | Updated: {current_time_display} {tz_label}")
                 
                 # Add to watchlist button
                 if st.button(f"Add {mover['ticker']} to Watchlist", key=f"enhanced_mover_{mover['ticker']}"):
