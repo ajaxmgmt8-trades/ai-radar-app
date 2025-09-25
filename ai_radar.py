@@ -684,72 +684,53 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
     except Exception as e:
         return {"error": f"Error analyzing flow alerts: {str(e)}"}
 
-def analyze_options_volume(volume_data: Dict, ticker: str) -> Dict:
+def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
     """Analyze options volume data from UW"""
-    if volume_data.get("error"):
-        return {"error": volume_data["error"]}
+    if options_volume_data.get("error"):
+        return {"error": options_volume_data["error"]}
     
     try:
-        data = volume_data.get("data", [])
-        if not data:
-            return {"summary": "No volume data found", "volume_data": []}
+        # FIX: Handle double-nested data structure  
+        data = options_volume_data.get("data", {})
+        if isinstance(data, dict) and "data" in data:
+            volume_data = data["data"]  # Double nested: data.data
+        elif isinstance(data, list):
+            volume_data = data  # Single nested: data
+        else:
+            volume_data = []
         
-        # Process volume data
-        processed_data = []
-        total_call_volume = 0
-        total_put_volume = 0
-        total_call_premium = 0
-        total_put_premium = 0
+        if not volume_data:
+            return {"summary": "No options volume data", "error": None}
         
-        for item in data:
-            if isinstance(item, dict):
-                avg_30_day_call_volume = float(item.get("avg_30_day_call_volume", 0)) if item.get("avg_30_day_call_volume") else 0
-                avg_30_day_put_volume = float(item.get("avg_30_day_put_volume", 0)) if item.get("avg_30_day_put_volume") else 0
-                call_volume = int(item.get("call_volume", 0)) if item.get("call_volume") else 0
-                put_volume = int(item.get("put_volume", 0)) if item.get("put_volume") else 0
-                
-                processed_item = {
-                    "date": item.get("date", ""),
+        # Process the volume data (assuming it's a list with volume info)
+        volume_record = volume_data[0] if volume_data and isinstance(volume_data, list) else volume_data
+        
+        if isinstance(volume_record, dict):
+            call_volume = int(volume_record.get("call_volume", 0))
+            put_volume = int(volume_record.get("put_volume", 0)) 
+            call_premium = float(volume_record.get("call_premium", 0))
+            put_premium = float(volume_record.get("put_premium", 0))
+            
+            put_call_ratio = put_volume / call_volume if call_volume > 0 else 0
+            premium_ratio = put_premium / call_premium if call_premium > 0 else 0
+            
+            return {
+                "summary": {
                     "call_volume": call_volume,
                     "put_volume": put_volume,
-                    "avg_30_day_call_volume": avg_30_day_call_volume,
-                    "avg_30_day_put_volume": avg_30_day_put_volume,
-                    "call_volume_ratio": call_volume / max(avg_30_day_call_volume, 1),
-                    "put_volume_ratio": put_volume / max(avg_30_day_put_volume, 1),
-                    "bearish_premium": float(item.get("bearish_premium", 0)) if item.get("bearish_premium") else 0,
-                    "bullish_premium": float(item.get("bullish_premium", 0)) if item.get("bullish_premium") else 0,
-                    "call_premium": float(item.get("call_premium", 0)) if item.get("call_premium") else 0,
-                    "put_premium": float(item.get("put_premium", 0)) if item.get("put_premium") else 0,
-                    "net_call_premium": float(item.get("net_call_premium", 0)) if item.get("net_call_premium") else 0,
-                    "net_put_premium": float(item.get("net_put_premium", 0)) if item.get("net_put_premium") else 0
-                }
-                
-                processed_data.append(processed_item)
-                total_call_volume += call_volume
-                total_put_volume += put_volume
-                total_call_premium += processed_item["call_premium"]
-                total_put_premium += processed_item["put_premium"]
+                    "put_call_ratio": put_call_ratio,
+                    "call_premium": call_premium,
+                    "put_premium": put_premium,
+                    "premium_ratio": premium_ratio
+                },
+                "raw_data": volume_record,
+                "error": None
+            }
         
-        # Calculate summary
-        put_call_ratio = total_put_volume / max(total_call_volume, 1)
-        premium_ratio = total_put_premium / max(total_call_premium, 1)
-        
-        return {
-            "summary": {
-                "total_call_volume": total_call_volume,
-                "total_put_volume": total_put_volume,
-                "put_call_ratio": put_call_ratio,
-                "total_call_premium": total_call_premium,
-                "total_put_premium": total_put_premium,
-                "premium_ratio": premium_ratio
-            },
-            "volume_data": processed_data,
-            "error": None
-        }
+        return {"summary": "Invalid options volume data format", "error": None}
         
     except Exception as e:
         return {"error": f"Error analyzing options volume: {str(e)}"}
-
 def get_hottest_chains_analysis() -> Dict:
     """Get and analyze hottest option chains"""
     if not uw_client:
