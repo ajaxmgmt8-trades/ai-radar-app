@@ -209,12 +209,19 @@ class UnusualWhalesClient:
         """Get hottest option chains"""
         endpoint = "/api/screener/option-contracts"
         params = {
-            "limit": limit,
-            "is_otm": "false"  # Include ITM contracts too
+            "limit": min(limit, 250),  # API max is 250
+            "order": "volume",  # Order by volume for "hottest"
+            "order_direction": "desc",
+            "min_volume": 500,  # Minimum 500 volume for active contracts
+            "min_premium": 10000,  # Minimum $10k premium for significance
+            "vol_greater_oi": True,  # Volume > OI indicates new activity
         }
-        if date:
-            params["date"] = date
-        return self._make_request(endpoint, params)
+    if date:
+        params["date"] = date
+    return self._make_request(endpoint, params)
+    if date:
+        params["date"] = date
+    return self._make_request(endpoint, params)
     
     def get_stock_flow_recent(self, ticker: str) -> Dict:
         """Get recent options flow for stock"""
