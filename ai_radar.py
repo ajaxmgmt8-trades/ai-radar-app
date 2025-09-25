@@ -4842,36 +4842,36 @@ with tabs[6]:
             st.markdown("### 🔥 Unusual Whales Flow Intelligence")
             
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
-         # Debug comprehensive flow data
-        st.write(f"🔍 Debug: Testing UW flow data for {flow_ticker}...")
-        
-        flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
-        st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
-        if flow_alerts_data.get('data'):
-            st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
-            st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
-        
-        options_volume_data = uw_client.get_options_volume(flow_ticker)
-        st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
-        
-        hottest_chains_data = get_hottest_chains_analysis()
-        st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
-        
-        # Test individual UW calls
-        st.write("**Testing individual UW endpoints:**")
-        try:
-            test_stock_state = uw_client.get_stock_state(flow_ticker)
-            st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
-        except Exception as e:
-            st.write(f"Stock state error: {str(e)}")
-        
-        # Raw data inspection
-        with st.expander("🔬 Raw API Responses"):
-            st.write("**Flow Alerts Raw:**")
-            st.json(flow_alerts_data)
-            st.write("**Options Volume Raw:**") 
-            st.json(options_volume_data)
+                # Debug comprehensive flow data
+                st.write(f"🔍 Debug: Testing UW flow data for {flow_ticker}...")
                 
+                flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
+                st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
+                if flow_alerts_data.get('data'):
+                    st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
+                    st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
+                
+                options_volume_data = uw_client.get_options_volume(flow_ticker)
+                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
+                
+                hottest_chains_data = get_hottest_chains_analysis()
+                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
+                
+                # Test individual UW calls
+                st.write("**Testing individual UW endpoints:**")
+                try:
+                    test_stock_state = uw_client.get_stock_state(flow_ticker)
+                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
+                except Exception as e:
+                    st.write(f"Stock state error: {str(e)}")
+                
+                # Raw data inspection
+                with st.expander("🔬 Raw API Responses"):
+                    st.write("**Flow Alerts Raw:**")
+                    st.json(flow_alerts_data)
+                    st.write("**Options Volume Raw:**") 
+                    st.json(options_volume_data)
+                        
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
                 volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
