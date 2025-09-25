@@ -737,7 +737,7 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             return {
                 "summary": {
                     "call_volume": call_volume,
-                    "put_volume": put_volume, 
+                    "put_volume": put_volume,
                     "put_call_ratio": put_call_ratio,
                     "call_premium": call_premium,
                     "put_premium": put_premium,
@@ -751,6 +751,9 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
                 "raw_data": volume_record,
                 "error": None
             }
+        
+        except Exception as e:                                    
+            return {"error": f"Error analyzing options volume: {str(e)}"}   
             
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
     """Get hottest option chains - loosened filters"""
