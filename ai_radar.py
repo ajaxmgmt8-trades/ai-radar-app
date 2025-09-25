@@ -4906,30 +4906,9 @@ with tabs[6]:
                     st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
                     st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
                 
-                options_volume_data = uw_client.get_options_volume(flow_ticker)
-                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
-                
+                options_volume_data = uw_client.get_options_volume(flow_ticker) 
                 hottest_chains_data = uw_client.get_hottest_chains()
-                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
-                
-
-                # Add this first to see what raw data looks like:
-                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
-                
-                # Then try the analysis:
-                try:
-                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
-                except Exception as e:
-                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
-                
-                # Test individual UW calls
-                st.write("**Testing individual UW endpoints:**")
-                try:
-                    test_stock_state = uw_client.get_stock_state(flow_ticker)
-                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
-                except Exception as e:
-                    st.write(f"Stock state error: {str(e)}")
+                hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
                 
                 # Raw data inspection
                 with st.expander("🔬 Raw API Responses"):
