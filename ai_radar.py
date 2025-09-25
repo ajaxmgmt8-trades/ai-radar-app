@@ -356,7 +356,27 @@ class UnusualWhalesClient:
         endpoint = "/api/market/fda-calendar"
         params = {"ticker": ticker} if ticker else {}
         return self._make_request(endpoint, params)
+        
+    def get_market_screener(self, params: Dict = None) -> Dict:
+    """Get market screener data from UW"""
+    endpoint = "/api/screener/stocks"
     
+    # Default parameters for market movers
+    default_params = {
+        "order": "perc_change",
+        "order_direction": "desc", 
+        "min_change": "0.03",  # 3% minimum move
+        "min_volume": "100000",  # 100k minimum volume
+        "min_underlying_price": "2.0",  # $2+ stocks
+        "issue_types[]": ["Common Stock"],
+        "min_marketcap": "50000000"  # $50M+ market cap
+    }
+    
+    # Merge with any custom params
+    if params:
+        default_params.update(params)
+    
+    return self._make_request(endpoint, default_params)
     # =================================================================
     # OPTIONS SPECIFIC METHODS
     # =================================================================
@@ -3347,7 +3367,94 @@ def analyze_timeframe_options(ticker: str, option_data: Dict, uw_data: Dict, tim
         return multi_ai.analyze_with_grok(prompt)
     else:
         return f"No AI model configured for {timeframe} analysis."
-
+def get_uw_market_screener_movers():
+    """Get comprehensive market movers using UW screener"""
+    if not uw_client:
+        return []
+    
+    # Get different types of movers concurrently
+    screener_types = {
+        'top_gainers': {
+            "order": "perc_change", 
+            "order_direction": "desc",
+            "min_change": "0.05",
+            "min_volume": "500000",
+            "min_underlying_price": "5.0"
+        },
+        'top_losers': {
+            "order": "perc_change",
+            "order_direction": "asc", 
+            "max_change": "-0.05",
+            "min_volume": "500000", 
+            "min_underlying_price": "5.0"
+        },
+        'volume_leaders': {
+            "order": "volume",
+            "order_direction": "desc",
+            "min_volume": "2000000",
+            "min_change": "0.02"
+        },
+        'unusual_volume': {
+            "order": "relative_volume", 
+            "order_direction": "desc",
+            "min_stock_volume_vs_avg30_volume": "3.0",
+            "min_volume": "1000000"
+        }
+    }
+    
+    all_movers = []
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        screener_futures = {
+            executor.submit(uw_client.get_market_screener, params): category 
+            for category, params in screener_types.items()
+        }
+        
+        for future in concurrent.futures.as_completed(screener_futures, timeout=20):
+            category = screener_futures[future]
+            try:
+                result = future.result()
+                if not result.get("error") and result.get("data"):
+                    st.write(f"UW {category}: Found {len(result['data'])} stocks")
+                    
+                    for stock in result["data"][:15]:  # Top 15 from each category
+                        # Calculate percentage change
+                        close = float(stock.get("close", 0))
+                        prev_close = float(stock.get("prev_close", 0))
+                        
+                        if close > 0 and prev_close > 0:
+                            change_pct = ((close - prev_close) / prev_close) * 100
+                            
+                            mover = {
+                                "ticker": stock.get("ticker", ""),
+                                "price": close,
+                                "change_pct": change_pct,
+                                "volume": int(stock.get("call_volume", 0)) + int(stock.get("put_volume", 0)),
+                                "stock_volume": stock.get("volume", 0),
+                                "relative_volume": float(stock.get("relative_volume", 1)),
+                                "market_cap": int(stock.get("marketcap", 0)),
+                                "sector": stock.get("sector", "Unknown"),
+                                "iv_rank": float(stock.get("iv_rank", 0)),
+                                "put_call_ratio": float(stock.get("put_call_ratio", 0)),
+                                "implied_move": float(stock.get("implied_move", 0)),
+                                "category": category,
+                                "data_source": "Unusual Whales Screener"
+                            }
+                            all_movers.append(mover)
+                            
+            except Exception as e:
+                st.warning(f"UW screener {category} failed: {str(e)}")
+                continue
+    
+    # Remove duplicates, keep highest absolute change
+    unique_movers = {}
+    for mover in all_movers:
+        ticker = mover["ticker"]
+        if (ticker not in unique_movers or 
+            abs(mover["change_pct"]) > abs(unique_movers[ticker]["change_pct"])):
+            unique_movers[ticker] = mover
+    
+    return sorted(unique_movers.values(), key=lambda x: abs(x["change_pct"]), reverse=True)
 # =============================================================================
 # MAIN APPLICATION
 # =============================================================================
@@ -3720,69 +3827,93 @@ with tabs[0]:
                 
                 st.divider()
 
-    # Top Market Movers
-    st.markdown("### 🌟 Top Market Movers")
-    st.caption("Stocks with significant intraday movement from CORE_TICKERS")
-    movers = []
-    for ticker in CORE_TICKERS[:20]:  # Limit to top 20 for performance
-        quote = get_live_quote(ticker, tz_label)
-        if not quote["error"]:
-            mover_data = {
-                "ticker": ticker,
-                "change_pct": quote["change_percent"],
-                "price": quote["last"],
-                "volume": quote["volume"],
-                "data_source": quote.get("data_source", "Yahoo Finance")
-            }
-            
-            # Add UW-specific fields if available
-            if quote.get('data_source') == 'Unusual Whales':
-                mover_data.update({
-                    "open": quote.get("open", 0),
-                    "high": quote.get("high", 0),
-                    "low": quote.get("low", 0),
-                    "total_volume": quote.get("total_volume", 0),
-                    "market_time": quote.get("market_time", "Unknown"),
-                    "tape_time": quote.get("tape_time", ""),
-                    "previous_close": quote.get("previous_close", 0)
-                })
-            
-            movers.append(mover_data)
-    movers.sort(key=lambda x: abs(x["change_pct"]), reverse=True)
-    top_movers = movers[:10]  # Show top 10 movers
+   # Market-Wide Movers using UW Screener
+    st.markdown("### 🔥 Market-Wide Movers (UW Screener)")
+    st.caption("Comprehensive market scan using Unusual Whales screener across all stocks")
 
-    for mover in top_movers:
-        with st.container():
-            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-            direction = "🚀" if mover["change_pct"] > 0 else "📉"
-            col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
-            
-            # Show enhanced data if from UW
-            if mover.get('data_source') == 'Unusual Whales':
-                col2.write("**🔥 UW OHLC**")
-                col2.write(f"O: ${mover.get('open', 0):.2f}")
-                col2.write(f"H: ${mover.get('high', 0):.2f}")
-                col2.write(f"L: ${mover.get('low', 0):.2f}")
+    if uw_client:
+        if st.button("🌍 Scan Entire Market", type="primary", key="scan_market_uw"):
+            with st.spinner("Scanning entire market with UW screener..."):
+                start_time = time.time()
+                market_movers = get_uw_market_screener_movers()
+                scan_time = time.time() - start_time
                 
-                col3.write("**Volume/Total**")
-                col3.write(f"{mover['volume']:,}")
-                col3.write(f"Total: {mover.get('total_volume', 0):,}")
-                col3.caption(f"Market: {mover.get('market_time', 'Unknown')}")
-            else:
-                col2.write("**Bid/Ask**")
-                col2.write(f"N/A")  # Movers don't include bid/ask in this view
-                col3.write("**Volume**")
-                col3.write(f"{mover['volume']:,}")
+                if market_movers:
+                    st.success(f"🔥 Found {len(market_movers)} market movers in {scan_time:.1f}s using UW screener")
+                    
+                    # Summary stats
+                    col1, col2, col3, col4 = st.columns(4)
+                    gainers = [m for m in market_movers if m["change_pct"] > 0]
+                    losers = [m for m in market_movers if m["change_pct"] < 0]
+                    
+                    col1.metric("Total Movers", len(market_movers))
+                    col2.metric("Gainers", len(gainers))
+                    col3.metric("Losers", len(losers))
+                    col4.metric("Avg Volume", f"{sum(m.get('stock_volume', 0) for m in market_movers if m.get('stock_volume')) // len([m for m in market_movers if m.get('stock_volume')]) if len([m for m in market_movers if m.get('stock_volume')]) > 0 else 0:,}")
+                    
+                    # Display movers with enhanced UW data
+                    for i, mover in enumerate(market_movers[:25]):  # Top 25
+                        with st.container():
+                            col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+                            
+                            direction = "🚀" if mover["change_pct"] > 0 else "📉"
+                            col1.metric(f"{direction} {mover['ticker']}", 
+                                       f"${mover['price']:.2f}", 
+                                       f"{mover['change_pct']:+.2f}%")
+                            
+                            col2.write("**Volume/Relative**")
+                            if mover.get('stock_volume'):
+                                col2.write(f"{mover['stock_volume']:,}")
+                            col2.write(f"Rel: {mover['relative_volume']:.1f}x")
+                            
+                            col3.write("**Options Data**")
+                            col3.write(f"P/C: {mover['put_call_ratio']:.2f}")
+                            col3.write(f"IV Rank: {mover['iv_rank']:.1f}")
+                            
+                            col4.write("**Market Info**")
+                            col4.write(f"Sector: {mover['sector']}")
+                            if mover['market_cap'] > 1e9:
+                                col4.write(f"Cap: ${mover['market_cap']/1e9:.1f}B")
+                            else:
+                                col4.write(f"Cap: ${mover['market_cap']/1e6:.0f}M")
+                            
+                            col5.write(f"**Category:** {mover['category'].replace('_', ' ').title()}")
+                            if col5.button(f"Add {mover['ticker']}", key=f"uw_screener_{i}_{mover['ticker']}"):
+                                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                if mover['ticker'] not in current_list:
+                                    current_list.append(mover['ticker'])
+                                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                    st.success(f"Added {mover['ticker']} to watchlist!")
+                                    st.rerun()
+                            
+                            st.divider()
+                else:
+                    st.info("No significant market movers found with current criteria")
+        
+        # Auto-refresh option
+        if st.checkbox("Auto-refresh market scan", key="auto_market_scan"):
+            time.sleep(30)  # 30 second refresh
+            st.rerun()
             
-            col3.caption(f"Source: {mover['data_source']}")
-            if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"quotes_mover_{mover['ticker']}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if mover['ticker'] not in current_list:
-                    current_list.append(mover['ticker'])
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {mover['ticker']} to watchlist!")
-                    st.rerun()
-            st.divider()
+    else:
+        st.error("🔥 Unusual Whales client not available - configure your UW API key for comprehensive market scanning")
+        
+        # Fallback to your current CORE_TICKERS approach
+        st.markdown("**Fallback: Core Tickers Scan**")
+        movers = []
+        for ticker in CORE_TICKERS[:20]:
+            quote = get_live_quote(ticker, tz_label)
+            if not quote["error"]:
+                movers.append({
+                    "ticker": ticker,
+                    "change_pct": quote["change_percent"],
+                    "price": quote["last"],
+                    "volume": quote["volume"]
+                })
+        
+        top_movers = sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:10]
+        for mover in top_movers:
+            st.write(f"**{mover['ticker']}**: ${mover['price']:.2f} ({mover['change_pct']:+.2f}%)")
 
 # TAB 2: Watchlist Manager
 with tabs[1]:
