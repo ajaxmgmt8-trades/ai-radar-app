@@ -751,6 +751,7 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
                 "raw_data": volume_record,
                 "error": None
             }
+            
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
     """Get hottest option chains - loosened filters"""
     endpoint = "/api/screener/option-contracts"
