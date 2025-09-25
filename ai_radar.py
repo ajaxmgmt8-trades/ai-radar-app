@@ -358,25 +358,25 @@ class UnusualWhalesClient:
         return self._make_request(endpoint, params)
         
     def get_market_screener(self, params: Dict = None) -> Dict:
-    """Get market screener data from UW"""
-    endpoint = "/api/screener/stocks"
-    
-    # Default parameters for market movers
-    default_params = {
-        "order": "perc_change",
-        "order_direction": "desc", 
-        "min_change": "0.03",  # 3% minimum move
-        "min_volume": "100000",  # 100k minimum volume
-        "min_underlying_price": "2.0",  # $2+ stocks
-        "issue_types[]": ["Common Stock"],
-        "min_marketcap": "50000000"  # $50M+ market cap
-    }
-    
-    # Merge with any custom params
-    if params:
-        default_params.update(params)
-    
-    return self._make_request(endpoint, default_params)
+        """Get market screener data from UW"""
+        endpoint = "/api/screener/stocks"
+        
+        # Default parameters for market movers
+        default_params = {
+            "order": "perc_change",
+            "order_direction": "desc", 
+            "min_change": "0.03",  # 3% minimum move
+            "min_volume": "100000",  # 100k minimum volume
+            "min_underlying_price": "2.0",  # $2+ stocks
+            "issue_types[]": ["Common Stock"],
+            "min_marketcap": "50000000"  # $50M+ market cap
+        }
+        
+        # Merge with any custom params
+        if params:
+            default_params.update(params)
+        
+        return self._make_request(endpoint, default_params)
     # =================================================================
     # OPTIONS SPECIFIC METHODS
     # =================================================================
