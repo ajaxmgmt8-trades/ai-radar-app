@@ -3415,32 +3415,53 @@ def get_uw_market_screener_movers():
             try:
                 result = future.result()
                 if not result.get("error") and result.get("data"):
-                    st.write(f"UW {category}: Found {len(result['data'])} stocks")
+                    data = result["data"]
                     
-                    for stock in result["data"][:15]:  # Top 15 from each category
-                        # Calculate percentage change
-                        close = float(stock.get("close", 0))
-                        prev_close = float(stock.get("prev_close", 0))
-                        
-                        if close > 0 and prev_close > 0:
-                            change_pct = ((close - prev_close) / prev_close) * 100
+                    # Handle different data structure possibilities
+                    if isinstance(data, list):
+                        stocks_list = data
+                    elif isinstance(data, dict) and "data" in data:
+                        stocks_list = data["data"]
+                    else:
+                        st.warning(f"UW {category}: Unexpected data format")
+                        continue
+                    
+                    # Make sure stocks_list is actually a list
+                    if not isinstance(stocks_list, list):
+                        st.warning(f"UW {category}: Data is not a list, got {type(stocks_list)}")
+                        continue
+                    
+                    st.write(f"UW {category}: Found {len(stocks_list)} stocks")
+                    
+                    # Process the stocks (limit to 15 safely)
+                    for stock in stocks_list[:15]:  
+                        try:
+                            # Calculate percentage change
+                            close = float(stock.get("close", 0))
+                            prev_close = float(stock.get("prev_close", 0))
                             
-                            mover = {
-                                "ticker": stock.get("ticker", ""),
-                                "price": close,
-                                "change_pct": change_pct,
-                                "volume": int(stock.get("call_volume", 0)) + int(stock.get("put_volume", 0)),
-                                "stock_volume": stock.get("volume", 0),
-                                "relative_volume": float(stock.get("relative_volume", 1)),
-                                "market_cap": int(stock.get("marketcap", 0)),
-                                "sector": stock.get("sector", "Unknown"),
-                                "iv_rank": float(stock.get("iv_rank", 0)),
-                                "put_call_ratio": float(stock.get("put_call_ratio", 0)),
-                                "implied_move": float(stock.get("implied_move", 0)),
-                                "category": category,
-                                "data_source": "Unusual Whales Screener"
-                            }
-                            all_movers.append(mover)
+                            if close > 0 and prev_close > 0:
+                                change_pct = ((close - prev_close) / prev_close) * 100
+                                
+                                mover = {
+                                    "ticker": stock.get("ticker", ""),
+                                    "price": close,
+                                    "change_pct": change_pct,
+                                    "volume": int(stock.get("call_volume", 0)) + int(stock.get("put_volume", 0)),
+                                    "stock_volume": stock.get("volume", 0),
+                                    "relative_volume": float(stock.get("relative_volume", 1)),
+                                    "market_cap": int(stock.get("marketcap", 0)),
+                                    "sector": stock.get("sector", "Unknown"),
+                                    "iv_rank": float(stock.get("iv_rank", 0)),
+                                    "put_call_ratio": float(stock.get("put_call_ratio", 0)),
+                                    "implied_move": float(stock.get("implied_move", 0)),
+                                    "category": category,
+                                    "data_source": "Unusual Whales Screener"
+                                }
+                                all_movers.append(mover)
+                        except Exception as e:
+                            print(f"Error processing stock data: {e}")
+                            continue
                             
             except Exception as e:
                 st.warning(f"UW screener {category} failed: {str(e)}")
@@ -3827,81 +3848,104 @@ with tabs[0]:
                 
                 st.divider()
 
-   # Market-Wide Movers using UW Screener
+   # Market-Wide Movers using UW Screener (Auto-loading)
     st.markdown("### 🔥 Market-Wide Movers (UW Screener)")
     st.caption("Comprehensive market scan using Unusual Whales screener across all stocks")
 
     if uw_client:
-        if st.button("🌍 Scan Entire Market", type="primary", key="scan_market_uw"):
-            with st.spinner("Scanning entire market with UW screener..."):
-                start_time = time.time()
-                market_movers = get_uw_market_screener_movers()
-                scan_time = time.time() - start_time
-                
-                if market_movers:
-                    st.success(f"🔥 Found {len(market_movers)} market movers in {scan_time:.1f}s using UW screener")
+        # Auto-load market movers (simplified for speed)
+        if 'market_movers_cache' not in st.session_state or time.time() - st.session_state.get('last_market_scan', 0) > 60:
+            with st.spinner("Auto-scanning market for top movers..."):
+                # Faster, single screener call instead of 4 concurrent ones
+                try:
+                    simple_params = {
+                        "order": "perc_change",
+                        "order_direction": "desc",
+                        "min_change": "0.03",
+                        "min_volume": "500000",
+                        "min_underlying_price": "3.0"
+                    }
                     
-                    # Summary stats
-                    col1, col2, col3, col4 = st.columns(4)
-                    gainers = [m for m in market_movers if m["change_pct"] > 0]
-                    losers = [m for m in market_movers if m["change_pct"] < 0]
+                    result = uw_client.get_market_screener(simple_params)
                     
-                    col1.metric("Total Movers", len(market_movers))
-                    col2.metric("Gainers", len(gainers))
-                    col3.metric("Losers", len(losers))
-                    col4.metric("Avg Volume", f"{sum(m.get('stock_volume', 0) for m in market_movers if m.get('stock_volume')) // len([m for m in market_movers if m.get('stock_volume')]) if len([m for m in market_movers if m.get('stock_volume')]) > 0 else 0:,}")
-                    
-                    # Display movers with enhanced UW data
-                    for i, mover in enumerate(market_movers[:25]):  # Top 25
-                        with st.container():
-                            col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 2])
+                    if not result.get("error") and result.get("data"):
+                        market_movers = []
+                        for stock in result["data"][:20]:  # Top 20 only for speed
+                            close = float(stock.get("close", 0))
+                            prev_close = float(stock.get("prev_close", 0))
                             
-                            direction = "🚀" if mover["change_pct"] > 0 else "📉"
-                            col1.metric(f"{direction} {mover['ticker']}", 
-                                       f"${mover['price']:.2f}", 
-                                       f"{mover['change_pct']:+.2f}%")
-                            
-                            col2.write("**Volume/Relative**")
-                            if mover.get('stock_volume'):
-                                col2.write(f"{mover['stock_volume']:,}")
-                            col2.write(f"Rel: {mover['relative_volume']:.1f}x")
-                            
-                            col3.write("**Options Data**")
-                            col3.write(f"P/C: {mover['put_call_ratio']:.2f}")
-                            col3.write(f"IV Rank: {mover['iv_rank']:.1f}")
-                            
-                            col4.write("**Market Info**")
-                            col4.write(f"Sector: {mover['sector']}")
-                            if mover['market_cap'] > 1e9:
-                                col4.write(f"Cap: ${mover['market_cap']/1e9:.1f}B")
-                            else:
-                                col4.write(f"Cap: ${mover['market_cap']/1e6:.0f}M")
-                            
-                            col5.write(f"**Category:** {mover['category'].replace('_', ' ').title()}")
-                            if col5.button(f"Add {mover['ticker']}", key=f"uw_screener_{i}_{mover['ticker']}"):
-                                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                                if mover['ticker'] not in current_list:
-                                    current_list.append(mover['ticker'])
-                                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                                    st.success(f"Added {mover['ticker']} to watchlist!")
-                                    st.rerun()
-                            
-                            st.divider()
-                else:
-                    st.info("No significant market movers found with current criteria")
+                            if close > 0 and prev_close > 0:
+                                change_pct = ((close - prev_close) / prev_close) * 100
+                                
+                                mover = {
+                                    "ticker": stock.get("ticker", ""),
+                                    "price": close,
+                                    "change_pct": change_pct,
+                                    "volume": stock.get("volume", 0),
+                                    "sector": stock.get("sector", "Unknown"),
+                                    "market_cap": int(stock.get("marketcap", 0)),
+                                    "data_source": "UW Screener"
+                                }
+                                market_movers.append(mover)
+                        
+                        st.session_state.market_movers_cache = sorted(market_movers, key=lambda x: abs(x["change_pct"]), reverse=True)
+                        st.session_state.last_market_scan = time.time()
+                    else:
+                        st.session_state.market_movers_cache = []
+                        
+                except Exception as e:
+                    st.warning(f"UW screener error: {str(e)}")
+                    st.session_state.market_movers_cache = []
         
-        # Auto-refresh option
-        if st.checkbox("Auto-refresh market scan", key="auto_market_scan"):
-            time.sleep(30)  # 30 second refresh
-            st.rerun()
+        # Display cached results
+        market_movers = st.session_state.get('market_movers_cache', [])
+        
+        if market_movers:
+            st.success(f"Found {len(market_movers)} market movers (auto-refreshes every 60 seconds)")
+            
+            for mover in market_movers[:15]:  # Show top 15
+                with st.container():
+                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                    direction = "🚀" if mover["change_pct"] > 0 else "📉"
+                    col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
+                    
+                    col2.write("**Volume**")
+                    col2.write(f"{mover.get('volume', 0):,}")
+                    
+                    col3.write("**Sector**")
+                    col3.write(f"{mover['sector']}")
+                    if mover['market_cap'] > 1e9:
+                        col3.caption(f"${mover['market_cap']/1e9:.1f}B")
+                    else:
+                        col3.caption(f"${mover['market_cap']/1e6:.0f}M")
+                    
+                    if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"auto_mover_{mover['ticker']}"):
+                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                        if mover['ticker'] not in current_list:
+                            current_list.append(mover['ticker'])
+                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                            st.success(f"Added {mover['ticker']} to watchlist!")
+                            st.rerun()
+                    st.divider()
+        else:
+            st.info("No significant market movers found")
+        
+        # Manual refresh button for immediate update
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("🔄 Refresh Now"):
+                st.session_state.last_market_scan = 0  # Force refresh
+                st.rerun()
+        with col2:
+            if st.session_state.get('last_market_scan'):
+                last_scan = time.time() - st.session_state.last_market_scan
+                st.caption(f"Last updated: {last_scan:.0f} seconds ago")
             
     else:
-        st.error("🔥 Unusual Whales client not available - configure your UW API key for comprehensive market scanning")
-        
-        # Fallback to your current CORE_TICKERS approach
-        st.markdown("**Fallback: Core Tickers Scan**")
+        # Fallback to CORE_TICKERS (your original auto-loading behavior)
+        st.markdown("**Fallback: Core Tickers Auto-Scan**")
         movers = []
-        for ticker in CORE_TICKERS[:20]:
+        for ticker in CORE_TICKERS[:15]:
             quote = get_live_quote(ticker, tz_label)
             if not quote["error"]:
                 movers.append({
@@ -3913,7 +3957,18 @@ with tabs[0]:
         
         top_movers = sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:10]
         for mover in top_movers:
-            st.write(f"**{mover['ticker']}**: ${mover['price']:.2f} ({mover['change_pct']:+.2f}%)")
+            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+            direction = "🚀" if mover["change_pct"] > 0 else "📉"
+            col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
+            col2.write(f"Volume: {mover['volume']:,}")
+            if col4.button(f"Add {mover['ticker']}", key=f"fallback_{mover['ticker']}"):
+                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                if mover['ticker'] not in current_list:
+                    current_list.append(mover['ticker'])
+                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                    st.success(f"Added {mover['ticker']}")
+                    st.rerun()
+            st.divider()
 
 # TAB 2: Watchlist Manager
 with tabs[1]:
