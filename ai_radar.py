@@ -726,7 +726,9 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
         
         if isinstance(volume_record, dict):
             # Extract volume numbers properly
-            call_volume = int(float(volume_record.get("call_volume", 0)))  # Convert string to int
+            # Add this debug line temporarily
+            st.write(f"DEBUG: call_volume raw = {volume_record.get('call_volume')}, put_volume raw = {volume_record.get('put_volume')}")
+            call_volume = int(float(volume_record.get("call_volume", 0)))
             put_volume = int(float(volume_record.get("put_volume", 0)))
             call_premium = float(volume_record.get("call_premium", 0))
             put_premium = float(volume_record.get("put_premium", 0))
