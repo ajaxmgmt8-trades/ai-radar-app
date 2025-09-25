@@ -3848,127 +3848,89 @@ with tabs[0]:
                 
                 st.divider()
 
-   # Market-Wide Movers using UW Screener (Auto-loading)
-    st.markdown("### 🔥 Market-Wide Movers (UW Screener)")
-    st.caption("Comprehensive market scan using Unusual Whales screener across all stocks")
+   # Market-Wide Movers (Simple UW Version)
+    st.markdown("### 🔥 Market-Wide Movers")
+    st.caption("Real market movers using Unusual Whales data")
 
     if uw_client:
-        # Auto-load market movers (simplified for speed)
-        if 'market_movers_cache' not in st.session_state or time.time() - st.session_state.get('last_market_scan', 0) > 60:
-            with st.spinner("Auto-scanning market for top movers..."):
-                # Faster, single screener call instead of 4 concurrent ones
+        if st.button("🌍 Get Market Movers", type="primary", key="simple_market_scan"):
+            with st.spinner("Getting market movers from UW..."):
                 try:
-                    simple_params = {
+                    # Simple single screener call
+                    params = {
                         "order": "perc_change",
                         "order_direction": "desc",
                         "min_change": "0.03",
-                        "min_volume": "500000",
-                        "min_underlying_price": "3.0"
+                        "min_volume": "500000"
                     }
                     
-                    result = uw_client.get_market_screener(simple_params)
+                    result = uw_client.get_market_screener(params)
                     
-                    if not result.get("error") and result.get("data"):
-                        market_movers = []
-                        for stock in result["data"][:20]:  # Top 20 only for speed
-                            close = float(stock.get("close", 0))
-                            prev_close = float(stock.get("prev_close", 0))
-                            
-                            if close > 0 and prev_close > 0:
-                                change_pct = ((close - prev_close) / prev_close) * 100
-                                
-                                mover = {
-                                    "ticker": stock.get("ticker", ""),
-                                    "price": close,
-                                    "change_pct": change_pct,
-                                    "volume": stock.get("volume", 0),
-                                    "sector": stock.get("sector", "Unknown"),
-                                    "market_cap": int(stock.get("marketcap", 0)),
-                                    "data_source": "UW Screener"
-                                }
-                                market_movers.append(mover)
+                    if result.get("error"):
+                        st.error(f"UW API Error: {result['error']}")
+                    elif result.get("data"):
+                        data = result["data"]
                         
-                        st.session_state.market_movers_cache = sorted(market_movers, key=lambda x: abs(x["change_pct"]), reverse=True)
-                        st.session_state.last_market_scan = time.time()
+                        # Handle the data safely
+                        if isinstance(data, list):
+                            stocks = data
+                        elif isinstance(data, dict) and "data" in data:
+                            stocks = data["data"]
+                        else:
+                            st.error(f"Unexpected data format: {type(data)}")
+                            stocks = []
+                        
+                        if stocks and isinstance(stocks, list):
+                            st.success(f"Found {len(stocks)} stocks from UW screener")
+                            
+                            # Process up to 15 stocks safely
+                            for i, stock in enumerate(stocks[:15]):
+                                try:
+                                    ticker = stock.get("ticker", "")
+                                    close = float(stock.get("close", 0))
+                                    prev_close = float(stock.get("prev_close", 0))
+                                    
+                                    if close > 0 and prev_close > 0 and ticker:
+                                        change_pct = ((close - prev_close) / prev_close) * 100
+                                        volume = stock.get("volume", 0)
+                                        sector = stock.get("sector", "Unknown")
+                                        
+                                        col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+                                        direction = "🚀" if change_pct > 0 else "📉"
+                                        
+                                        col1.metric(f"{direction} {ticker}", f"${close:.2f}", f"{change_pct:+.2f}%")
+                                        col2.write(f"Volume: {volume:,}")
+                                        col3.write(f"Sector: {sector}")
+                                        
+                                        if col4.button(f"Add {ticker}", key=f"simple_add_{i}_{ticker}"):
+                                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                            if ticker not in current_list:
+                                                current_list.append(ticker)
+                                                st.session_state.watchlists[st.session_state.active_watchlist] = current_list
+                                                st.success(f"Added {ticker}")
+                                                st.rerun()
+                                        
+                                        st.divider()
+                                        
+                                except Exception as e:
+                                    st.write(f"Error processing stock {i}: {str(e)}")
+                                    continue
+                        else:
+                            st.info("No valid stock data received")
                     else:
-                        st.session_state.market_movers_cache = []
+                        st.info("No data returned from UW screener")
                         
                 except Exception as e:
-                    st.warning(f"UW screener error: {str(e)}")
-                    st.session_state.market_movers_cache = []
-        
-        # Display cached results
-        market_movers = st.session_state.get('market_movers_cache', [])
-        
-        if market_movers:
-            st.success(f"Found {len(market_movers)} market movers (auto-refreshes every 60 seconds)")
-            
-            for mover in market_movers[:15]:  # Show top 15
-                with st.container():
-                    col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-                    direction = "🚀" if mover["change_pct"] > 0 else "📉"
-                    col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
-                    
-                    col2.write("**Volume**")
-                    col2.write(f"{mover.get('volume', 0):,}")
-                    
-                    col3.write("**Sector**")
-                    col3.write(f"{mover['sector']}")
-                    if mover['market_cap'] > 1e9:
-                        col3.caption(f"${mover['market_cap']/1e9:.1f}B")
-                    else:
-                        col3.caption(f"${mover['market_cap']/1e6:.0f}M")
-                    
-                    if col4.button(f"Add {mover['ticker']} to Watchlist", key=f"auto_mover_{mover['ticker']}"):
-                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                        if mover['ticker'] not in current_list:
-                            current_list.append(mover['ticker'])
-                            st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                            st.success(f"Added {mover['ticker']} to watchlist!")
-                            st.rerun()
-                    st.divider()
-        else:
-            st.info("No significant market movers found")
-        
-        # Manual refresh button for immediate update
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            if st.button("🔄 Refresh Now"):
-                st.session_state.last_market_scan = 0  # Force refresh
-                st.rerun()
-        with col2:
-            if st.session_state.get('last_market_scan'):
-                last_scan = time.time() - st.session_state.last_market_scan
-                st.caption(f"Last updated: {last_scan:.0f} seconds ago")
-            
+                    st.error(f"Market screener error: {str(e)}")
     else:
-        # Fallback to CORE_TICKERS (your original auto-loading behavior)
-        st.markdown("**Fallback: Core Tickers Auto-Scan**")
-        movers = []
-        for ticker in CORE_TICKERS[:15]:
-            quote = get_live_quote(ticker, tz_label)
-            if not quote["error"]:
-                movers.append({
-                    "ticker": ticker,
-                    "change_pct": quote["change_percent"],
-                    "price": quote["last"],
-                    "volume": quote["volume"]
-                })
+        st.error("UW client not available")
         
-        top_movers = sorted(movers, key=lambda x: abs(x["change_pct"]), reverse=True)[:10]
-        for mover in top_movers:
-            col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
-            direction = "🚀" if mover["change_pct"] > 0 else "📉"
-            col1.metric(f"{direction} {mover['ticker']}", f"${mover['price']:.2f}", f"{mover['change_pct']:+.2f}%")
-            col2.write(f"Volume: {mover['volume']:,}")
-            if col4.button(f"Add {mover['ticker']}", key=f"fallback_{mover['ticker']}"):
-                current_list = st.session_state.watchlists[st.session_state.active_watchlist]
-                if mover['ticker'] not in current_list:
-                    current_list.append(mover['ticker'])
-                    st.session_state.watchlists[st.session_state.active_watchlist] = current_list
-                    st.success(f"Added {mover['ticker']}")
-                    st.rerun()
-            st.divider()
+        # Simple fallback
+        st.write("**Fallback - Core Tickers:**")
+        for ticker in CORE_TICKERS[:10]:
+            quote = get_live_quote(ticker, tz_label)
+            if not quote.get("error"):
+                st.write(f"**{ticker}**: ${quote['last']:.2f} ({quote['change_percent']:+.2f}%)")
 
 # TAB 2: Watchlist Manager
 with tabs[1]:
