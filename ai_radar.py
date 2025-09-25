@@ -5278,10 +5278,12 @@ with tabs[7]:
             options_volume_data = uw_client.get_options_volume(lotto_ticker)
             flow_analysis = analyze_flow_alerts(flow_alerts_data, lotto_ticker)
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
+            hottest_chains_data = uw_client.get_hottest_chains()
+            hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
-
+            hottest_chains_analysis = {"error": "UW not available"}
     if option_chain.get("error"):
         st.error(option_chain["error"])
     else:
