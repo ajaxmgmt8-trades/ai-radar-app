@@ -3948,15 +3948,18 @@ with tabs[0]:
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             
                             # Use the working flow alerts data
-                            total_alerts = flow_alerts_analysis.get('summary', {}).get('total_alerts', 0)
-                            flow_sentiment = flow_alerts_analysis.get('summary', {}).get('flow_sentiment', 'Neutral')
+                            summary = flow_alerts_analysis.get('summary', {}) if flow_alerts_analysis else {}
+                            total_alerts = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
+                            flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
                             # Calculate P/C ratio from options volume data
                             options_volume_data = uw_client.get_options_volume(ticker)
                             options_volume_analysis = analyze_options_volume(options_volume_data, ticker)
                             pc_ratio = 0.0
                             if not options_volume_analysis.get("error"):
-                                pc_ratio = options_volume_analysis.get('summary', {}).get('put_call_ratio', 0.0)
+                                # To this:
+                                vol_summary = options_volume_analysis.get('summary', {}) if options_volume_analysis else {}
+                                pc_ratio = vol_summary.get('put_call_ratio', 0.0) if isinstance(vol_summary, dict) else 0.0
                             
                             opt_col1.metric("Flow Alerts", total_alerts)
                             opt_col2.metric("Flow Sentiment", flow_sentiment)
