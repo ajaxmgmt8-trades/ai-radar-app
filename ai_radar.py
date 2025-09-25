@@ -3589,8 +3589,8 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         return {
             "summary": {
                 "total_chains": len(chains),
-                "combined_volume": total_volume,
-                "combined_premium": total_premium
+                "total_volume": total_volume,        # Changed from 'combined_volume' 
+                "total_premium": total_premium,      # Changed from 'combined_premium'
             },
             "chains": chains[:10],  # Top 10 chains
             "error": None
