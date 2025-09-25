@@ -4912,6 +4912,17 @@ with tabs[6]:
                 hottest_chains_data = uw_client.get_hottest_chains()
                 st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
                 
+
+                # Add this first to see what raw data looks like:
+                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
+                
+                # Then try the analysis:
+                try:
+                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
+                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
+                except Exception as e:
+                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
+                
                 # Test individual UW calls
                 st.write("**Testing individual UW endpoints:**")
                 try:
