@@ -180,43 +180,135 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get options flow alerts"""
+        """Get options flow alerts with comprehensive filtering"""
         endpoint = "/api/option-trades/flow-alerts"
         params = {
-            "all_opening": "true",
-            "is_floor": "true", 
-            "is_sweep": "true",
-            "is_call": "true",
-            "is_put": "true",
-            "is_ask_side": "true",
-            "is_bid_side": "true",
-            "is_otm": "true"
+            # Basic filters (all default to True)
+            "all_opening": True,
+            "is_ask_side": True,
+            "is_bid_side": True,
+            "is_call": True,
+            "is_put": True,
+            "is_sweep": True,
+            "is_floor": True,
+            
+            # Result limits
+            "limit": 100,  # Max 200
+            
+            # Premium filters (for significant alerts)
+            "min_premium": 10000,  # $10k minimum premium
+            "max_premium": 5000000,  # $5M max to filter out huge outliers
+            
+            # Size filters
+            "min_size": 25,  # Minimum 25 contracts
+            
+            # Volume filters
+            "min_volume": 100,  # Minimum volume
+            "min_volume_oi_ratio": 1,  # Volume must be >= OI (new activity)
+            
+            # Days to expiry filters
+            "min_dte": 0,  # Include 0DTE
+            "max_dte": 365,  # Up to 1 year out
+            
+            # Open Interest filters
+            "min_open_interest": 50,  # Some existing OI
+            
+            # Issue types
+            "issue_types[]": ["Common Stock", "ETF"],
+            
+            # Rule names for quality alerts
+            "rule_name[]": [
+                "RepeatedHits",
+                "RepeatedHitsAscendingFill", 
+                "RepeatedHitsDescendingFill",
+                "FloorTradeLargeCap",
+                "FloorTradeMidCap",
+                "SweepsFollowedByFloor"
+            ]
         }
+        
+        # Add ticker filter if specified
         if ticker:
-            # Use stock-specific flow alerts
-            endpoint = f"/api/stock/{ticker}/flow-alerts"
-            params = {"is_ask_side": "true", "is_bid_side": "true"}
+            params["ticker_symbol"] = ticker
         
         return self._make_request(endpoint, params)
-    
+        
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
         endpoint = f"/api/stock/{ticker}/options-volume"
         params = {"limit": limit}
         return self._make_request(endpoint, params)
     def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
-        """Get hottest option chains"""
+        """Get hottest option chains with comprehensive filtering"""
         endpoint = "/api/screener/option-contracts"
         params = {
+            # Result control
             "limit": min(limit, 250),  # API max is 250
-            "order": "volume",  # Order by volume for "hottest"
+            "order": "volume",
             "order_direction": "desc",
-            "min_volume": 500,  # Minimum 500 volume for active contracts
-            "min_premium": 10000,  # Minimum $10k premium for significance
-            "vol_greater_oi": True,  # Volume > OI indicates new activity
+            
+            # Volume filters for "hottest" activity
+            "min_volume": 500,  # Minimum 500 contracts
+            "min_volume_oi_ratio": 1.5,  # Volume > 1.5x open interest (new activity)
+            "vol_greater_oi": True,  # Volume must be greater than OI
+            
+            # Premium filters for significance
+            "min_premium": 25000,  # $25k minimum premium for meaningful trades
+            "max_premium": 10000000,  # $10M max to filter outliers
+            
+            # Price filters
+            "min_underlying_price": 5.0,  # $5+ stocks only
+            "max_underlying_price": 1000.0,  # Under $1000 to avoid outliers
+            
+            # Contract filters
+            "min_open_interest": 100,  # Some existing OI required
+            "max_open_interest": 100000,  # Not too illiquid
+            
+            # Days to expiry (for active trading)
+            "min_dte": 0,  # Include 0DTE
+            "max_dte": 60,  # Up to 2 months out for active trading
+            
+            # Delta filters (focus on tradeable contracts)
+            "min_delta": -0.95,  # Not too deep ITM puts
+            "max_delta": 0.95,   # Not too deep ITM calls
+            
+            # IV filters
+            "min_iv_perc": 0.10,  # 10% minimum IV
+            "max_iv_perc": 3.0,   # 300% max IV to filter crazy spikes
+            
+            # Transaction filters
+            "min_transactions": 10,  # At least 10 transactions for liquidity
+            
+            # Floor and sweep activity (indicates institutional interest)
+            "min_floor_volume": 0,  # Include floor activity
+            "min_sweep_volume_ratio": 0.1,  # Some sweep activity
+            
+            # Skew filter (balanced bid/ask activity)
+            "max_skew_perc": 0.9,  # Not more than 90% on one side
+            
+            # Market cap filters
+            "min_marketcap": 100000000,  # $100M+ market cap
+            "max_marketcap": 5000000000000,  # $5T max
+            
+            # Issue types
+            "issue_types[]": ["Common Stock", "ETF"],
+            
+            # Sectors (focus on active sectors)
+            "sectors[]": [
+                "Technology",
+                "Financial Services", 
+                "Healthcare",
+                "Consumer Cyclical",
+                "Communication Services",
+                "Consumer Defensive",
+                "Industrials",
+                "Energy"
+            ]
         }
+        
         if date:
             params["date"] = date
+        
         return self._make_request(endpoint, params)
     
     def get_stock_flow_recent(self, ticker: str) -> Dict:
