@@ -740,8 +740,8 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             
             return {
                 "summary": {
-                    "call_volume": call_volume,
-                    "put_volume": put_volume,
+                    "total_call_volume": call_volume,        # Changed from 'call_volume'
+                    "total_put_volume": put_volume,          # Changed from 'put_volume'  
                     "put_call_ratio": put_call_ratio,
                     "call_premium": call_premium,
                     "put_premium": put_premium,
