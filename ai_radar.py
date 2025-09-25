@@ -709,24 +709,25 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
         return {"error": options_volume_data["error"]}
     
     try:
-        # FIX: Handle double-nested data structure  
+        # Handle double-nested data structure  
         data = options_volume_data.get("data", {})
         if isinstance(data, dict) and "data" in data:
-            volume_data = data["data"]  # Double nested: data.data
+            volume_data = data["data"]  
         elif isinstance(data, list):
-            volume_data = data  # Single nested: data
+            volume_data = data  
         else:
             volume_data = []
         
         if not volume_data:
             return {"summary": "No options volume data", "error": None}
         
-        # Process the volume data (assuming it's a list with volume info)
-        volume_record = volume_data[0] if volume_data and isinstance(volume_data, list) else volume_data
+        # Get the first record
+        volume_record = volume_data[0] if isinstance(volume_data, list) else volume_data
         
         if isinstance(volume_record, dict):
-            call_volume = int(volume_record.get("call_volume", 0))
-            put_volume = int(volume_record.get("put_volume", 0)) 
+            # Extract volume numbers properly
+            call_volume = int(float(volume_record.get("call_volume", 0)))  # Convert string to int
+            put_volume = int(float(volume_record.get("put_volume", 0)))
             call_premium = float(volume_record.get("call_premium", 0))
             put_premium = float(volume_record.get("put_premium", 0))
             
@@ -736,20 +737,20 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             return {
                 "summary": {
                     "call_volume": call_volume,
-                    "put_volume": put_volume,
+                    "put_volume": put_volume, 
                     "put_call_ratio": put_call_ratio,
                     "call_premium": call_premium,
                     "put_premium": put_premium,
-                    "premium_ratio": premium_ratio
+                    "premium_ratio": premium_ratio,
+                    # Add more fields for dropdown
+                    "bullish_premium": float(volume_record.get("bullish_premium", 0)),
+                    "bearish_premium": float(volume_record.get("bearish_premium", 0)),
+                    "call_open_interest": int(volume_record.get("call_open_interest", 0)),
+                    "put_open_interest": int(volume_record.get("put_open_interest", 0))
                 },
                 "raw_data": volume_record,
                 "error": None
             }
-        
-        return {"summary": "Invalid options volume data format", "error": None}
-        
-    except Exception as e:
-        return {"error": f"Error analyzing options volume: {str(e)}"}
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
     """Get hottest option chains - loosened filters"""
     endpoint = "/api/screener/option-contracts"
@@ -3897,20 +3898,36 @@ with tabs[0]:
                     st.markdown("### 🎯 AI Playbook")
                     catalyst_title = news[0].get('headline', '') if news else ""
                     
-                    # Use enhanced options data if UW available
+                    # Replace the existing "Use enhanced options data if UW available" section with:
                     if uw_client:
-                        options_data = get_enhanced_options_analysis(ticker)
-                        if not options_data.get("error"):
-                            st.write("**🔥 Unusual Whales Options Metrics:**")
-                            enhanced = options_data.get('enhanced_metrics', {})
+                        # Get the same working UW data used in Options Flow tab
+                        flow_alerts_data = uw_client.get_flow_alerts(ticker)
+                        flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
+                        
+                        if not flow_alerts_analysis.get("error"):
+                            enhanced_metrics = flow_alerts_analysis.get('enhanced_metrics', {})
+                            st.write("***🔥 Unusual Whales Options Metrics:***")
+                            
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            opt_col1.metric("Flow Alerts", enhanced.get('total_flow_alerts', 'N/A'))
-                            opt_col2.metric("Flow Sentiment", enhanced.get('flow_sentiment', 'Neutral'))
-                            opt_col3.metric("ATM P/C Ratio", f"{enhanced.get('atm_put_call_ratio', 0):.2f}")
+                            
+                            # Use the working flow alerts data
+                            total_alerts = flow_alerts_analysis.get('summary', {}).get('total_alerts', 0)
+                            flow_sentiment = flow_alerts_analysis.get('summary', {}).get('flow_sentiment', 'Neutral')
+                            
+                            # Calculate P/C ratio from options volume data
+                            options_volume_data = uw_client.get_options_volume(ticker)
+                            options_volume_analysis = analyze_options_volume(options_volume_data, ticker)
+                            pc_ratio = 0.0
+                            if not options_volume_analysis.get("error"):
+                                pc_ratio = options_volume_analysis.get('summary', {}).get('put_call_ratio', 0.0)
+                            
+                            opt_col1.metric("Flow Alerts", total_alerts)
+                            opt_col2.metric("Flow Sentiment", flow_sentiment)
+                            opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
                     else:
                         options_data = get_options_data(ticker)
-                        if options_data:
-                            st.write("**Options Metrics:**")
+                        if not options_data:
+                            st.write("***Options Metrics:***")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
                             opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
@@ -4892,14 +4909,48 @@ with tabs[6]:
                     vol_col3.metric("P/C Ratio", f"{vol_summary.get('put_call_ratio', 0):.2f}")
                     vol_col4.metric("Premium Ratio", f"{vol_summary.get('premium_ratio', 0):.2f}")
                     
-                    # Display volume data
+                    # Display volume data - REPLACE THE EXISTING EXPANDER SECTION
                     if volume_analysis.get("volume_data"):
-                        with st.expander("📈 Volume Details"):
-                            volume_df = pd.DataFrame(volume_analysis["volume_data"])
-                            if not volume_df.empty:
-                                st.dataframe(volume_df, use_container_width=True)
-                else:
-                    st.info(f"Volume Analysis: {volume_analysis.get('error', 'No data available')}")
+                        with st.expander("📊 Enhanced Volume Details"):
+                            # Get the raw UW data
+                            raw_data = volume_analysis.get("raw_data", {})
+                            
+                            if raw_data:
+                                # Enhanced two-column layout
+                                vol_col1, vol_col2 = st.columns(2)
+                                
+                                with vol_col1:
+                                    st.write("**📞 Call Options Data:**")
+                                    st.write(f"Volume: {raw_data.get('call_volume', 'N/A'):,}")
+                                    st.write(f"Premium: ${float(raw_data.get('call_premium', 0)):,.0f}")
+                                    st.write(f"Open Interest: {raw_data.get('call_open_interest', 'N/A'):,}")
+                                    st.write(f"Bid Side Volume: {raw_data.get('call_volume_bid_side', 'N/A'):,}")
+                                    st.write(f"Ask Side Volume: {raw_data.get('call_volume_ask_side', 'N/A'):,}")
+                                    st.write(f"Net Premium: ${float(raw_data.get('net_call_premium', 0)):,.0f}")
+                                
+                                with vol_col2:
+                                    st.write("**📉 Put Options Data:**")
+                                    st.write(f"Volume: {raw_data.get('put_volume', 'N/A'):,}")
+                                    st.write(f"Premium: ${float(raw_data.get('put_premium', 0)):,.0f}")
+                                    st.write(f"Open Interest: {raw_data.get('put_open_interest', 'N/A'):,}")
+                                    st.write(f"Bid Side Volume: {raw_data.get('put_volume_bid_side', 'N/A'):,}")
+                                    st.write(f"Ask Side Volume: {raw_data.get('put_volume_ask_side', 'N/A'):,}")
+                                    st.write(f"Net Premium: ${float(raw_data.get('net_put_premium', 0)):,.0f}")
+                                
+                                # Additional metrics row
+                                st.write("**📊 Additional Metrics:**")
+                                met_col1, met_col2, met_col3 = st.columns(3)
+                                met_col1.write(f"Bullish Flow: ${float(raw_data.get('bullish_premium', 0)):,.0f}")
+                                met_col2.write(f"Bearish Flow: ${float(raw_data.get('bearish_premium', 0)):,.0f}")
+                                met_col3.write(f"Date: {raw_data.get('date', 'N/A')}")
+                            
+                            # Keep the DataFrame if you want
+                            if volume_analysis.get("volume_data"):
+                                volume_df = pd.DataFrame(volume_analysis["volume_data"])
+                                if not volume_df.empty():
+                                    st.dataframe(volume_df, use_container_width=True)
+                    else:
+                        st.info(f"Volume Analysis: {volume_analysis.get('error', 'No data available')}")
                 
                 # Display Hottest Chains
                 st.markdown("#### 🌡️ Hottest Chains")
