@@ -591,6 +591,25 @@ def debug_atm_chains(ticker: str):
 
 def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
     """Analyze flow alerts data from UW"""
+    
+    # TEMP DEBUG - remove after fixing
+    st.write(f"🔍 ANALYZE DEBUG: Received data keys: {list(flow_alerts_data.keys())}")
+    data = flow_alerts_data.get("data", {})
+    st.write(f"🔍 ANALYZE DEBUG: data type: {type(data)}")
+    if isinstance(data, dict) and "data" in data:
+        alerts = data["data"]
+        st.write(f"🔍 ANALYZE DEBUG: Found {len(alerts)} alerts in data.data")
+    elif isinstance(data, list):
+        alerts = data
+        st.write(f"🔍 ANALYZE DEBUG: Found {len(alerts)} alerts in data")
+    else:
+        alerts = []
+        st.write(f"🔍 ANALYZE DEBUG: No valid alerts structure")
+    
+    if flow_alerts_data.get("error"):
+        return {"error": flow_alerts_data["error"]}
+    
+    # ... rest of your function
     if flow_alerts_data.get("error"):
         return {"error": flow_alerts_data["error"]}
     
@@ -731,60 +750,21 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing options volume: {str(e)}"}
-def get_hottest_chains_analysis() -> Dict:
-    """Get and analyze hottest option chains"""
-    if not uw_client:
-        return {"error": "UW client not available"}
-    
-    try:
-        chains_data = uw_client.get_hottest_chains()
-        if chains_data.get("error"):
-            return chains_data
-        
-        data = chains_data.get("data", [])
-        if not data:
-            return {"summary": "No hottest chains data found", "chains": []}
-        
-        processed_chains = []
-        total_volume = 0
-        total_premium = 0
-        
-        for chain in data:
-            if isinstance(chain, dict):
-                volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
-                premium = float(chain.get("total_premium", 0)) if chain.get("total_premium") else 0
-                
-                processed_chain = {
-                    "ticker": chain.get("ticker", ""),
-                    "strike": float(chain.get("strike", 0)) if chain.get("strike") else 0,
-                    "type": chain.get("type", ""),
-                    "volume": volume,
-                    "premium": premium,
-                    "expiry": chain.get("expiry", ""),
-                    "underlying_price": float(chain.get("underlying_price", 0)) if chain.get("underlying_price") else 0,
-                    "price": float(chain.get("price", 0)) if chain.get("price") else 0,
-                    "iv": float(chain.get("iv", 0)) if chain.get("iv") else 0
-                }
-                
-                processed_chains.append(processed_chain)
-                total_volume += volume
-                total_premium += premium
-        
-        # Sort by volume
-        processed_chains.sort(key=lambda x: x["volume"], reverse=True)
-        
-        return {
-            "summary": {
-                "total_chains": len(processed_chains),
-                "total_volume": total_volume,
-                "total_premium": total_premium
-            },
-            "chains": processed_chains,
-            "error": None
-        }
-        
-    except Exception as e:
-        return {"error": f"Error analyzing hottest chains: {str(e)}"}
+def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
+    """Get hottest option chains - loosened filters"""
+    endpoint = "/api/screener/option-contracts"
+    params = {
+        "limit": min(limit, 250),
+        "order": "volume",
+        "order_direction": "desc",
+        # Much looser filters
+        "min_volume": 100,  # Reduced from 200
+        "min_premium": 1000,  # Reduced from 5000  
+        # Remove most restrictive filters to start
+    }
+    if date:
+        params["date"] = date
+    return self._make_request(endpoint, params)
 
 # =================================================================
 # AI ANALYSIS WITH ENHANCED FLOW DATA
