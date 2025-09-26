@@ -4857,7 +4857,12 @@ with tabs[6]:
     # Ticker selection
     col1, col2 = st.columns([3, 1])
     with col1:
-        flow_ticker = st.selectbox("Select Ticker for Options Flow", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="flow_ticker")
+        flow_ticker = st.text_input(
+            "Select Ticker for Options Flow", 
+            value="AAPL",
+            placeholder="Enter any ticker (e.g., AAPL, TSLA, SPY)",
+            key="flow_ticker"
+        ).upper()
     with col2:
         if st.button("Refresh All Data", key="refresh_flow_data"):
             st.cache_data.clear()
