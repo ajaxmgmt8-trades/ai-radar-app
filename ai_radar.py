@@ -3935,58 +3935,57 @@ with tabs[0]:
                     st.markdown("### 🎯 AI Playbook")
                     catalyst_title = news[0].get('headline', '') if news else ""
                     
-                    # Replace the existing "Use enhanced options data if UW available" section with:
+                    # Single UW check - no nesting
                     if uw_client:
-                        # Get the same working UW data used in Options Flow tab
                         flow_alerts_data = uw_client.get_flow_alerts(ticker)
                         flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
                         
-                        if not flow_alerts_analysis.get("error"):
-                            enhanced_metrics = flow_alerts_analysis.get('enhanced_metrics', {})
+                        if flow_alerts_analysis and not flow_alerts_analysis.get("error"):
                             st.write("***🔥 Unusual Whales Options Metrics:***")
-                            
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             
-                            # Use the working flow alerts data
                             summary = flow_alerts_analysis.get('summary', {}) if flow_alerts_analysis else {}
                             total_alerts = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
                             flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
-                            # Calculate P/C ratio from options volume data
+                            # Get P/C ratio
                             options_volume_data = uw_client.get_options_volume(ticker)
                             options_volume_analysis = analyze_options_volume(options_volume_data, ticker)
                             pc_ratio = 0.0
-                            if not options_volume_analysis.get("error"):
-                                # To this:
+                            if options_volume_analysis and not options_volume_analysis.get("error"):
                                 vol_summary = options_volume_analysis.get('summary', {}) if options_volume_analysis else {}
                                 pc_ratio = vol_summary.get('put_call_ratio', 0.0) if isinstance(vol_summary, dict) else 0.0
                             
                             opt_col1.metric("Flow Alerts", total_alerts)
                             opt_col2.metric("Flow Sentiment", flow_sentiment)
                             opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
+                            
+                            # Create options_data for AI
+                            options_data = {
+                                'flow_alerts': total_alerts,
+                                'flow_sentiment': flow_sentiment,
+                                'put_call_ratio': pc_ratio,
+                                'data_source': 'Unusual Whales'
+                            }
+                        else:
+                            st.info("UW data unavailable (API limit)")
+                            options_data = {}
+                    
                     else:
+                        # Non-UW fallback
                         options_data = get_options_data(ticker)
-                        if not options_data:
+                        if options_data:  # Fixed: was "if not options_data"
                             st.write("***Options Metrics:***")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
                             opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
                             opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                    
-                        if uw_client:
-                            # ... existing UW code ...
-                            opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
-                            
-                            # Create options_data and call ai_playbook here
-                            options_data = {'flow_alerts': total_alerts, 'flow_sentiment': flow_sentiment, 'put_call_ratio': pc_ratio}
-                            st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
-                            
                         else:
-                            # ... existing non-UW code ...
-                            opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                            
-                            # Call ai_playbook here too
-                            st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
+                            options_data = {}
+                    
+                    # Single AI playbook call for both paths
+                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
+                
                 st.divider()
 
   # Enhanced Auto-loading Market Movers with Full Data
