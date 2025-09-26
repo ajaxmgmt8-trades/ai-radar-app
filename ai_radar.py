@@ -15,6 +15,7 @@ import openai
 import concurrent.futures
 from datetime import datetime, date
 from datetime import timedelta
+import re
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -3284,15 +3285,37 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
                     include = True
                 
                 if include:
+                    # Parse option symbol to extract strike using UW's regex pattern
+                    try:
+                        symbol = contract.get("option_symbol", "")
+                        if symbol:
+                            # UW regex pattern to extract strike
+                            pattern = r'^(?P<symbol>[\w]*)(?P<expiry>(\d{2})(\d{2})(\d{2}))(?P<type>[PC])(?P<strike>\d{8})$'
+                            match = re.match(pattern, symbol)
+                            if match:
+                                # Extract strike and divide by 1000 as per UW documentation
+                                strike_raw = int(match.group('strike'))
+                                strike_price = strike_raw / 1000.0
+                                option_type = 'call' if match.group('type') == 'C' else 'put'
+                            else:
+                                strike_price = 0
+                                option_type = 'unknown'
+                        else:
+                            strike_price = 0
+                            option_type = 'unknown'
+                    except:
+                        strike_price = 0
+                        option_type = 'unknown'
+                    
                     formatted_contract = {
                         'contractSymbol': symbol,
-                        'strike': float(contract.get('strike_price', 0)) / 1000,  # UW uses 'strike_price'
+                        'strike': strike_price,  # Now properly extracted from option symbol
                         'lastPrice': float(contract.get('last_price', 0)),
                         'bid': float(contract.get('nbbo_bid', 0)),
                         'ask': float(contract.get('nbbo_ask', 0)), 
                         'volume': int(contract.get('volume', 0)),
                         'openInterest': int(contract.get('open_interest', 0)),
-                        'impliedVolatility': float(contract.get('implied_volatility', 0)) * 100,  # Convert to percentage
+                        'impliedVolatility': float(contract.get('implied_volatility', 0)) * 100,
                         'expiration_date': exp_date.strftime('%Y-%m-%d'),
                         'expiry': exp_date.strftime('%Y-%m-%d'),
                         'type': option_type
