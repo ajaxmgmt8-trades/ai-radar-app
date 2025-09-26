@@ -3223,109 +3223,106 @@ def get_important_events() -> List[Dict]:
 
 @st.cache_data(ttl=300)
 def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dict:
-    """Get options filtered by timeframe (0DTE, Swing, LEAPS) - returns ALL expirations in timeframe"""
+    """Get options filtered by timeframe using UW API"""
+    if not uw_client:
+        return {"error": "UW client not available"}
+    
     try:
-        stock = yf.Ticker(ticker)
-        expirations = stock.options
-        if not expirations:
-            return {"error": f"No options data available for {ticker}"}
-
+        # Get all option contracts from UW
+        response = requests.get(
+            f"https://api.unusualwhales.com/api/stock/{ticker}/option-contracts",
+            headers={
+                "Authorization": f"Bearer {UW_API_KEY}",
+                "Accept": "application/json"
+            },
+            params={
+                "exclude_zero_dte": "false",
+                "exclude_zero_oi_chains": "false", 
+                "exclude_zero_vol_chains": "false",
+                "limit": 1000
+            }
+        )
+        
+        if response.status_code != 200:
+            return {"error": f"UW API error: {response.status_code}"}
+        
+        data = response.json().get("data", [])
+        if not data:
+            return {"error": f"No UW options data for {ticker}"}
+        
+        # Process and filter by timeframe
         today = datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
-        expiration_dates = []
         
-        for exp in expirations:
-            exp_date = datetime.strptime(exp, '%Y-%m-%d').date()
-            days_to_exp = (exp_date - today).days
-            
-            if timeframe == "0DTE" and days_to_exp == 0:
-                expiration_dates.append(exp)
-            elif timeframe == "Swing" and 2 <= days_to_exp <= 89:
-                expiration_dates.append(exp)
-            elif timeframe == "LEAPS" and days_to_exp >= 90:
-                expiration_dates.append(exp)
+        filtered_calls = []
+        filtered_puts = []
         
-        if not expiration_dates:
-            return {"error": f"No {timeframe} options available for {ticker}"}
-
-        # SIMPLE FIX: If we only have one expiration, use the old single-expiration logic
-        if len(expiration_dates) == 1:
-            target_expiration = expiration_dates[0]
-            
-            # Fetch option chain
-            option_chain = stock.option_chain(target_expiration)
-            calls = option_chain.calls
-            puts = option_chain.puts
-
-            # Clean and format data
-            calls = calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
-            puts = puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']]
-            
-            # Determine moneyness
-            current_price = get_live_quote(ticker, tz).get('last', 0)
-            calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
-            puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
-
-            # Convert IV to percentage
-            calls['impliedVolatility'] = calls['impliedVolatility'] * 100
-            puts['impliedVolatility'] = puts['impliedVolatility'] * 100
-
-            return {
-                "calls": calls,
-                "puts": puts,
-                "expiration": target_expiration,
-                "current_price": current_price,
-                "days_to_expiration": (datetime.strptime(target_expiration, '%Y-%m-%d').date() - today).days,
-                "timeframe": timeframe,
-                "all_expirations": expiration_dates,
-                "error": None
-            }
-        
-        # MULTIPLE EXPIRATIONS: Use the new multi-expiration logic
-        else:
-            all_calls = []
-            all_puts = []
-            current_price = get_live_quote(ticker, tz).get('last', 0)
-            
-            for target_expiration in expiration_dates:
-                try:
-                    option_chain = stock.option_chain(target_expiration)
-                    calls = option_chain.calls[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']].copy()
-                    puts = option_chain.puts[['contractSymbol', 'strike', 'lastPrice', 'bid', 'ask', 'volume', 'openInterest', 'impliedVolatility']].copy()
-                    
-                    # Add metadata
-                    calls['expiration_date'] = target_expiration
-                    calls['expiry'] = target_expiration
-                    calls['type'] = 'call'
-                    puts['expiration_date'] = target_expiration  
-                    puts['expiry'] = target_expiration
-                    puts['type'] = 'put'
-                    
-                    # Moneyness and IV
-                    calls['moneyness'] = calls['strike'].apply(lambda x: 'ITM' if x < current_price else 'OTM')
-                    puts['moneyness'] = puts['strike'].apply(lambda x: 'ITM' if x > current_price else 'OTM')
-                    calls['impliedVolatility'] = calls['impliedVolatility'] * 100
-                    puts['impliedVolatility'] = puts['impliedVolatility'] * 100
-                    
-                    all_calls.append(calls)
-                    all_puts.append(puts)
-                except:
+        for contract in data:
+            symbol = contract.get("option_symbol", "")
+            if not symbol:
+                continue
+                
+            try:
+                if 'C' in symbol:
+                    option_type = 'call'
+                elif 'P' in symbol:
+                    option_type = 'put'
+                else:
                     continue
-
-            combined_calls = pd.concat(all_calls, ignore_index=True) if all_calls else pd.DataFrame()
-            combined_puts = pd.concat(all_puts, ignore_index=True) if all_puts else pd.DataFrame()
-
-            return {
-                "calls": combined_calls,
-                "puts": combined_puts,
-                "current_price": current_price,
-                "timeframe": timeframe,
-                "all_expirations": expiration_dates,
-                "available_expirations": expiration_dates,
-                "error": None
-            }
-            
+                    
+                # Extract date part from UW option symbol format
+                date_part = symbol[len(ticker):len(ticker)+6]
+                exp_date = datetime.strptime(f"20{date_part}", '%Y%m%d').date()
+                days_to_exp = (exp_date - today).days
+                
+                # Filter by timeframe
+                include = False
+                if timeframe == "0DTE" and days_to_exp == 0:
+                    include = True
+                elif timeframe == "Swing" and 2 <= days_to_exp <= 89:
+                    include = True
+                elif timeframe == "LEAPS" and days_to_exp >= 90:
+                    include = True
+                
+                if include:
+                    formatted_contract = {
+                        'contractSymbol': symbol,
+                        'strike': float(contract.get('strike', 0)) / 1000,
+                        'lastPrice': contract.get('last_price', 0),
+                        'bid': contract.get('nbbo_bid', 0),
+                        'ask': contract.get('nbbo_ask', 0), 
+                        'volume': contract.get('volume', 0),
+                        'openInterest': contract.get('open_interest', 0),
+                        'impliedVolatility': contract.get('implied_volatility', 0) * 100,
+                        'expiration_date': exp_date.strftime('%Y-%m-%d'),
+                        'expiry': exp_date.strftime('%Y-%m-%d'),
+                        'type': option_type
+                    }
+                    
+                    current_price = float(contract.get('stock_price', 0))
+                    if option_type == 'call':
+                        formatted_contract['moneyness'] = 'ITM' if formatted_contract['strike'] < current_price else 'OTM'
+                        filtered_calls.append(formatted_contract)
+                    else:
+                        formatted_contract['moneyness'] = 'ITM' if formatted_contract['strike'] > current_price else 'OTM'
+                        filtered_puts.append(formatted_contract)
+                        
+            except Exception:
+                continue
+        
+        calls_df = pd.DataFrame(filtered_calls) if filtered_calls else pd.DataFrame()
+        puts_df = pd.DataFrame(filtered_puts) if filtered_puts else pd.DataFrame()
+        
+        return {
+            "calls": calls_df,
+            "puts": puts_df,
+            "current_price": current_price,
+            "timeframe": timeframe,
+            "all_expirations": sorted(list(set([c['expiration_date'] for c in filtered_calls + filtered_puts]))),
+            "error": None
+        }
+        
     except Exception as e:
-        return {"error": f"Error fetching {timeframe} options for {ticker}: {str(e)}"}
+        return {"error": f"Error fetching UW {timeframe} options: {str(e)}"}
 def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_data: Dict, volume_data: Dict, hottest_chains: Dict, timeframe: str) -> str:
     """Generate timeframe-specific AI analysis with enhanced flow data"""
     
