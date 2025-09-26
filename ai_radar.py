@@ -3337,7 +3337,34 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     # Calculate key metrics
     total_call_volume = calls['volume'].sum() if not calls.empty else 0
     total_put_volume = puts['volume'].sum() if not puts.empty else 0
-    avg_iv = (calls['impliedVolatility'].mean() + puts['impliedVolatility'].mean()) / 2 if not calls.empty and not puts.empty else 0
+    # Safe IV calculation with string-to-numeric conversion
+    avg_iv = 0
+    try:
+        if not calls.empty and 'impliedVolatility' in calls.columns:
+            call_iv_numeric = pd.to_numeric(calls['impliedVolatility'], errors='coerce')
+            call_iv_mean = call_iv_numeric.mean() if not call_iv_numeric.isna().all() else 0
+            call_iv_mean = 0 if pd.isna(call_iv_mean) else call_iv_mean
+        else:
+            call_iv_mean = 0
+        
+        if not puts.empty and 'impliedVolatility' in puts.columns:
+            put_iv_numeric = pd.to_numeric(puts['impliedVolatility'], errors='coerce')
+            put_iv_mean = put_iv_numeric.mean() if not put_iv_numeric.isna().all() else 0
+            put_iv_mean = 0 if pd.isna(put_iv_mean) else put_iv_mean
+        else:
+            put_iv_mean = 0
+        
+        if call_iv_mean > 0 and put_iv_mean > 0:
+            avg_iv = (call_iv_mean + put_iv_mean) / 2
+        elif call_iv_mean > 0:
+            avg_iv = call_iv_mean
+        elif put_iv_mean > 0:
+            avg_iv = put_iv_mean
+        else:
+            avg_iv = 0
+            
+    except Exception as e:
+        avg_iv = 0
     
     # Generate enhanced flow analysis prompt
     flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains)
