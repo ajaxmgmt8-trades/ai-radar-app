@@ -542,7 +542,7 @@ class UnusualWhalesClient:
             "greek_exposure": self.get_greek_exposure(ticker, today),
             "greek_by_expiry": self.get_greek_exposure_by_expiry(ticker, today),
             "atm_chains": self.get_atm_chains(ticker),
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "data_source": "Unusual Whales"
         }
         
@@ -562,7 +562,7 @@ class UnusualWhalesClient:
             "greek_by_expiry": self.get_greek_exposure_by_expiry(ticker, today),
             "flow_per_strike": self.get_flow_per_strike(ticker, today),
             "atm_chains": self.get_atm_chains(ticker),
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": datetime.now().isoformat(),
             "data_source": "Unusual Whales"
         }
         
@@ -957,7 +957,7 @@ class TwelveDataClient:
                             "postmarket_change": 0,
                             "previous_close": open_price,
                             "market_open": open_price,
-                            "last_updated": datetime.datetime.now().isoformat(),
+                            "last_updated": datetime.now().isoformat(),
                             "data_source": "Twelve Data",
                             "error": None,
                             "raw_data": data
@@ -994,7 +994,7 @@ class TwelveDataClient:
                                 "postmarket_change": 0,
                                 "previous_close": open_price,
                                 "market_open": open_price,
-                                "last_updated": datetime.datetime.now().isoformat(),
+                                "last_updated": datetime.now().isoformat(),
                                 "data_source": "Twelve Data",
                                 "error": None,
                                 "raw_data": data
@@ -1504,7 +1504,7 @@ def get_enhanced_options_analysis(ticker: str) -> Dict:
             "uw_atm_chains": uw_data.get("atm_chains", {}),
             "enhanced_metrics": analyze_uw_options_data(uw_data),
             "data_source": "Unusual Whales",
-            "timestamp": datetime.datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat()
         }
         
         return analysis
