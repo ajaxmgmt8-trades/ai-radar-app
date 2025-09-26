@@ -3719,49 +3719,69 @@ def display_options_table_with_expiration(options_data, option_type="", show_exp
     # Prepare table data
     table_data = []
     for option in options_data:
-        # Calculate IV display value outside the dictionary
+        # Handle UW API field names and formatting
         try:
-            iv_value = option.get('impliedVolatility', option.get('implied_volatility', 0))
-            iv_numeric = pd.to_numeric(iv_value, errors='coerce') if iv_value != 0 else 0
-            if pd.isna(iv_numeric) or iv_numeric == 0:
-                iv_display = "N/A"
+            # Strike price - UW API uses different field names and needs division by 1000
+            strike_value = option.get('strike_price', option.get('strike', 0))
+            if strike_value and strike_value != 0:
+                # UW API strikes need to be divided by 1000
+                if isinstance(strike_value, (int, float)) and strike_value > 1000:
+                    strike_numeric = float(strike_value) / 1000
+                else:
+                    strike_numeric = float(strike_value)
+                strike_display = f"${strike_numeric:.2f}"
             else:
-                iv_display = f"{iv_numeric:.2f}%"  # Changed to 2 decimal places
-        except:
-            iv_display = "N/A"
-    
-        # Fix strike price extraction
-        try:
-            strike_value = option.get('strike', 0)
-            if isinstance(strike_value, str):
-                strike_numeric = pd.to_numeric(strike_value, errors='coerce')
-                strike_display = f"${strike_numeric:.2f}" if not pd.isna(strike_numeric) else "N/A"
-            else:
-                strike_display = f"${float(strike_value):.2f}" if strike_value > 0 else "N/A"
+                strike_display = "N/A"
         except:
             strike_display = "N/A"
     
-        # Fix last price formatting
+        # Last price - handle UW API field names  
         try:
-            price_value = option.get('lastPrice', option.get('last_price', 0))
-            if isinstance(price_value, str):
-                price_numeric = pd.to_numeric(price_value, errors='coerce')
-                price_display = f"${price_numeric:.2f}" if not pd.isna(price_numeric) else "N/A"
+            price_value = option.get('last_price', option.get('lastPrice', 0))
+            if price_value and price_value != 0:
+                price_numeric = float(price_value)
+                price_display = f"${price_numeric:.2f}"
             else:
-                price_display = f"${float(price_value):.2f}" if price_value > 0 else "N/A"
+                price_display = "N/A"
         except:
             price_display = "N/A"
     
+        # Implied Volatility - handle UW API field names and convert to percentage
+        try:
+            iv_value = option.get('implied_volatility', option.get('impliedVolatility', 0))
+            if iv_value and iv_value != 0:
+                iv_numeric = float(iv_value)
+                # Convert to percentage if it's in decimal format (0.25 -> 25%)
+                if iv_numeric <= 1.0:
+                    iv_display = f"{iv_numeric * 100:.2f}%"
+                else:
+                    iv_display = f"{iv_numeric:.2f}%"
+            else:
+                iv_display = "N/A"
+        except:
+            iv_display = "N/A"
+    
+        # Volume and OI - handle UW API field names
+        try:
+            volume = int(option.get('volume', option.get('vol', 0)))
+        except:
+            volume = 0
+    
+        try:
+            open_interest = int(option.get('open_interest', option.get('openInterest', 0)))
+        except:
+            open_interest = 0
+    
         row = {
-            'Strike': strike_display,  # Use formatted strike
-            'Last Price': price_display,  # Use formatted price
-            'Volume': option.get('volume', 0),
-            'Open Interest': option.get('openInterest', option.get('open_interest', 0)),
-            'Implied Volatility': iv_display,  # Use formatted IV with 2 decimal places
-            'Moneyness': option.get('moneyness', 'ATM')
+            'Strike': strike_display,
+            'Last Price': price_display,
+            'Volume': volume,
+            'Open Interest': open_interest,
+            'Implied Volatility': iv_display,
+            'Moneyness': option.get('moneyness', 'OTM')
         }
     
-        # Add expiration info (rest of the existing code continues here)
+        # Add expiration info
         if show_expiration:
             if show_dte:
                 row['DTE'] = f"{option.get('dte', 0)}d"
@@ -3773,7 +3793,6 @@ def display_options_table_with_expiration(options_data, option_type="", show_exp
             row['Trade Time'] = option.get('trade_time_display', 'Unknown')
         
         table_data.append(row)
-    
     # Display table
     if table_data:
         df = pd.DataFrame(table_data)
@@ -5795,13 +5814,17 @@ with tabs[7]:
             is_0dte = False
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
-        # Filter for lotto plays (options under $1.00)
-        calls = option_chain["calls"]
-        puts = option_chain["puts"]
+        # Convert lists to DataFrames for filtering
+        if all_lotto_calls:
+            lotto_calls = pd.DataFrame(all_lotto_calls)
+        else:
+            lotto_calls = pd.DataFrame()
         
-        # Find lotto opportunities
-        lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
-        lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
+        if all_lotto_puts:
+            lotto_puts = pd.DataFrame(all_lotto_puts)  
+        else:
+            lotto_puts = pd.DataFrame()
+        
         # ADD THIS - Add expiration date to each contract:
         if not lotto_calls.empty:
             lotto_calls['expiration_date'] = expiration
