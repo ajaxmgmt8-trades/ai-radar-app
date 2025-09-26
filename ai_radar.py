@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo  # For timezone support
 import google.generativeai as genai
 import openai
 import concurrent.futures
+from datetime import datetime, date
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
@@ -3586,6 +3587,162 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
+def calculate_days_to_expiration(expiration_str):
+    """Calculate days to expiration from date string"""
+    try:
+        if isinstance(expiration_str, str):
+            exp_date = datetime.strptime(expiration_str, '%Y-%m-%d').date()
+        else:
+            exp_date = expiration_str
+        
+        today = date.today()
+        return (exp_date - today).days
+    except:
+        return 0
+
+def process_options_with_expiration(options_data):
+    """Add expiration info and trade timestamps to options data"""
+    for option in options_data:
+        # Handle expiration dates
+        expiration = option.get('expiration_date', option.get('expiry', ''))
+        option['expiration'] = expiration
+        option['dte'] = calculate_days_to_expiration(expiration)
+        
+        # Add formatted expiration for display
+        if expiration:
+            try:
+                exp_date = datetime.strptime(expiration, '%Y-%m-%d')
+                option['exp_display'] = exp_date.strftime('%b %d, %Y')
+            except:
+                option['exp_display'] = expiration
+        else:
+            option['exp_display'] = 'Unknown'
+        
+        # Handle trade timestamps - check multiple possible field names
+        timestamp = option.get('timestamp', option.get('trade_time', option.get('created_at', option.get('time', ''))))
+        option['trade_timestamp'] = timestamp
+        
+        # Add formatted trade time for display
+        if timestamp:
+            try:
+                if 'T' in timestamp:  # ISO format
+                    trade_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                else:
+                    trade_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+                
+                option['trade_time_display'] = trade_time.strftime('%H:%M:%S')
+                option['trade_date_display'] = trade_time.strftime('%b %d')
+            except:
+                option['trade_time_display'] = timestamp
+                option['trade_date_display'] = 'Unknown'
+        else:
+            option['trade_time_display'] = 'Unknown'
+            option['trade_date_display'] = 'Unknown'
+    
+    return options_data
+def display_options_table_with_expiration(options_data, option_type="", show_expiration=True, show_dte=False, show_trade_time=True):
+    """Display options table with expiration and trade time columns"""
+    if not options_data:
+        st.info(f"No {option_type} options data available")
+        return
+    
+    # Prepare table data
+    table_data = []
+    for option in options_data:
+        row = {
+            'Strike': option.get('strike', 0),
+            'Last Price': option.get('lastPrice', option.get('last_price', 0)),
+            'Volume': option.get('volume', 0),
+            'Open Interest': option.get('openInterest', option.get('open_interest', 0)),
+            'Implied Volatility': f"{option.get('impliedVolatility', option.get('implied_volatility', 0)):.1f}%",
+            'Moneyness': option.get('moneyness', 'ATM')
+        }
+        
+        # Add expiration info
+        if show_expiration:
+            if show_dte:
+                row['DTE'] = f"{option.get('dte', 0)}d"
+            else:
+                row['Expiration'] = option.get('exp_display', 'Unknown')
+        
+        # Add trade time info
+        if show_trade_time:
+            row['Trade Time'] = option.get('trade_time_display', 'Unknown')
+        
+        table_data.append(row)
+    
+    # Display table
+    if table_data:
+        df = pd.DataFrame(table_data)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info(f"No {option_type} contracts found")
+
+def display_grouped_options_by_expiration(options_data, show_dte_only=False, show_trade_time=True):
+    """Display options grouped by expiration date"""
+    if not options_data:
+        st.info("No options data available")
+        return
+    
+    # Group options by expiration
+    expiration_groups = {}
+    for option in options_data:
+        exp = option.get('expiration', 'Unknown')
+        if exp not in expiration_groups:
+            expiration_groups[exp] = {'calls': [], 'puts': []}
+        
+        # Separate by option type
+        option_type = option.get('type', '').lower()
+        if 'call' in option_type or option.get('strike', 0) > option.get('current_price', 0):
+            expiration_groups[exp]['calls'].append(option)
+        else:
+            expiration_groups[exp]['puts'].append(option)
+    
+    # Display each expiration group
+    for expiration in sorted(expiration_groups.keys()):
+        group = expiration_groups[expiration]
+        dte = calculate_days_to_expiration(expiration)
+        
+        # Format expiration display
+        try:
+            exp_date = datetime.strptime(expiration, '%Y-%m-%d')
+            exp_display = exp_date.strftime('%b %d, %Y')
+        except:
+            exp_display = expiration
+        
+        total_contracts = len(group['calls']) + len(group['puts'])
+        st.subheader(f"📅 {exp_display} ({dte} DTE) - {total_contracts} contracts")
+        
+        # Display calls and puts side by side
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📞 Calls")
+            if group['calls']:
+                display_options_table_with_expiration(
+                    group['calls'], 
+                    option_type="call",
+                    show_expiration=False,  # Don't show exp column since it's in header
+                    show_dte=show_dte_only,
+                    show_trade_time=show_trade_time
+                )
+            else:
+                st.info("No call options")
+        
+        with col2:
+            st.markdown("#### 📉 Puts")
+            if group['puts']:
+                display_options_table_with_expiration(
+                    group['puts'],
+                    option_type="put", 
+                    show_expiration=False,
+                    show_dte=show_dte_only,
+                    show_trade_time=show_trade_time
+                )
+            else:
+                st.info("No put options")
+        
+        st.divider()
 # =============================================================================
 # MAIN APPLICATION
 # =============================================================================
@@ -5124,7 +5281,40 @@ with tabs[6]:
                 
                 calls_swing = swing_options["calls"]
                 puts_swing = swing_options["puts"]
+
+                # ADD THIS ENTIRE SECTION HERE:
+                # Combine calls and puts for expiration processing
+                all_swing_options = []
+                if not calls_swing.empty:
+                    all_swing_options.extend(calls_swing.to_dict('records'))
+                if not puts_swing.empty:
+                    all_swing_options.extend(puts_swing.to_dict('records'))
                 
+                if all_swing_options:
+                    # Process expiration data
+                    all_swing_options = process_options_with_expiration(all_swing_options)
+                    
+                    # Get available expirations
+                    available_expirations = sorted(list(set([
+                        opt['expiration'] for opt in all_swing_options 
+                        if opt.get('expiration') and opt['expiration'] != ''
+                    ])))
+                    
+                    # Expiration filter and grouping controls
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    
+                    with col1:
+                        selected_expiration = st.selectbox(
+                            "📅 Filter by Expiration",
+                            options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations],
+                            key="swing_exp_filter"
+                        )
+                    
+                    with col2:
+                        group_by_exp = st.checkbox("Group by Expiration", key="swing_group")
+                    
+                    with col3:
+                        show_dte_only = st.checkbox("Show DTE Only", key="swing_dte_only")
                 # Swing Summary
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Call Options", len(calls_swing))
@@ -5144,25 +5334,55 @@ with tabs[6]:
                     
                     st.markdown(swing_analysis)
                 
-                # Swing Options Display
-                if not calls_swing.empty or not puts_swing.empty:
-                    col1, col2 = st.columns(2)
+                # Enhanced Swing Options Display with Expiration
+                if all_swing_options:
+                    # Apply expiration filter if selected
+                    filtered_swing_options = all_swing_options.copy()
+                    if selected_expiration != "All Expirations":
+                        target_expiration = selected_expiration.split(' (')[0]  # Remove DTE part
+                        filtered_swing_options = [opt for opt in filtered_swing_options if opt.get('expiration') == target_expiration]
                     
-                    with col1:
-                        st.markdown("#### 📈 Swing Calls")
-                        if not calls_swing.empty:
-                            top_calls = calls_swing.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
-                            st.dataframe(top_calls, use_container_width=True)
-                        else:
-                            st.info("No swing call options")
+                    if group_by_exp and selected_expiration == "All Expirations":
+                        # Grouped display
+                        st.markdown("#### 📈📉 Swing Options by Expiration")
+                        display_grouped_options_by_expiration(filtered_swing_options, show_dte_only, show_trade_time=True)
                     
-                    with col2:
-                        st.markdown("#### 📉 Swing Puts") 
-                        if not puts_swing.empty:
-                            top_puts = puts_swing.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
-                            st.dataframe(top_puts, use_container_width=True)
-                        else:
-                            st.info("No swing put options")
+                    else:
+                        # Standard side-by-side display with expiration columns
+                        st.markdown("#### 📈📉 Swing Options")
+                        
+                        # Separate calls and puts
+                        swing_calls_filtered = [opt for opt in filtered_swing_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
+                        swing_puts_filtered = [opt for opt in filtered_swing_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("##### 📞 Calls")
+                            # Sort by volume and take top 10
+                            swing_calls_sorted = sorted(swing_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                            display_options_table_with_expiration(
+                                swing_calls_sorted,
+                                option_type="call",
+                                show_expiration=True,
+                                show_dte=show_dte_only,
+                                show_trade_time=True
+                            )
+                        
+                        with col2:
+                            st.markdown("##### 📉 Puts")
+                            # Sort by volume and take top 10
+                            swing_puts_sorted = sorted(swing_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                            display_options_table_with_expiration(
+                                swing_puts_sorted,
+                                option_type="put",
+                                show_expiration=True,
+                                show_dte=show_dte_only,
+                                show_trade_time=True
+                            )
+                
+                else:
+                    st.info("No swing options data available")
 
         # LEAPS Tab with Flow Integration
         with timeframe_tabs[2]:
@@ -5180,6 +5400,40 @@ with tabs[6]:
                 
                 calls_leaps = leaps_options["calls"]
                 puts_leaps = leaps_options["puts"]
+
+                # ADD THIS SECTION FOR LEAPS:
+                # Combine calls and puts for expiration processing
+                all_leaps_options = []
+                if not calls_leaps.empty:
+                    all_leaps_options.extend(calls_leaps.to_dict('records'))
+                if not puts_leaps.empty:
+                    all_leaps_options.extend(puts_leaps.to_dict('records'))
+                
+                if all_leaps_options:
+                    # Process expiration data
+                    all_leaps_options = process_options_with_expiration(all_leaps_options)
+                    
+                    # Get available expirations
+                    available_expirations_leaps = sorted(list(set([
+                        opt['expiration'] for opt in all_leaps_options 
+                        if opt.get('expiration') and opt['expiration'] != ''
+                    ])))
+                    
+                    # Expiration filter and grouping controls
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    
+                    with col1:
+                        selected_expiration_leaps = st.selectbox(
+                            "📅 Filter by Expiration",
+                            options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations_leaps],
+                            key="leaps_exp_filter"
+                        )
+                    
+                    with col2:
+                        group_by_exp_leaps = st.checkbox("Group by Expiration", key="leaps_group")
+                    
+                    with col3:
+                        show_dte_only_leaps = st.checkbox("Show DTE Only", key="leaps_dte_only")
                 
                 # LEAPS Summary
                 col1, col2, col3, col4 = st.columns(4)
@@ -5202,26 +5456,55 @@ with tabs[6]:
                     
                     st.markdown(leaps_analysis)
                 
-                # LEAPS Options Display  
-                if not calls_leaps.empty or not puts_leaps.empty:
-                    col1, col2 = st.columns(2)
+                # Enhanced LEAPS Options Display with Expiration
+                if all_leaps_options:
+                    # Apply expiration filter if selected
+                    filtered_leaps_options = all_leaps_options.copy()
+                    if selected_expiration_leaps != "All Expirations":
+                        target_expiration = selected_expiration_leaps.split(' (')[0]  # Remove DTE part
+                        filtered_leaps_options = [opt for opt in filtered_leaps_options if opt.get('expiration') == target_expiration]
                     
-                    with col1:
-                        st.markdown("#### 📊 LEAPS Calls")
-                        if not calls_leaps.empty:
-                            # For LEAPS, show by open interest as it's more relevant
-                            top_calls = calls_leaps.nlargest(10, 'openInterest')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
-                            st.dataframe(top_calls, use_container_width=True)
-                        else:
-                            st.info("No LEAPS call options")
+                    if group_by_exp_leaps and selected_expiration_leaps == "All Expirations":
+                        # Grouped display
+                        st.markdown("#### 📈📉 LEAPS Options by Expiration")
+                        display_grouped_options_by_expiration(filtered_leaps_options, show_dte_only_leaps, show_trade_time=True)
                     
-                    with col2:
-                        st.markdown("#### 📊 LEAPS Puts")
-                        if not puts_leaps.empty:
-                            top_puts = puts_leaps.nlargest(10, 'openInterest')[['strike', 'lastPrice', 'volume', 'openInterest', 'impliedVolatility', 'moneyness']]
-                            st.dataframe(top_puts, use_container_width=True)
-                        else:
-                            st.info("No LEAPS put options")
+                    else:
+                        # Standard side-by-side display with expiration columns
+                        st.markdown("#### 📈📉 LEAPS Options")
+                        
+                        # Separate calls and puts
+                        leaps_calls_filtered = [opt for opt in filtered_leaps_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
+                        leaps_puts_filtered = [opt for opt in filtered_leaps_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("##### 📞 LEAPS Calls")
+                            # Sort by volume and take top 10
+                            leaps_calls_sorted = sorted(leaps_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                            display_options_table_with_expiration(
+                                leaps_calls_sorted,
+                                option_type="LEAPS call",
+                                show_expiration=True,
+                                show_dte=show_dte_only_leaps,
+                                show_trade_time=True
+                            )
+                        
+                        with col2:
+                            st.markdown("##### 📉 LEAPS Puts")
+                            # Sort by volume and take top 10
+                            leaps_puts_sorted = sorted(leaps_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                            display_options_table_with_expiration(
+                                leaps_puts_sorted,
+                                option_type="LEAPS put",
+                                show_expiration=True,
+                                show_dte=show_dte_only_leaps,
+                                show_trade_time=True
+                            )
+                
+                else:
+                    st.info("No LEAPS options data available")
                 
                 # Show all available LEAPS expirations
                 if leaps_options.get("all_expirations"):
@@ -5276,8 +5559,6 @@ with tabs[7]:
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
             hottest_chains_data = uw_client.get_hottest_chains()
             hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-            # ADD THIS DEBUG LINE:
-            st.write(f"DEBUG: Hottest chains analysis = {hottest_chains_analysis}")
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
@@ -5299,6 +5580,40 @@ with tabs[7]:
         # Find lotto opportunities
         lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
         lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
+
+        # ADD THIS SECTION FOR LOTTOS EXPIRATION PROCESSING:
+        # Combine calls and puts for expiration processing
+        all_lotto_options = []
+        if not lotto_calls.empty:
+            all_lotto_options.extend(lotto_calls.to_dict('records'))
+        if not lotto_puts.empty:
+            all_lotto_options.extend(lotto_puts.to_dict('records'))
+        
+        if all_lotto_options:
+            # Process expiration data
+            all_lotto_options = process_options_with_expiration(all_lotto_options)
+            
+            # Get available expirations
+            available_expirations_lottos = sorted(list(set([
+                opt['expiration'] for opt in all_lotto_options 
+                if opt.get('expiration') and opt['expiration'] != ''
+            ])))
+            
+            # Expiration filter and grouping controls
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                selected_expiration_lottos = st.selectbox(
+                    "📅 Filter by Expiration",
+                    options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations_lottos],
+                    key="lottos_exp_filter"
+                )
+            
+            with col2:
+                group_by_exp_lottos = st.checkbox("Group by Expiration", key="lottos_group")
+            
+            with col3:
+                show_dte_only_lottos = st.checkbox("Show DTE Only", key="lottos_dte_only")
         
         # Sort by volume for most active lottos
         if not lotto_calls.empty:
@@ -5400,37 +5715,78 @@ with tabs[7]:
             lotto_analysis = ai_playbook(lotto_ticker, quote["change_percent"], lotto_summary, options_analysis)
             st.markdown(lotto_analysis)
 
-        # Display enhanced lotto opportunities
-        if not lotto_calls.empty or not lotto_puts.empty:
-            st.markdown("### 🎰 Enhanced Lotto Opportunities")
+        # Enhanced Lotto Opportunities Display with Expiration
+        if all_lotto_options:
+            # Apply expiration filter if selected
+            filtered_lotto_options = all_lotto_options.copy()
+            if selected_expiration_lottos != "All Expirations":
+                target_expiration = selected_expiration_lottos.split(' (')[0]
+                filtered_lotto_options = [opt for opt in filtered_lotto_options if opt.get('expiration') == target_expiration]
             
-            col1, col2 = st.columns(2)
+            # Filter for lotto criteria (≤$1.00)
+            lotto_options_filtered = [opt for opt in filtered_lotto_options if opt.get('lastPrice', opt.get('last_price', 0)) <= 1.0]
             
-            with col1:
-                st.markdown("#### 📞 Lotto Calls (≤$1.00)")
-                if not lotto_calls.empty:
-                    # Calculate percentage to breakeven
-                    lotto_calls['breakeven'] = lotto_calls['strike'] + lotto_calls['lastPrice']
-                    lotto_calls['breakeven_move'] = ((lotto_calls['breakeven'] - current_price) / current_price * 100).round(2)
-                    
-                    display_calls = lotto_calls[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness', 'breakeven_move']].head(10)
-                    display_calls.columns = ['Strike', 'Price', 'Volume', 'IV%', 'ITM/OTM', 'Move Needed%']
-                    st.dataframe(display_calls, use_container_width=True)
-                else:
-                    st.info("No call options under $1.00 available")
+            if group_by_exp_lottos and selected_expiration_lottos == "All Expirations":
+                # Grouped display
+                st.markdown("### 🎰 Lotto Opportunities by Expiration")
+                display_grouped_options_by_expiration(lotto_options_filtered, show_dte_only_lottos, show_trade_time=True)
             
-            with col2:
-                st.markdown("#### 📞 Lotto Puts (≤$1.00)")
-                if not lotto_puts.empty:
-                    # Calculate percentage to breakeven
-                    lotto_puts['breakeven'] = lotto_puts['strike'] - lotto_puts['lastPrice']
-                    lotto_puts['breakeven_move'] = ((lotto_puts['breakeven'] - current_price) / current_price * 100).round(2)
-                    
-                    display_puts = lotto_puts[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness', 'breakeven_move']].head(10)
-                    display_puts.columns = ['Strike', 'Price', 'Volume', 'IV%', 'ITM/OTM', 'Move Needed%']
-                    st.dataframe(display_puts, use_container_width=True)
-                else:
-                    st.info("No put options under $1.00 available")
+            else:
+                # Standard lotto display with expiration columns
+                st.markdown("### 🎰 Enhanced Lotto Opportunities")
+                
+                # Separate calls and puts
+                lotto_calls_filtered = [opt for opt in lotto_options_filtered if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
+                lotto_puts_filtered = [opt for opt in lotto_options_filtered if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("#### 📞 Lotto Calls (≤$1.00)")
+                    if lotto_calls_filtered:
+                        # Add breakeven calculations
+                        for opt in lotto_calls_filtered:
+                            price = opt.get('lastPrice', opt.get('last_price', 0))
+                            strike = opt.get('strike', 0)
+                            opt['breakeven'] = strike + price
+                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
+                        
+                        # Sort by volume and take top 10
+                        lotto_calls_sorted = sorted(lotto_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                        display_options_table_with_expiration(
+                            lotto_calls_sorted,
+                            option_type="lotto call",
+                            show_expiration=True,
+                            show_dte=show_dte_only_lottos,
+                            show_trade_time=True
+                        )
+                    else:
+                        st.info("No call options under $1.00 available")
+                
+                with col2:
+                    st.markdown("#### 📉 Lotto Puts (≤$1.00)")
+                    if lotto_puts_filtered:
+                        # Add breakeven calculations
+                        for opt in lotto_puts_filtered:
+                            price = opt.get('lastPrice', opt.get('last_price', 0))
+                            strike = opt.get('strike', 0)
+                            opt['breakeven'] = strike - price
+                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
+                        
+                        # Sort by volume and take top 10
+                        lotto_puts_sorted = sorted(lotto_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                        display_options_table_with_expiration(
+                            lotto_puts_sorted,
+                            option_type="lotto put",
+                            show_expiration=True,
+                            show_dte=show_dte_only_lottos,
+                            show_trade_time=True
+                        )
+                    else:
+                        st.info("No put options under $1.00 available")
+        
+        else:
+            st.info("No lotto opportunities found")
 
             # Enhanced unusual activity in lottos with flow correlation
             st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
