@@ -5323,7 +5323,20 @@ with tabs[6]:
                 st.error(swing_options["error"])
             else:
                 # Swing specific metrics
-                st.success(f"Swing Options Expiring: {swing_options['expiration']} ({swing_options['days_to_expiration']} days)")
+                # Handle both single and multi-expiration formats
+                if 'expiration' in swing_options:
+                    # Single expiration format (old)
+                    st.success(f"Swing Options Expiring: {swing_options['expiration']} ({swing_options['days_to_expiration']} days)")
+                else:
+                    # Multi-expiration format (new)
+                    exp_count = len(swing_options.get('all_expirations', []))
+                    if exp_count == 1:
+                        exp_date = swing_options['all_expirations'][0]
+                        today = datetime.now().date()
+                        days_to_exp = (datetime.strptime(exp_date, '%Y-%m-%d').date() - today).days
+                        st.success(f"Swing Options Expiring: {exp_date} ({days_to_exp} days)")
+                    else:
+                        st.success(f"Swing Options: {exp_count} expiration dates available")
                 
                 calls_swing = swing_options["calls"]
                 puts_swing = swing_options["puts"]
