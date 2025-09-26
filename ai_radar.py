@@ -5835,9 +5835,9 @@ with tabs[7]:
             else:
                 st.info("No unusual lotto activity detected with current criteria")
 
-        else:
-            st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
-            st.info("Try a different ticker or check if options are available for this expiration")
+            else:
+                st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
+                st.info("Try a different ticker or check if options are available for this expiration")
 
         # Enhanced Risk Warning
         with st.expander("⚠️ Enhanced Lotto Trading Risk Warning"):
