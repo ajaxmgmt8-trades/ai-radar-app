@@ -3232,7 +3232,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
         response = requests.get(
             f"https://api.unusualwhales.com/api/stock/{ticker}/option-contracts",
             headers={
-                "Authorization": f"Bearer {UW_API_KEY}",
+                "Authorization": f"Bearer {UNUSUAL_WHALES_KEY}",
                 "Accept": "application/json"
             },
             params={
