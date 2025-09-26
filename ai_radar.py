@@ -2412,7 +2412,7 @@ def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
 
         # Find today's expiration or closest future date
         today = datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
-        expiration_dates = [datetime.datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
+        expiration_dates = [datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
         valid_expirations = [exp for exp in expiration_dates if exp >= today]
         if not valid_expirations:
             return {"error": f"No valid expirations found for {ticker}"}
@@ -3233,7 +3233,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
         expiration_dates = []
         
         for exp in expirations:
-            exp_date = datetime.datetime.strptime(exp, '%Y-%m-%d').date()
+            exp_date = datetime.strptime(exp, '%Y-%m-%d').date()
             days_to_exp = (exp_date - today).days
             
             if timeframe == "0DTE" and days_to_exp == 0:
@@ -3247,7 +3247,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
             return {"error": f"No {timeframe} options available for {ticker}"}
 
         # Get closest expiration in timeframe
-        target_expiration = min(expiration_dates, key=lambda x: abs((datetime.datetime.strptime(x, '%Y-%m-%d').date() - today).days))
+        target_expiration = min(expiration_dates, key=lambda x: abs((datetime.strptime(x, '%Y-%m-%d').date() - today).days))
         
         # Fetch option chain
         option_chain = stock.option_chain(target_expiration)
@@ -3272,7 +3272,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
             "puts": puts,
             "expiration": target_expiration,
             "current_price": current_price,
-            "days_to_expiration": (datetime.datetime.strptime(target_expiration, '%Y-%m-%d').date() - today).days,
+            "days_to_expiration": (datetime.strptime(target_expiration, '%Y-%m-%d').date() - today).days,
             "timeframe": timeframe,
             "all_expirations": expiration_dates,
             "error": None
@@ -5510,7 +5510,7 @@ with tabs[6]:
                 if leaps_options.get("all_expirations"):
                     with st.expander("📅 All LEAPS Expirations Available"):
                         for exp in leaps_options["all_expirations"]:
-                            days_out = (datetime.datetime.strptime(exp, '%Y-%m-%d').date() - datetime.date.today()).days
+                            days_out = (datetime.strptime(exp, '%Y-%m-%d').date() - datetime.date.today()).days
                             st.write(f"• {exp} ({days_out} days)")
                 
                 # LEAPS Strategy Guide
@@ -5568,7 +5568,7 @@ with tabs[7]:
     else:
         current_price = quote['last']
         expiration = option_chain["expiration"]
-        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
+        is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
         
         st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
