@@ -3932,10 +3932,7 @@ with tabs[0]:
                     else:
                         st.info("No recent news.")
                     
-                    st.markdown("### 🎯 AI Playbook")
-                    catalyst_title = news[0].get('headline', '') if news else ""
-                    
-                    # Single UW check - no nesting
+                    # UW Options Metrics (fast, auto-loading)
                     if uw_client:
                         flow_alerts_data = uw_client.get_flow_alerts(ticker)
                         flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
@@ -3948,7 +3945,6 @@ with tabs[0]:
                             total_alerts = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
                             flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
-                            # Get P/C ratio
                             options_volume_data = uw_client.get_options_volume(ticker)
                             options_volume_analysis = analyze_options_volume(options_volume_data, ticker)
                             pc_ratio = 0.0
@@ -3960,7 +3956,6 @@ with tabs[0]:
                             opt_col2.metric("Flow Sentiment", flow_sentiment)
                             opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
                             
-                            # Create options_data for AI
                             options_data = {
                                 'flow_alerts': total_alerts,
                                 'flow_sentiment': flow_sentiment,
@@ -3970,21 +3965,18 @@ with tabs[0]:
                         else:
                             st.info("UW data unavailable (API limit)")
                             options_data = {}
-                    
                     else:
-                        # Non-UW fallback
-                        options_data = get_options_data(ticker)
-                        if options_data:  # Fixed: was "if not options_data"
-                            st.write("***Options Metrics:***")
-                            opt_col1, opt_col2, opt_col3 = st.columns(3)
-                            opt_col1.metric("Implied Vol", f"{options_data.get('iv', 0):.1f}%")
-                            opt_col2.metric("Put/Call Ratio", f"{options_data.get('put_call_ratio', 0):.2f}")
-                            opt_col3.metric("Total Contracts", f"{options_data.get('total_calls', 0) + options_data.get('total_puts', 0):,}")
-                        else:
-                            options_data = {}
+                        options_data = get_options_data(ticker) or {}
                     
-                    # Single AI playbook call for both paths
-                    st.markdown(ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data))
+                    # AI Analysis Button (opt-in)
+                    st.markdown("### 🎯 AI Playbook")
+                    catalyst_title = news[0].get('headline', '') if news else ""
+                    
+                    if st.button("🤖 AI Analysis", key=f"ai_analysis_{ticker}"):
+                        with st.spinner(f"Analyzing {ticker}..."):
+                            analysis = ai_playbook(ticker, quote['change_percent'], catalyst_title, options_data)
+                            st.success(f"🤖 {ticker} Analysis Complete")
+                            st.markdown(analysis)
                 
                 st.divider()
 
