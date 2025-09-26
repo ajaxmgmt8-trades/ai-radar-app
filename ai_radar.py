@@ -5317,8 +5317,7 @@ with tabs[6]:
             st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
             with st.spinner("Loading swing options and flow analysis..."):
-                all_options_data = get_all_options_chains(flow_ticker, st.session_state.selected_tz)
-                swing_options = filter_options_by_timeframe(all_options_data, "Swing")
+                swing_options = get_options_by_timeframe(flow_ticker, "Swing", st.session_state.selected_tz)
             
             if swing_options.get("error"):
                 st.error(swing_options["error"])
