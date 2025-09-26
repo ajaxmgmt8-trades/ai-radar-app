@@ -5455,7 +5455,20 @@ with tabs[6]:
                 st.error(leaps_options["error"])
             else:
                 # LEAPS specific metrics
-                st.success(f"LEAPS Options Expiring: {leaps_options['expiration']} ({leaps_options['days_to_expiration']} days)")
+                # Handle both single and multi-expiration formats
+                if 'expiration' in leaps_options:
+                    # Single expiration format (old)
+                    st.success(f"LEAPS Options Expiring: {leaps_options['expiration']} ({leaps_options['days_to_expiration']} days)")
+                else:
+                    # Multi-expiration format (new)
+                    exp_count = len(leaps_options.get('all_expirations', []))
+                    if exp_count == 1:
+                        exp_date = leaps_options['all_expirations'][0]
+                        today = datetime.now().date()
+                        days_to_exp = (datetime.strptime(exp_date, '%Y-%m-%d').date() - today).days
+                        st.success(f"LEAPS Options Expiring: {exp_date} ({days_to_exp} days)")
+                    else:
+                        st.success(f"LEAPS Options: {exp_count} expiration dates available")
                 
                 calls_leaps = leaps_options["calls"]
                 puts_leaps = leaps_options["puts"]
@@ -5531,7 +5544,7 @@ with tabs[6]:
                     else:
                         # Standard side-by-side display with expiration columns
                         st.markdown("#### 📈📉 LEAPS Options")
-                        
+                        current_price = leaps_options.get('current_price', 0)
                         # Separate calls and puts
                         leaps_calls_filtered = [opt for opt in filtered_leaps_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
                         leaps_puts_filtered = [opt for opt in filtered_leaps_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
