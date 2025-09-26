@@ -5742,8 +5742,9 @@ with tabs[7]:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
             hottest_chains_analysis = {"error": "UW not available"}
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
+    # Check if we have any lotto data
+    if not all_lotto_calls and not all_lotto_puts:
+        st.info("No lotto opportunities found for this ticker")
     else:
         current_price = quote['last']
         expiration = option_chain["expiration"]
