@@ -5769,10 +5769,30 @@ with tabs[7]:
         st.info("No lotto opportunities found for this ticker")
     else:
         current_price = quote['last']
-        expiration = option_chain["expiration"]
-        is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
+        # Get current date for 0DTE check
+        current_date = datetime.now(ZoneInfo('US/Eastern')).date()
         
-        st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        # Check if we have any lotto data
+        if all_lotto_calls or all_lotto_puts:
+            # Get expiration from first available option
+            if all_lotto_calls:
+                first_option = all_lotto_calls[0]
+            else:
+                first_option = all_lotto_puts[0]
+            
+            expiration = first_option.get('expiration_date', 'Unknown')
+            
+            # Check for 0DTE
+            try:
+                is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == current_date) if expiration != 'Unknown' else False
+            except:
+                is_0dte = False
+    
+            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        else:
+            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}**")
+            expiration = "No data"
+            is_0dte = False
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
         # Filter for lotto plays (options under $1.00)
