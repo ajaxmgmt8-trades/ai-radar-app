@@ -14,7 +14,7 @@ import google.generativeai as genai
 import openai
 import concurrent.futures
 from datetime import datetime, date
-from timedelta import timedelta
+from datetime import timedelta
 
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
