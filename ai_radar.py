@@ -5652,7 +5652,16 @@ with tabs[7]:
         # Find lotto opportunities
         lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
         lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
-
+        # ADD THIS - Add expiration date to each contract:
+        if not lotto_calls.empty:
+            lotto_calls['expiration_date'] = expiration
+            lotto_calls['expiry'] = expiration
+            lotto_calls['type'] = 'call'
+        
+        if not lotto_puts.empty:
+            lotto_puts['expiration_date'] = expiration  
+            lotto_puts['expiry'] = expiration
+            lotto_puts['type'] = 'put'
         # ADD THIS SECTION FOR LOTTOS EXPIRATION PROCESSING:
         # Combine calls and puts for expiration processing
         all_lotto_options = []
