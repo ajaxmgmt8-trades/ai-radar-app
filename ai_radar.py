@@ -5409,7 +5409,7 @@ with tabs[6]:
                     else:
                         # Standard side-by-side display with expiration columns
                         st.markdown("#### 📈📉 Swing Options")
-                        
+                        current_price = swing_options.get('current_price', 0)
                         # Separate calls and puts
                         swing_calls_filtered = [opt for opt in filtered_swing_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
                         swing_puts_filtered = [opt for opt in filtered_swing_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
