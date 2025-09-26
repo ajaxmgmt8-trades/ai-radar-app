@@ -5620,8 +5620,45 @@ with tabs[7]:
 
     # Fetch comprehensive data for lotto analysis
     with st.spinner(f"Gathering comprehensive lotto intelligence for {lotto_ticker}..."):
-        option_chain = get_option_chain(lotto_ticker, st.session_state.selected_tz)
+        # Get ALL available option chains (multiple expirations)
+        stock = yf.Ticker(lotto_ticker)
+        all_expirations = stock.options[:6]  # Get first 6 expirations for reasonable scope
+        
+        all_lotto_calls = []
+        all_lotto_puts = []
+        
+        for exp_date in all_expirations:
+            try:
+                option_chain = stock.option_chain(exp_date)
+                calls = option_chain.calls
+                puts = option_chain.puts
+                
+                # Filter for lotto criteria (≤$1.00) immediately
+                lotto_calls_exp = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
+                lotto_puts_exp = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
+                
+                if not lotto_calls_exp.empty:
+                    lotto_calls_exp['expiration_date'] = exp_date
+                    lotto_calls_exp['expiry'] = exp_date
+                    lotto_calls_exp['type'] = 'call'
+                    all_lotto_calls.append(lotto_calls_exp)
+                    
+                if not lotto_puts_exp.empty:
+                    lotto_puts_exp['expiration_date'] = exp_date
+                    lotto_puts_exp['expiry'] = exp_date
+                    lotto_puts_exp['type'] = 'put'
+                    all_lotto_puts.append(lotto_puts_exp)
+                    
+            except:
+                continue
+        
+        # Combine all expirations
+        lotto_calls = pd.concat(all_lotto_calls, ignore_index=True) if all_lotto_calls else pd.DataFrame()
+        lotto_puts = pd.concat(all_lotto_puts, ignore_index=True) if all_lotto_puts else pd.DataFrame()
+        
+        # Get current price and basic info
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
+        current_price = quote['last']
         
         # Get UW flow data if available
         if uw_client:
