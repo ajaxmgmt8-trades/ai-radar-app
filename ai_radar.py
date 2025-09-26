@@ -3758,7 +3758,7 @@ with col_tz:
 
 # Get current time in selected TZ
 tz_zone = ZoneInfo('US/Eastern') if st.session_state.selected_tz == "ET" else ZoneInfo('US/Central')
-current_tz = datetime.datetime.now(tz_zone)
+current_tz = datetime.now(tz_zone)
 tz_label = st.session_state.selected_tz
 
 # Enhanced AI Settings
