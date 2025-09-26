@@ -3286,13 +3286,13 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
                 if include:
                     formatted_contract = {
                         'contractSymbol': symbol,
-                        'strike': float(contract.get('strike', 0)) / 1000,
-                        'lastPrice': contract.get('last_price', 0),
-                        'bid': contract.get('nbbo_bid', 0),
-                        'ask': contract.get('nbbo_ask', 0), 
-                        'volume': contract.get('volume', 0),
-                        'openInterest': contract.get('open_interest', 0),
-                        'impliedVolatility': contract.get('implied_volatility', 0) * 100,
+                        'strike': float(contract.get('strike_price', 0)) / 1000,  # UW uses 'strike_price'
+                        'lastPrice': float(contract.get('last_price', 0)),
+                        'bid': float(contract.get('nbbo_bid', 0)),
+                        'ask': float(contract.get('nbbo_ask', 0)), 
+                        'volume': int(contract.get('volume', 0)),
+                        'openInterest': int(contract.get('open_interest', 0)),
+                        'impliedVolatility': float(contract.get('implied_volatility', 0)) * 100,  # Convert to percentage
                         'expiration_date': exp_date.strftime('%Y-%m-%d'),
                         'expiry': exp_date.strftime('%Y-%m-%d'),
                         'type': option_type
