@@ -5412,8 +5412,36 @@ with tabs[6]:
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Call Options", len(calls_swing))
                 col2.metric("Put Options", len(puts_swing))
-                col3.metric("Avg Call IV", f"{calls_swing['impliedVolatility'].mean():.1f}%" if not calls_swing.empty else "N/A")
-                col4.metric("Avg Put IV", f"{puts_swing['impliedVolatility'].mean():.1f}%" if not puts_swing.empty else "N/A")
+                # Safe IV calculation for display
+                try:
+                    if not calls_swing.empty and 'impliedVolatility' in calls_swing.columns:
+                        call_iv_numeric = pd.to_numeric(calls_swing['impliedVolatility'], errors='coerce')
+                        call_iv_mean = call_iv_numeric.mean()
+                        if pd.isna(call_iv_mean) or call_iv_mean == 0:
+                            call_iv_display = "N/A"
+                        else:
+                            call_iv_display = f"{call_iv_mean:.1f}%"
+                    else:
+                        call_iv_display = "N/A"
+                except:
+                    call_iv_display = "N/A"
+                
+                col3.metric("Avg Call IV", call_iv_display)
+                # Safe IV calculation for puts display
+                try:
+                    if not puts_swing.empty and 'impliedVolatility' in puts_swing.columns:
+                        put_iv_numeric = pd.to_numeric(puts_swing['impliedVolatility'], errors='coerce')
+                        put_iv_mean = put_iv_numeric.mean()
+                        if pd.isna(put_iv_mean) or put_iv_mean == 0:
+                            put_iv_display = "N/A"
+                        else:
+                            put_iv_display = f"{put_iv_mean:.1f}%"
+                    else:
+                        put_iv_display = "N/A"
+                except:
+                    put_iv_display = "N/A"
+                
+                col4.metric("Avg Put IV", put_iv_display)
                 
                 # Enhanced AI Analysis for Swing with Flow Data
                 st.markdown("### 🤖 Enhanced AI Swing Flow Analysis")
