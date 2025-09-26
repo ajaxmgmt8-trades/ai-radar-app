@@ -1773,7 +1773,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
         try:
             twelve_quote = twelvedata_client.get_quote(ticker)
             if not twelve_quote.get("error") and twelve_quote.get("last", 0) > 0:
-                twelve_quote["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+                twelve_quote["last_updated"] = datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
                 return twelve_quote
         except Exception as e:
             print(f"Twelve Data error for {ticker}: {str(e)}")
@@ -1830,7 +1830,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
                         intraday_change = ((market_close_price - market_open_price) / market_open_price) * 100
                     
                     # After hours change
-                    current_hour = datetime.datetime.now(tz_zone).hour
+                    current_hour = datetime.now(tz_zone).hour
                     if (current_hour >= 16 or current_hour < 4) and current_price != market_close_price:
                         postmarket_change = ((current_price - market_close_price) / market_close_price) * 100
                         
@@ -1857,7 +1857,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "postmarket_change": float(postmarket_change),
             "previous_close": float(previous_close),
             "market_open": float(regular_market_open) if regular_market_open else 0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "last_updated": datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": None,
             "data_source": "Yahoo Finance"
         }
@@ -1869,7 +1869,7 @@ def get_live_quote(ticker: str, tz: str = "ET") -> Dict:
             "change": 0.0, "change_percent": 0.0,
             "premarket_change": 0.0, "intraday_change": 0.0, "postmarket_change": 0.0,
             "previous_close": 0.0, "market_open": 0.0,
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "last_updated": datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": str(e),
             "data_source": "Yahoo Finance"
         }
@@ -1926,7 +1926,7 @@ def enhance_uw_stock_state_with_sessions(uw_stock_state: Dict, ticker: str, tz_z
             "low": uw_stock_state.get("low", current_price),
             "market_time": market_time,
             "tape_time": uw_stock_state.get("tape_time", ""),
-            "last_updated": datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
+            "last_updated": datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}",
             "error": None,
             "data_source": "Unusual Whales"
         }
@@ -1935,7 +1935,7 @@ def enhance_uw_stock_state_with_sessions(uw_stock_state: Dict, ticker: str, tz_z
         
     except Exception as e:
         # Return basic UW quote if enhancement fails
-        uw_stock_state["last_updated"] = datetime.datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
+        uw_stock_state["last_updated"] = datetime.now(tz_zone).strftime("%Y-%m-%d %H:%M:%S") + f" {tz_label}"
         uw_stock_state["data_source"] = "Unusual Whales"
         uw_stock_state.setdefault("premarket_change", 0)
         uw_stock_state.setdefault("intraday_change", 0)
@@ -2411,7 +2411,7 @@ def get_option_chain(ticker: str, tz: str = "ET") -> Optional[Dict]:
             return {"error": f"No options data available for {ticker}"}
 
         # Find today's expiration or closest future date
-        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
+        today = datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
         expiration_dates = [datetime.datetime.strptime(exp, '%Y-%m-%d').date() for exp in expirations]
         valid_expirations = [exp for exp in expiration_dates if exp >= today]
         if not valid_expirations:
@@ -3229,7 +3229,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
         if not expirations:
             return {"error": f"No options data available for {ticker}"}
 
-        today = datetime.datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
+        today = datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
         expiration_dates = []
         
         for exp in expirations:
@@ -5568,7 +5568,7 @@ with tabs[7]:
     else:
         current_price = quote['last']
         expiration = option_chain["expiration"]
-        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
+        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
         
         st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
