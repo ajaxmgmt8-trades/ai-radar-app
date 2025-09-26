@@ -3726,20 +3726,42 @@ def display_options_table_with_expiration(options_data, option_type="", show_exp
             if pd.isna(iv_numeric) or iv_numeric == 0:
                 iv_display = "N/A"
             else:
-                iv_display = f"{iv_numeric:.1f}%"
+                iv_display = f"{iv_numeric:.2f}%"  # Changed to 2 decimal places
         except:
             iv_display = "N/A"
-        
+    
+        # Fix strike price extraction
+        try:
+            strike_value = option.get('strike', 0)
+            if isinstance(strike_value, str):
+                strike_numeric = pd.to_numeric(strike_value, errors='coerce')
+                strike_display = f"${strike_numeric:.2f}" if not pd.isna(strike_numeric) else "N/A"
+            else:
+                strike_display = f"${float(strike_value):.2f}" if strike_value > 0 else "N/A"
+        except:
+            strike_display = "N/A"
+    
+        # Fix last price formatting
+        try:
+            price_value = option.get('lastPrice', option.get('last_price', 0))
+            if isinstance(price_value, str):
+                price_numeric = pd.to_numeric(price_value, errors='coerce')
+                price_display = f"${price_numeric:.2f}" if not pd.isna(price_numeric) else "N/A"
+            else:
+                price_display = f"${float(price_value):.2f}" if price_value > 0 else "N/A"
+        except:
+            price_display = "N/A"
+    
         row = {
-            'Strike': option.get('strike', 0),
-            'Last Price': option.get('lastPrice', option.get('last_price', 0)),
+            'Strike': strike_display,  # Use formatted strike
+            'Last Price': price_display,  # Use formatted price
             'Volume': option.get('volume', 0),
             'Open Interest': option.get('openInterest', option.get('open_interest', 0)),
-            'Implied Volatility': iv_display,
+            'Implied Volatility': iv_display,  # Use formatted IV with 2 decimal places
             'Moneyness': option.get('moneyness', 'ATM')
         }
-        
-        # Add expiration info
+    
+        # Add expiration info (rest of the existing code continues here)
         if show_expiration:
             if show_dte:
                 row['DTE'] = f"{option.get('dte', 0)}d"
