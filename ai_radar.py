@@ -3719,21 +3719,22 @@ def display_options_table_with_expiration(options_data, option_type="", show_exp
     # Prepare table data
     table_data = []
     for option in options_data:
+        # Calculate IV display value outside the dictionary
+        try:
+            iv_value = option.get('impliedVolatility', option.get('implied_volatility', 0))
+            iv_numeric = pd.to_numeric(iv_value, errors='coerce') if iv_value != 0 else 0
+            if pd.isna(iv_numeric) or iv_numeric == 0:
+                iv_display = "N/A"
+            else:
+                iv_display = f"{iv_numeric:.1f}%"
+        except:
+            iv_display = "N/A"
+        
         row = {
             'Strike': option.get('strike', 0),
             'Last Price': option.get('lastPrice', option.get('last_price', 0)),
             'Volume': option.get('volume', 0),
             'Open Interest': option.get('openInterest', option.get('open_interest', 0)),
-            # Safe IV formatting with string-to-numeric conversion
-            try:
-                iv_value = option.get('impliedVolatility', option.get('implied_volatility', 0))
-                iv_numeric = pd.to_numeric(iv_value, errors='coerce') if iv_value != 0 else 0
-                if pd.isna(iv_numeric) or iv_numeric == 0:
-                    iv_display = "N/A"
-                else:
-                    iv_display = f"{iv_numeric:.1f}%"
-            except:
-                iv_display = "N/A"
             'Implied Volatility': iv_display,
             'Moneyness': option.get('moneyness', 'ATM')
         }
