@@ -5582,7 +5582,7 @@ with tabs[6]:
                 if leaps_options.get("all_expirations"):
                     with st.expander("📅 All LEAPS Expirations Available"):
                         for exp in leaps_options["all_expirations"]:
-                            days_out = (datetime.strptime(exp, '%Y-%m-%d').date() - datetime.date.today()).days
+                            days_out = (datetime.strptime(exp, '%Y-%m-%d').date() - date.today()).days
                             st.write(f"• {exp} ({days_out} days)")
                 
                 # LEAPS Strategy Guide
