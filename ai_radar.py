@@ -1985,7 +1985,7 @@ def get_finnhub_news(symbol: str = None) -> List[Dict]:
     
     try:
         if symbol:
-            url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={datetime.date.today()}&to={datetime.date.today()}&token={FINNHUB_KEY}"
+            url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={date.today()}&to={date.today()}&token={FINNHUB_KEY}"
         else:
             url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_KEY}"
         
