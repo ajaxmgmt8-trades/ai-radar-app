@@ -5249,7 +5249,20 @@ with tabs[6]:
                 st.info("0DTE options may not be available for this ticker or may have already expired.")
             else:
                 # 0DTE specific metrics
-                st.success(f"0DTE Options Expiring: {dte_options['expiration']} ({dte_options['days_to_expiration']} days)")
+                today = datetime.now().date()
+                
+                # Get expiration info from all_expirations if available
+                if dte_options.get('all_expirations') and len(dte_options['all_expirations']) > 0:
+                    expiration_date = dte_options['all_expirations'][0]  # Get first/closest expiration
+                    exp_date_obj = datetime.strptime(expiration_date, '%Y-%m-%d').date()
+                    days_to_exp = (exp_date_obj - today).days
+                    
+                    # 0DTE specific metrics
+                    st.success(f"0DTE Options Expiring: {expiration_date} ({days_to_exp} days)")
+                else:
+                    # Fallback if no expiration data
+                    st.success("0DTE Options Analysis")
+                    days_to_exp = 0
                 
                 calls_0dte = dte_options["calls"]
                 puts_0dte = dte_options["puts"]
@@ -5320,13 +5333,8 @@ with tabs[6]:
                 st.error(swing_options["error"])
             else:
                 # Swing specific metrics
-                # Handle both single and multi-expiration formats
-                if 'expiration' in swing_options:
-                    # Single expiration format (old)
-                    st.success(f"Swing Options Expiring: {swing_options['expiration']} ({swing_options['days_to_expiration']} days)")
-                else:
-                    # Multi-expiration format (new)
-                    exp_count = len(swing_options.get('all_expirations', []))
+                if swing_options.get('all_expirations') and len(swing_options['all_expirations']) > 0:
+                    exp_count = len(swing_options['all_expirations'])
                     if exp_count == 1:
                         exp_date = swing_options['all_expirations'][0]
                         today = datetime.now().date()
@@ -5334,6 +5342,8 @@ with tabs[6]:
                         st.success(f"Swing Options Expiring: {exp_date} ({days_to_exp} days)")
                     else:
                         st.success(f"Swing Options: {exp_count} expiration dates available")
+                else:
+                    st.success("Swing Options Analysis")
                 
                 calls_swing = swing_options["calls"]
                 puts_swing = swing_options["puts"]
@@ -5452,13 +5462,8 @@ with tabs[6]:
                 st.error(leaps_options["error"])
             else:
                 # LEAPS specific metrics
-                # Handle both single and multi-expiration formats
-                if 'expiration' in leaps_options:
-                    # Single expiration format (old)
-                    st.success(f"LEAPS Options Expiring: {leaps_options['expiration']} ({leaps_options['days_to_expiration']} days)")
-                else:
-                    # Multi-expiration format (new)
-                    exp_count = len(leaps_options.get('all_expirations', []))
+                if leaps_options.get('all_expirations') and len(leaps_options['all_expirations']) > 0:
+                    exp_count = len(leaps_options['all_expirations'])
                     if exp_count == 1:
                         exp_date = leaps_options['all_expirations'][0]
                         today = datetime.now().date()
@@ -5466,6 +5471,8 @@ with tabs[6]:
                         st.success(f"LEAPS Options Expiring: {exp_date} ({days_to_exp} days)")
                     else:
                         st.success(f"LEAPS Options: {exp_count} expiration dates available")
+                else:
+                    st.success("LEAPS Options Analysis")
                 
                 calls_leaps = leaps_options["calls"]
                 puts_leaps = leaps_options["puts"]
