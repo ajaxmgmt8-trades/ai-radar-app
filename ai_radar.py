@@ -5784,60 +5784,60 @@ with tabs[7]:
                         )
                     else:
                         st.info("No put options under $1.00 available")
-        
+
         else:
             st.info("No lotto opportunities found")
 
-            # Enhanced unusual activity in lottos with flow correlation
-            st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
-            unusual_lottos = []
+        # Enhanced unusual activity in lottos with flow correlation (MOVED OUTSIDE)
+        st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
+        unusual_lottos = []
+        
+        # Check for unusual volume in lotto calls
+        if not lotto_calls.empty:
+            for _, call in lotto_calls.iterrows():
+                vol_oi_ratio = call['volume'] / max(call['openInterest'], 1)
+                if vol_oi_ratio > 2 and call['volume'] > 100:  # High volume relative to OI
+                    unusual_lottos.append({
+                        'type': 'Call',
+                        'strike': call['strike'],
+                        'price': call['lastPrice'],
+                        'volume': call['volume'],
+                        'oi': call['openInterest'],
+                        'vol_oi_ratio': vol_oi_ratio,
+                        'moneyness': call['moneyness'],
+                        'flow_correlation': 'Check flow alerts for this strike level'
+                    })
+        
+        # Check for unusual volume in lotto puts
+        if not lotto_puts.empty:
+            for _, put in lotto_puts.iterrows():
+                vol_oi_ratio = put['volume'] / max(put['openInterest'], 1)
+                if vol_oi_ratio > 2 and put['volume'] > 100:
+                    unusual_lottos.append({
+                        'type': 'Put',
+                        'strike': put['strike'],
+                        'price': put['lastPrice'],
+                        'volume': put['volume'],
+                        'oi': put['openInterest'],
+                        'vol_oi_ratio': vol_oi_ratio,
+                        'moneyness': put['moneyness'],
+                        'flow_correlation': 'Check flow alerts for this strike level'
+                    })
+        
+        if unusual_lottos:
+            st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
+            unusual_df = pd.DataFrame(unusual_lottos)
+            unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
+            st.dataframe(unusual_df, use_container_width=True)
             
-            # Check for unusual volume in lotto calls
-            if not lotto_calls.empty:
-                for _, call in lotto_calls.iterrows():
-                    vol_oi_ratio = call['volume'] / max(call['openInterest'], 1)
-                    if vol_oi_ratio > 2 and call['volume'] > 100:  # High volume relative to OI
-                        unusual_lottos.append({
-                            'type': 'Call',
-                            'strike': call['strike'],
-                            'price': call['lastPrice'],
-                            'volume': call['volume'],
-                            'oi': call['openInterest'],
-                            'vol_oi_ratio': vol_oi_ratio,
-                            'moneyness': call['moneyness'],
-                            'flow_correlation': 'Check flow alerts for this strike level'
-                        })
-            
-            # Check for unusual volume in lotto puts
-            if not lotto_puts.empty:
-                for _, put in lotto_puts.iterrows():
-                    vol_oi_ratio = put['volume'] / max(put['openInterest'], 1)
-                    if vol_oi_ratio > 2 and put['volume'] > 100:
-                        unusual_lottos.append({
-                            'type': 'Put',
-                            'strike': put['strike'],
-                            'price': put['lastPrice'],
-                            'volume': put['volume'],
-                            'oi': put['openInterest'],
-                            'vol_oi_ratio': vol_oi_ratio,
-                            'moneyness': put['moneyness'],
-                            'flow_correlation': 'Check flow alerts for this strike level'
-                        })
-            
-            if unusual_lottos:
-                st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
-                unusual_df = pd.DataFrame(unusual_lottos)
-                unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
-                st.dataframe(unusual_df, use_container_width=True)
-                
-                if not flow_analysis.get("error") and flow_analysis.get("alerts"):
-                    st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
-            else:
-                st.info("No unusual lotto activity detected with current criteria")
+            if not flow_analysis.get("error") and flow_analysis.get("alerts"):
+                st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
+        else:
+            st.info("No unusual lotto activity detected with current criteria")
 
-            else:
-                st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
-                st.info("Try a different ticker or check if options are available for this expiration")
+    else:
+        st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
+        st.info("Try a different ticker or check if options are available for this expiration")
 
         # Enhanced Risk Warning
         with st.expander("⚠️ Enhanced Lotto Trading Risk Warning"):
