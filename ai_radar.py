@@ -845,7 +845,19 @@ def generate_flow_analysis_prompt(ticker: str, flow_data: Dict, volume_data: Dic
         chains = hottest_chains.get("chains", [])
         for chain in chains[:5]:
             prompt += f"""
-        - {chain['ticker']} {chain['type'].upper()}: Strike ${chain['strike']}, Volume {chain['volume']}, Premium ${chain['premium']:,.2f}
+        # Try to get the option symbol and extract info from it
+        option_symbol = chain.get('option_symbol', chain.get('ticker', 'N/A'))
+        strike = chain.get('strike', chain.get('strike_price', 0))
+        volume = chain.get('volume', 0)
+        premium = chain.get('premium', chain.get('total_premium', 0))
+        
+        # Determine type from symbol if available
+        if option_symbol != 'N/A':
+            option_type = 'CALL' if 'C' in option_symbol else 'PUT' if 'P' in option_symbol else 'UNKNOWN'
+        else:
+            option_type = 'UNKNOWN'
+        
+        prompt += f"\n        - {option_symbol} {option_type}: Strike ${strike}, Volume {volume}, Premium ${premium:,.2f}"
         """
     else:
         prompt += f"Hottest Chains Error: {hottest_chains['error']}\n"
