@@ -5575,8 +5575,8 @@ with tabs[5]:
                             )
                 else:
                     st.info("No swing options data available")
-     # LEAPS Tab with Flow Integration
-     with timeframe_tabs[2]:
+ # LEAPS Tab with Flow Integration
+    with timeframe_tabs[2]:
             st.markdown("### 📊 LEAPS Options (90+ Days)")
             st.caption("Long-term strategic positions with lower time decay and institutional flow insights")
             
