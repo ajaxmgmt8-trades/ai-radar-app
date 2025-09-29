@@ -57,6 +57,12 @@ if "data_source" not in st.session_state:
     st.session_state.data_source = "Unusual Whales"  # Primary data source now UW
 if "ai_model" not in st.session_state:
     st.session_state.ai_model = "Multi-AI"  # Default to multi-AI
+if "flow_last_refresh" not in st.session_state:
+    st.session_state.flow_last_refresh = {}
+if "flow_data_cache" not in st.session_state:
+    st.session_state.flow_data_cache = {}
+if "flow_auto_refresh_enabled" not in st.session_state:
+    st.session_state.flow_auto_refresh_enabled = {"0DTE": False, "Swing": False, "LEAPS": False}    
 
 # API Keys
 try:
@@ -3680,6 +3686,95 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
+ def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
+    """Unified function to fetch both options chain and flow data together"""
+    cache_key = f"{ticker}_{timeframe}"
+    now = time.time()
+    
+    # Determine staleness threshold based on timeframe
+    staleness_threshold = {
+        "0DTE": 900,      # 15 minutes
+        "Swing": 3600,    # 1 hour  
+        "LEAPS": 14400    # 4 hours
+    }.get(timeframe, 1800)
+    
+    # Check if we need to refresh
+    last_refresh = st.session_state.flow_last_refresh.get(cache_key, 0)
+    is_stale = (now - last_refresh) > staleness_threshold
+    
+    if not force_refresh and not is_stale and cache_key in st.session_state.flow_data_cache:
+        return st.session_state.flow_data_cache[cache_key]
+    
+    # Fetch fresh data
+    data = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timeframe": timeframe,
+        "ticker": ticker
+    }
+    
+    # Get options chain for timeframe
+    if timeframe == "0DTE":
+        data["options"] = get_options_by_timeframe(ticker, "0DTE", st.session_state.selected_tz)
+    elif timeframe == "Swing":
+        data["options"] = get_options_by_timeframe(ticker, "Swing", st.session_state.selected_tz)
+    else:  # LEAPS
+        data["options"] = get_options_by_timeframe(ticker, "LEAPS", st.session_state.selected_tz)
+    
+    # Get flow data if UW available
+    if uw_client:
+        data["flow_alerts"] = uw_client.get_flow_alerts(ticker)
+        data["options_volume"] = uw_client.get_options_volume(ticker)
+        data["hottest_chains"] = uw_client.get_hottest_chains()
+        
+        # Analyze flow data
+        data["flow_analysis"] = analyze_flow_alerts(data["flow_alerts"], ticker)
+        data["volume_analysis"] = analyze_options_volume(data["options_volume"], ticker)
+        data["hottest_analysis"] = analyze_hottest_chains(data["hottest_chains"])
+    else:
+        data["flow_analysis"] = {"error": "UW not available"}
+        data["volume_analysis"] = {"error": "UW not available"}
+        data["hottest_analysis"] = {"error": "UW not available"}
+    
+    # Cache the data
+    st.session_state.flow_data_cache[cache_key] = data
+    st.session_state.flow_last_refresh[cache_key] = now
+    
+    return data
+
+def get_data_age(ticker: str, timeframe: str) -> str:
+    """Get human-readable age of cached data"""
+    cache_key = f"{ticker}_{timeframe}"
+    last_refresh = st.session_state.flow_last_refresh.get(cache_key, 0)
+    
+    if last_refresh == 0:
+        return "Never fetched"
+    
+    age_seconds = time.time() - last_refresh
+    
+    if age_seconds < 60:
+        return f"{int(age_seconds)}s ago"
+    elif age_seconds < 3600:
+        return f"{int(age_seconds/60)}m ago"
+    else:
+        return f"{int(age_seconds/3600)}h ago"
+
+def is_data_stale(ticker: str, timeframe: str) -> bool:
+    """Check if data is stale based on timeframe"""
+    cache_key = f"{ticker}_{timeframe}"
+    last_refresh = st.session_state.flow_last_refresh.get(cache_key, 0)
+    
+    if last_refresh == 0:
+        return True
+    
+    age_seconds = time.time() - last_refresh
+    
+    staleness_threshold = {
+        "0DTE": 900,      # 15 minutes
+        "Swing": 3600,    # 1 hour
+        "LEAPS": 14400    # 4 hours
+    }.get(timeframe, 1800)
+    
+    return age_seconds > staleness_threshold       
 def calculate_days_to_expiration(expiration_str):
     """Calculate days to expiration from date string"""
     try:
@@ -3888,6 +3983,31 @@ def display_grouped_options_by_expiration(options_data, show_dte_only=False, sho
                 st.info("No put options")
         
         st.divider()
+ def get_lotto_contracts(self, ticker: str = None, max_price: float = 1.0) -> Dict:
+    """Get lotto plays (cheap options under $1) across all expirations"""
+    endpoint = "/api/screener/option-contracts"
+    params = {
+        "limit": 250,  # Max allowed
+        "order": "volume",
+        "order_direction": "desc",
+        
+        # Price filters for lottos
+        "max_option_price": max_price,  # Options under $1.00
+        "min_volume": 10,  # Some liquidity
+        
+        # Include all timeframes - no max_dte to get everything
+        "min_dte": 0,  # Include 0DTE
+        
+        # Basic filters
+        "min_underlying_price": 2.0,  # Avoid penny stocks
+        "min_open_interest": 10,  # Some existing OI
+        "issue_types[]": ["Common Stock", "ETF"]
+    }
+    
+    if ticker:
+        params["ticker_symbol"] = ticker
+    
+    return self._make_request(endpoint, params)       
 # =============================================================================
 # MAIN APPLICATION
 # =============================================================================
@@ -5151,219 +5271,60 @@ with tabs[5]:
 
             st.divider()
 
-# TAB 7: Enhanced Options Flow with UW Integration
-with tabs[6]:
-    st.subheader("🎯 Enhanced Options Flow Analysis")
-    st.markdown("**Advanced options flow analysis with Unusual Whales integration and timeframe-specific strategies.**")
-
-    # Ticker selection
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        flow_ticker = st.text_input(
-            "Select Ticker for Options Flow", 
-            value="AAPL",
-            placeholder="Enter any ticker (e.g., AAPL, TSLA, SPY)",
-            key="flow_ticker"
-        ).upper()
-    with col2:
-        if st.button("Refresh All Data", key="refresh_flow_data"):
-            st.cache_data.clear()
-            st.rerun()
-
-    # Get base data
-    quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
-    
-    if not quote.get("error"):
-        # Basic quote info
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-        col2.metric("Volume", f"{quote['volume']:,}")
-        col3.metric("Data Source", quote.get('data_source', 'Unknown'))
-        col4.metric("Last Updated", quote['last_updated'][-8:])
-
-        # Enhanced UW Flow Analysis Section
-        if uw_client:
-            st.markdown("### 🔥 Unusual Whales Flow Intelligence")
-            
-            with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
-                
-                flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
-                st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
-                if flow_alerts_data.get('data'):
-                    st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
-                    st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
-                
-                options_volume_data = uw_client.get_options_volume(flow_ticker)
-                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
-                
-                hottest_chains_data = uw_client.get_hottest_chains()
-                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
-                
-
-                # Add this first to see what raw data looks like:
-                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
-                
-                # Then try the analysis:
-                try:
-                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
-                except Exception as e:
-                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
-                
-                # Test individual UW calls
-                st.write("**Testing individual UW endpoints:**")
-                try:
-                    test_stock_state = uw_client.get_stock_state(flow_ticker)
-                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
-                except Exception as e:
-                    st.write(f"Stock state error: {str(e)}")
-                
-                # Raw data inspection
-                with st.expander("🔬 Raw API Responses"):
-                    st.write("**Flow Alerts Raw:**")
-                    st.json(flow_alerts_data)
-                    st.write("**Options Volume Raw:**") 
-                    st.json(options_volume_data)
-                        
-                # Analyze the data
-                flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
-                volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
-                
-                # Display UW Flow Alerts
-                st.markdown("#### 🔥 Flow Alerts")
-                if not flow_analysis.get("error"):
-                    summary = flow_analysis.get("summary", {})
-                    
-                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
-                    alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
-                    
-                    # Premium metrics
-                    prem_col1, prem_col2, prem_col3 = st.columns(3)
-                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
-                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
-                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
-                    
-                    # Display top alerts
-                    if flow_analysis.get("alerts"):
-                        with st.expander("📋 Recent Flow Alerts"):
-                            alerts_df = pd.DataFrame(flow_analysis["alerts"])
-                            if not alerts_df.empty:
-                                # Sort by premium
-                                alerts_df = alerts_df.sort_values('premium', ascending=False)
-                                st.dataframe(alerts_df.head(10), use_container_width=True)
-                else:
-                    st.info(f"Flow Alerts: {flow_analysis.get('error', 'No data available')}")
-                
-                # Display UW Volume Analysis
-                st.markdown("#### 📊 Options Volume Analysis")
-                if not volume_analysis.get("error"):
-                    vol_summary = volume_analysis.get("summary", {})
-                    
-                    vol_col1, vol_col2, vol_col3, vol_col4 = st.columns(4)
-                    vol_col1.metric("Call Volume", f"{vol_summary.get('total_call_volume', 0):,}")
-                    vol_col2.metric("Put Volume", f"{vol_summary.get('total_put_volume', 0):,}")
-                    vol_col3.metric("P/C Ratio", f"{vol_summary.get('put_call_ratio', 0):.2f}")
-                    vol_col4.metric("Premium Ratio", f"{vol_summary.get('premium_ratio', 0):.2f}")
-                    
-                    # Display volume data - REPLACE THE EXISTING EXPANDER SECTION
-                    if volume_analysis.get("volume_data"):
-                        with st.expander("📊 Enhanced Volume Details"):
-                            # Get the raw UW data
-                            raw_data = volume_analysis.get("raw_data", {})
-                            
-                            if raw_data:
-                                # Enhanced two-column layout
-                                vol_col1, vol_col2 = st.columns(2)
-                                
-                                with vol_col1:
-                                    st.write("**📞 Call Options Data:**")
-                                    st.write(f"Volume: {raw_data.get('call_volume', 'N/A'):,}")
-                                    st.write(f"Premium: ${float(raw_data.get('call_premium', 0)):,.0f}")
-                                    st.write(f"Open Interest: {raw_data.get('call_open_interest', 'N/A'):,}")
-                                    st.write(f"Bid Side Volume: {raw_data.get('call_volume_bid_side', 'N/A'):,}")
-                                    st.write(f"Ask Side Volume: {raw_data.get('call_volume_ask_side', 'N/A'):,}")
-                                    st.write(f"Net Premium: ${float(raw_data.get('net_call_premium', 0)):,.0f}")
-                                
-                                with vol_col2:
-                                    st.write("**📉 Put Options Data:**")
-                                    st.write(f"Volume: {raw_data.get('put_volume', 'N/A'):,}")
-                                    st.write(f"Premium: ${float(raw_data.get('put_premium', 0)):,.0f}")
-                                    st.write(f"Open Interest: {raw_data.get('put_open_interest', 'N/A'):,}")
-                                    st.write(f"Bid Side Volume: {raw_data.get('put_volume_bid_side', 'N/A'):,}")
-                                    st.write(f"Ask Side Volume: {raw_data.get('put_volume_ask_side', 'N/A'):,}")
-                                    st.write(f"Net Premium: ${float(raw_data.get('net_put_premium', 0)):,.0f}")
-                                
-                                # Additional metrics row
-                                st.write("**📊 Additional Metrics:**")
-                                met_col1, met_col2, met_col3 = st.columns(3)
-                                met_col1.write(f"Bullish Flow: ${float(raw_data.get('bullish_premium', 0)):,.0f}")
-                                met_col2.write(f"Bearish Flow: ${float(raw_data.get('bearish_premium', 0)):,.0f}")
-                                met_col3.write(f"Date: {raw_data.get('date', 'N/A')}")
-                            
-                            # Keep the DataFrame if you want
-                            if volume_analysis.get("volume_data"):
-                                volume_df = pd.DataFrame(volume_analysis["volume_data"])
-                                if not volume_df.empty():
-                                    st.dataframe(volume_df, use_container_width=True)
-                    else:
-                        st.info(f"Volume Analysis: {volume_analysis.get('error', 'No data available')}")
-                
-                # Display Hottest Chains
-                st.markdown("#### 🌡️ Hottest Chains")
-                if not hottest_chains_data.get("error"):
-                    chains_summary = hottest_chains_analysis.get("summary", {})
-                    
-                    chain_col1, chain_col2, chain_col3 = st.columns(3)
-                    chain_col1.metric("Total Chains", chains_summary.get("total_chains", 0))
-                    chain_col2.metric("Combined Volume", f"{chains_summary.get('total_volume', 0):,}")
-                    chain_col3.metric("Combined Premium", f"${chains_summary.get('total_premium', 0):,.0f}")
-                    
-                    if hottest_chains_analysis.get("chains"):
-                        with st.expander("🔥 Top Hottest Chains"):
-                            chains_df = pd.DataFrame(hottest_chains_analysis["chains"][:20])
-                            if not chains_df.empty:
-                                st.dataframe(chains_df, use_container_width=True)
-                else:
-                    st.info(f"Hottest Chains: {hottest_chains_data.get('error', 'No data available')}")
-        else:
-            st.error("🔥 Unusual Whales API required for premium options flow analysis")
-            st.info("Configure your Unusual Whales API key to access enhanced flow data")
-            flow_analysis = {"error": "UW not available"}
-            volume_analysis = {"error": "UW not available"}
-            hottest_chains_data = {"error": "UW not available"}
-
-        # Create the 3 timeframe tabs with enhanced flow integration
-        timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
-
-        # 0DTE Tab with Flow Integration
+# 0DTE Tab with Flow Integration
         with timeframe_tabs[0]:
             st.markdown("### 🎯 0DTE Options (Same Day Expiration)")
             st.caption("High-risk, high-reward same-day expiration plays with flow analysis")
             
-            with st.spinner("Loading 0DTE options and flow data..."):
-                dte_options = get_options_by_timeframe(flow_ticker, "0DTE", st.session_state.selected_tz)
+            # Refresh controls and data status
+            col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+            with col1:
+                data_age = get_data_age(flow_ticker, "0DTE")
+                is_stale = is_data_stale(flow_ticker, "0DTE")
+                status_color = "🔴" if is_stale else "🟢"
+                st.caption(f"{status_color} Data Age: **{data_age}** (Refresh: 15min)")
+            
+            with col2:
+                if st.button("🔄 Refresh 0DTE Data", key="refresh_0dte"):
+                    with st.spinner("Refreshing 0DTE options and flow data..."):
+                        get_unified_flow_data(flow_ticker, "0DTE", force_refresh=True)
+                        st.rerun()
+            
+            with col3:
+                auto_refresh_0dte = st.checkbox("Auto", key="auto_0dte", 
+                                                value=st.session_state.flow_auto_refresh_enabled.get("0DTE", False))
+                st.session_state.flow_auto_refresh_enabled["0DTE"] = auto_refresh_0dte
+            
+            with col4:
+                if is_stale:
+                    st.warning("⚠️ Stale", help="Data is >15 minutes old")
+            
+            # Get or fetch unified data
+            with st.spinner("Loading 0DTE data..."):
+                unified_data = get_unified_flow_data(flow_ticker, "0DTE", force_refresh=False)
+            
+            dte_options = unified_data["options"]
+            flow_analysis = unified_data.get("flow_analysis", {})
+            volume_analysis = unified_data.get("volume_analysis", {})
+            hottest_chains_data = unified_data.get("hottest_analysis", {})
             
             if dte_options.get("error"):
                 st.error(dte_options["error"])
                 st.info("0DTE options may not be available for this ticker or may have already expired.")
             else:
+                # Display timestamp
+                st.success(f"✅ Data fetched at: {unified_data['timestamp']}")
+                
                 # 0DTE specific metrics
                 today = datetime.now().date()
                 
-                # Get expiration info from all_expirations if available
                 if dte_options.get('all_expirations') and len(dte_options['all_expirations']) > 0:
-                    expiration_date = dte_options['all_expirations'][0]  # Get first/closest expiration
+                    expiration_date = dte_options['all_expirations'][0]
                     exp_date_obj = datetime.strptime(expiration_date, '%Y-%m-%d').date()
                     days_to_exp = (exp_date_obj - today).days
-                    
-                    # 0DTE specific metrics
-                    st.success(f"0DTE Options Expiring: {expiration_date} ({days_to_exp} days)")
+                    st.info(f"📅 Expiring: {expiration_date} ({days_to_exp} days)")
                 else:
-                    # Fallback if no expiration data
-                    st.success("0DTE Options Analysis")
+                    st.info("📅 0DTE Options Analysis")
                     days_to_exp = 0
                 
                 calls_0dte = dte_options["calls"]
@@ -5376,19 +5337,30 @@ with tabs[6]:
                 col3.metric("Total Call Volume", int(calls_0dte['volume'].sum()) if not calls_0dte.empty else 0)
                 col4.metric("Total Put Volume", int(puts_0dte['volume'].sum()) if not puts_0dte.empty else 0)
                 
-                # Enhanced AI Analysis for 0DTE with Flow Data
-                st.markdown("### 🤖 Enhanced AI 0DTE Flow Analysis")
-                with st.spinner("Generating comprehensive 0DTE flow strategy..."):
-                    if uw_client and not flow_analysis.get("error"):
-                        # Use enhanced flow analysis
+                # Flow Intelligence Summary for 0DTE
+                if not flow_analysis.get("error"):
+                    st.markdown("#### 🔥 Real-Time Flow Intelligence")
+                    flow_summary = flow_analysis.get("summary", {})
+                    
+                    flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
+                    flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
+                    flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
+                
+                # Enhanced AI Analysis for 0DTE with Fresh Flow Data
+                st.markdown("### 🤖 AI 0DTE Flow Analysis (Live)")
+                with st.spinner("Generating fresh 0DTE analysis..."):
+                    if not flow_analysis.get("error"):
                         dte_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, dte_options, flow_analysis, volume_analysis, hottest_chains_data, "0DTE"
+                            flow_ticker, dte_options, flow_analysis, volume_analysis, 
+                            hottest_chains_data, "0DTE"
                         )
                     else:
-                        # Fallback to standard analysis
                         dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, {}, "0DTE")
                     
                     st.markdown(dte_analysis)
+                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
                 # 0DTE Options Display
                 if not calls_0dte.empty or not puts_0dte.empty:
@@ -5397,16 +5369,14 @@ with tabs[6]:
                     with col1:
                         st.markdown("#### 📞 0DTE Calls")
                         if not calls_0dte.empty:
-                            # Show top calls by volume
                             top_calls = calls_0dte.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']]
                             st.dataframe(top_calls, use_container_width=True)
                         else:
                             st.info("No 0DTE call options")
                     
                     with col2:
-                        st.markdown("#### 📞 0DTE Puts")
+                        st.markdown("#### 📉 0DTE Puts")
                         if not puts_0dte.empty:
-                            # Show top puts by volume
                             top_puts = puts_0dte.nlargest(10, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']]
                             st.dataframe(top_puts, use_container_width=True)
                         else:
@@ -5421,19 +5391,52 @@ with tabs[6]:
                     - Can lose 100% value in minutes
                     - Only for experienced traders
                     - Use tiny position sizes
+                    - **Flow data refreshes every 15 minutes** - critical for intraday timing
                     """)
 
-        # Swing Tab with Flow Integration
+       # Swing Tab with Flow Integration
         with timeframe_tabs[1]:
             st.markdown("### 📈 Swing Options (2-89 Days)")
             st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
-            with st.spinner("Loading swing options and flow analysis..."):
-                swing_options = get_options_by_timeframe(flow_ticker, "Swing", st.session_state.selected_tz)
+            # Refresh controls and data status
+            col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+            with col1:
+                data_age = get_data_age(flow_ticker, "Swing")
+                is_stale = is_data_stale(flow_ticker, "Swing")
+                status_color = "🔴" if is_stale else "🟢"
+                st.caption(f"{status_color} Data Age: **{data_age}** (Refresh: 1hr)")
+            
+            with col2:
+                if st.button("🔄 Refresh Swing Data", key="refresh_swing"):
+                    with st.spinner("Refreshing Swing options and flow data..."):
+                        get_unified_flow_data(flow_ticker, "Swing", force_refresh=True)
+                        st.rerun()
+            
+            with col3:
+                auto_refresh_swing = st.checkbox("Auto", key="auto_swing",
+                                                 value=st.session_state.flow_auto_refresh_enabled.get("Swing", False))
+                st.session_state.flow_auto_refresh_enabled["Swing"] = auto_refresh_swing
+            
+            with col4:
+                if is_stale:
+                    st.warning("⚠️ Stale", help="Data is >1 hour old")
+            
+            # Get or fetch unified data
+            with st.spinner("Loading Swing data..."):
+                unified_data = get_unified_flow_data(flow_ticker, "Swing", force_refresh=False)
+            
+            swing_options = unified_data["options"]
+            flow_analysis = unified_data.get("flow_analysis", {})
+            volume_analysis = unified_data.get("volume_analysis", {})
+            hottest_chains_data = unified_data.get("hottest_analysis", {})
             
             if swing_options.get("error"):
                 st.error(swing_options["error"])
             else:
+                # Display timestamp
+                st.success(f"✅ Data fetched at: {unified_data['timestamp']}")
+                
                 # Swing specific metrics
                 if swing_options.get('all_expirations') and len(swing_options['all_expirations']) > 0:
                     exp_count = len(swing_options['all_expirations'])
@@ -5441,16 +5444,15 @@ with tabs[6]:
                         exp_date = swing_options['all_expirations'][0]
                         today = datetime.now().date()
                         days_to_exp = (datetime.strptime(exp_date, '%Y-%m-%d').date() - today).days
-                        st.success(f"Swing Options Expiring: {exp_date} ({days_to_exp} days)")
+                        st.info(f"📅 Expiring: {exp_date} ({days_to_exp} days)")
                     else:
-                        st.success(f"Swing Options: {exp_count} expiration dates available")
+                        st.info(f"📅 {exp_count} expiration dates available")
                 else:
-                    st.success("Swing Options Analysis")
+                    st.info("📅 Swing Options Analysis")
                 
                 calls_swing = swing_options["calls"]
                 puts_swing = swing_options["puts"]
 
-                # ADD THIS ENTIRE SECTION HERE:
                 # Combine calls and puts for expiration processing
                 all_swing_options = []
                 if not calls_swing.empty:
@@ -5459,58 +5461,47 @@ with tabs[6]:
                     all_swing_options.extend(puts_swing.to_dict('records'))
                 
                 if all_swing_options:
-                    # Process expiration data
                     all_swing_options = process_options_with_expiration(all_swing_options)
-                    
-                    # Get available expirations
                     available_expirations = sorted(list(set([
                         opt['expiration'] for opt in all_swing_options 
                         if opt.get('expiration') and opt['expiration'] != ''
                     ])))
                     
-                    # Expiration filter and grouping controls
                     col1, col2, col3 = st.columns([2, 1, 1])
-                    
                     with col1:
                         selected_expiration = st.selectbox(
                             "📅 Filter by Expiration",
                             options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations],
                             key="swing_exp_filter"
                         )
-                    
                     with col2:
                         group_by_exp = st.checkbox("Group by Expiration", key="swing_group")
-                    
                     with col3:
                         show_dte_only = st.checkbox("Show DTE Only", key="swing_dte_only")
+                
                 # Swing Summary
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Call Options", len(calls_swing))
                 col2.metric("Put Options", len(puts_swing))
-                # Safe IV calculation for display
+                
+                # Safe IV calculation
                 try:
                     if not calls_swing.empty and 'impliedVolatility' in calls_swing.columns:
                         call_iv_numeric = pd.to_numeric(calls_swing['impliedVolatility'], errors='coerce')
                         call_iv_mean = call_iv_numeric.mean()
-                        if pd.isna(call_iv_mean) or call_iv_mean == 0:
-                            call_iv_display = "N/A"
-                        else:
-                            call_iv_display = f"{call_iv_mean:.1f}%"
+                        call_iv_display = f"{call_iv_mean:.1f}%" if not pd.isna(call_iv_mean) else "N/A"
                     else:
                         call_iv_display = "N/A"
                 except:
                     call_iv_display = "N/A"
                 
                 col3.metric("Avg Call IV", call_iv_display)
-                # Safe IV calculation for puts display
+                
                 try:
                     if not puts_swing.empty and 'impliedVolatility' in puts_swing.columns:
                         put_iv_numeric = pd.to_numeric(puts_swing['impliedVolatility'], errors='coerce')
                         put_iv_mean = put_iv_numeric.mean()
-                        if pd.isna(put_iv_mean) or put_iv_mean == 0:
-                            put_iv_display = "N/A"
-                        else:
-                            put_iv_display = f"{put_iv_mean:.1f}%"
+                        put_iv_display = f"{put_iv_mean:.1f}%" if not pd.isna(put_iv_mean) else "N/A"
                     else:
                         put_iv_display = "N/A"
                 except:
@@ -5518,79 +5509,113 @@ with tabs[6]:
                 
                 col4.metric("Avg Put IV", put_iv_display)
                 
-                # Enhanced AI Analysis for Swing with Flow Data
-                st.markdown("### 🤖 Enhanced AI Swing Flow Analysis")
-                with st.spinner("Generating comprehensive swing flow strategy..."):
-                    if uw_client and not flow_analysis.get("error"):
+                # Flow Intelligence Summary for Swing
+                if not flow_analysis.get("error"):
+                    st.markdown("#### 🔥 Flow Intelligence")
+                    flow_summary = flow_analysis.get("summary", {})
+                    
+                    flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
+                    flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
+                    flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
+                
+                # Enhanced AI Analysis for Swing with Fresh Flow Data
+                st.markdown("### 🤖 AI Swing Flow Analysis (Live)")
+                with st.spinner("Generating fresh swing analysis..."):
+                    if not flow_analysis.get("error"):
                         swing_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, swing_options, flow_analysis, volume_analysis, hottest_chains_data, "Swing"
+                            flow_ticker, swing_options, flow_analysis, volume_analysis, 
+                            hottest_chains_data, "Swing"
                         )
                     else:
                         swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, {}, "Swing")
                     
                     st.markdown(swing_analysis)
+                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
-                # Enhanced Swing Options Display with Expiration
+                # Display Swing options
                 if all_swing_options:
-                    # Apply expiration filter if selected
                     filtered_swing_options = all_swing_options.copy()
                     if selected_expiration != "All Expirations":
-                        target_expiration = selected_expiration.split(' (')[0]  # Remove DTE part
+                        target_expiration = selected_expiration.split(' (')[0]
                         filtered_swing_options = [opt for opt in filtered_swing_options if opt.get('expiration') == target_expiration]
                     
                     if group_by_exp and selected_expiration == "All Expirations":
-                        # Grouped display
                         st.markdown("#### 📈📉 Swing Options by Expiration")
                         display_grouped_options_by_expiration(filtered_swing_options, show_dte_only, show_trade_time=True)
-                    
                     else:
-                        # Standard side-by-side display with expiration columns
                         st.markdown("#### 📈📉 Swing Options")
                         current_price = swing_options.get('current_price', 0)
-                        # Separate calls and puts
                         swing_calls_filtered = [opt for opt in filtered_swing_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
                         swing_puts_filtered = [opt for opt in filtered_swing_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
                         
                         col1, col2 = st.columns(2)
-                        
                         with col1:
                             st.markdown("##### 📞 Calls")
-                            # Sort by volume and take top 10
                             swing_calls_sorted = sorted(swing_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
                             display_options_table_with_expiration(
-                                swing_calls_sorted,
+                                swing_calls_sorted, 
                                 option_type="call",
                                 show_expiration=True,
                                 show_dte=show_dte_only,
                                 show_trade_time=True
                             )
-                        
                         with col2:
                             st.markdown("##### 📉 Puts")
-                            # Sort by volume and take top 10
                             swing_puts_sorted = sorted(swing_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
                             display_options_table_with_expiration(
                                 swing_puts_sorted,
-                                option_type="put",
+                                option_type="put", 
                                 show_expiration=True,
                                 show_dte=show_dte_only,
                                 show_trade_time=True
                             )
-                
                 else:
                     st.info("No swing options data available")
-
         # LEAPS Tab with Flow Integration
         with timeframe_tabs[2]:
             st.markdown("### 📊 LEAPS Options (90+ Days)")
             st.caption("Long-term strategic positions with lower time decay and institutional flow insights")
             
-            with st.spinner("Loading LEAPS options and flow analysis..."):
-                leaps_options = get_options_by_timeframe(flow_ticker, "LEAPS", st.session_state.selected_tz)
+            # Refresh controls and data status
+            col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+            with col1:
+                data_age = get_data_age(flow_ticker, "LEAPS")
+                is_stale = is_data_stale(flow_ticker, "LEAPS")
+                status_color = "🔴" if is_stale else "🟢"
+                st.caption(f"{status_color} Data Age: **{data_age}** (Refresh: 4hr)")
+            
+            with col2:
+                if st.button("🔄 Refresh LEAPS Data", key="refresh_leaps"):
+                    with st.spinner("Refreshing LEAPS options and flow data..."):
+                        get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
+                        st.rerun()
+            
+            with col3:
+                auto_refresh_leaps = st.checkbox("Auto", key="auto_leaps",
+                                                value=st.session_state.flow_auto_refresh_enabled.get("LEAPS", False))
+                st.session_state.flow_auto_refresh_enabled["LEAPS"] = auto_refresh_leaps
+            
+            with col4:
+                if is_stale:
+                    st.warning("⚠️ Stale", help="Data is >4 hours old")
+            
+            # Get or fetch unified data
+            with st.spinner("Loading LEAPS data..."):
+                unified_data = get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=False)
+            
+            leaps_options = unified_data["options"]
+            flow_analysis = unified_data.get("flow_analysis", {})
+            volume_analysis = unified_data.get("volume_analysis", {})
+            hottest_chains_data = unified_data.get("hottest_analysis", {})
             
             if leaps_options.get("error"):
                 st.error(leaps_options["error"])
             else:
+                # Display timestamp
+                st.success(f"✅ Data fetched at: {unified_data['timestamp']}")
+                
                 # LEAPS specific metrics
                 if leaps_options.get('all_expirations') and len(leaps_options['all_expirations']) > 0:
                     exp_count = len(leaps_options['all_expirations'])
@@ -5598,17 +5623,16 @@ with tabs[6]:
                         exp_date = leaps_options['all_expirations'][0]
                         today = datetime.now().date()
                         days_to_exp = (datetime.strptime(exp_date, '%Y-%m-%d').date() - today).days
-                        st.success(f"LEAPS Options Expiring: {exp_date} ({days_to_exp} days)")
+                        st.info(f"📅 Expiring: {exp_date} ({days_to_exp} days)")
                     else:
-                        st.success(f"LEAPS Options: {exp_count} expiration dates available")
+                        st.info(f"📅 {exp_count} expiration dates available")
                 else:
-                    st.success("LEAPS Options Analysis")
+                    st.info("📅 LEAPS Options Analysis")
                 
                 calls_leaps = leaps_options["calls"]
                 puts_leaps = leaps_options["puts"]
 
-                # ADD THIS SECTION FOR LEAPS:
-                # Combine calls and puts for expiration processing
+                # Combine and process LEAPS options
                 all_leaps_options = []
                 if not calls_leaps.empty:
                     all_leaps_options.extend(calls_leaps.to_dict('records'))
@@ -5616,28 +5640,21 @@ with tabs[6]:
                     all_leaps_options.extend(puts_leaps.to_dict('records'))
                 
                 if all_leaps_options:
-                    # Process expiration data
                     all_leaps_options = process_options_with_expiration(all_leaps_options)
-                    
-                    # Get available expirations
                     available_expirations_leaps = sorted(list(set([
                         opt['expiration'] for opt in all_leaps_options 
                         if opt.get('expiration') and opt['expiration'] != ''
                     ])))
                     
-                    # Expiration filter and grouping controls
                     col1, col2, col3 = st.columns([2, 1, 1])
-                    
                     with col1:
                         selected_expiration_leaps = st.selectbox(
                             "📅 Filter by Expiration",
                             options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations_leaps],
                             key="leaps_exp_filter"
                         )
-                    
                     with col2:
                         group_by_exp_leaps = st.checkbox("Group by Expiration", key="leaps_group")
-                    
                     with col3:
                         show_dte_only_leaps = st.checkbox("Show DTE Only", key="leaps_dte_only")
                 
@@ -5650,44 +5667,50 @@ with tabs[6]:
                 col3.metric("Call Open Interest", f"{total_call_oi:,}")
                 col4.metric("Put Open Interest", f"{total_put_oi:,}")
                 
-                # Enhanced AI Analysis for LEAPS with Flow Data
-                st.markdown("### 🤖 Enhanced AI LEAPS Flow Analysis")
-                with st.spinner("Generating comprehensive LEAPS flow strategy..."):
-                    if uw_client and not flow_analysis.get("error"):
+                # Flow Intelligence Summary for LEAPS
+                if not flow_analysis.get("error"):
+                    st.markdown("#### 🔥 Flow Intelligence")
+                    flow_summary = flow_analysis.get("summary", {})
+                    
+                    flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
+                    flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
+                    flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
+                
+                # Enhanced AI Analysis for LEAPS with Fresh Flow Data
+                st.markdown("### 🤖 AI LEAPS Flow Analysis (Live)")
+                with st.spinner("Generating fresh LEAPS analysis..."):
+                    if not flow_analysis.get("error"):
                         leaps_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, leaps_options, flow_analysis, volume_analysis, hottest_chains_data, "LEAPS"
+                            flow_ticker, leaps_options, flow_analysis, volume_analysis,
+                            hottest_chains_data, "LEAPS"
                         )
                     else:
                         leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, {}, "LEAPS")
                     
                     st.markdown(leaps_analysis)
+                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
-                # Enhanced LEAPS Options Display with Expiration
+                # Display LEAPS options
                 if all_leaps_options:
-                    # Apply expiration filter if selected
                     filtered_leaps_options = all_leaps_options.copy()
                     if selected_expiration_leaps != "All Expirations":
-                        target_expiration = selected_expiration_leaps.split(' (')[0]  # Remove DTE part
+                        target_expiration = selected_expiration_leaps.split(' (')[0]
                         filtered_leaps_options = [opt for opt in filtered_leaps_options if opt.get('expiration') == target_expiration]
                     
                     if group_by_exp_leaps and selected_expiration_leaps == "All Expirations":
-                        # Grouped display
                         st.markdown("#### 📈📉 LEAPS Options by Expiration")
                         display_grouped_options_by_expiration(filtered_leaps_options, show_dte_only_leaps, show_trade_time=True)
-                    
                     else:
-                        # Standard side-by-side display with expiration columns
                         st.markdown("#### 📈📉 LEAPS Options")
                         current_price = leaps_options.get('current_price', 0)
-                        # Separate calls and puts
                         leaps_calls_filtered = [opt for opt in filtered_leaps_options if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
                         leaps_puts_filtered = [opt for opt in filtered_leaps_options if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
                         
                         col1, col2 = st.columns(2)
-                        
                         with col1:
                             st.markdown("##### 📞 LEAPS Calls")
-                            # Sort by volume and take top 10
                             leaps_calls_sorted = sorted(leaps_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
                             display_options_table_with_expiration(
                                 leaps_calls_sorted,
@@ -5696,10 +5719,8 @@ with tabs[6]:
                                 show_dte=show_dte_only_leaps,
                                 show_trade_time=True
                             )
-                        
                         with col2:
                             st.markdown("##### 📉 LEAPS Puts")
-                            # Sort by volume and take top 10
                             leaps_puts_sorted = sorted(leaps_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
                             display_options_table_with_expiration(
                                 leaps_puts_sorted,
@@ -5708,18 +5729,15 @@ with tabs[6]:
                                 show_dte=show_dte_only_leaps,
                                 show_trade_time=True
                             )
-                
                 else:
                     st.info("No LEAPS options data available")
                 
-                # Show all available LEAPS expirations
                 if leaps_options.get("all_expirations"):
                     with st.expander("📅 All LEAPS Expirations Available"):
                         for exp in leaps_options["all_expirations"]:
                             days_out = (datetime.strptime(exp, '%Y-%m-%d').date() - date.today()).days
                             st.write(f"• {exp} ({days_out} days)")
                 
-                # LEAPS Strategy Guide
                 with st.expander("💡 LEAPS Strategy Guide"):
                     st.markdown("""
                     **LEAPS (Long-term Equity AnticiPation Securities) Benefits:**
@@ -5728,335 +5746,346 @@ with tabs[6]:
                     - Can be used for stock replacement strategies
                     - Better for fundamental-based trades
                     - Less sensitive to short-term volatility
+                    - **Flow data refreshes every 4 hours** - sufficient for long-term positioning
                     
                     **Common LEAPS Strategies:**
                     - Buy deep ITM calls as stock replacement
                     - Sell covered calls against LEAPS (poor man's covered call)
                     - Long-term protective puts for portfolio hedging
                     """)
-
-    else:
-        st.error(f"Could not get quote data for {flow_ticker}: {quote['error']}")
-
-# TAB 8: Enhanced Lottos with Flow Analysis
+     # Refresh Status Dashboard
+    st.divider()
+    st.markdown("### 📊 Data Refresh Status Dashboard")
+    
+    status_col1, status_col2, status_col3 = st.columns(3)
+    
+    with status_col1:
+        st.markdown("#### 🎯 0DTE Status")
+        age_0dte = get_data_age(flow_ticker, "0DTE")
+        stale_0dte = is_data_stale(flow_ticker, "0DTE")
+        status_emoji = "🔴" if stale_0dte else "🟢"
+        st.write(f"{status_emoji} **{age_0dte}**")
+        st.caption("Staleness: 15 minutes")
+        if st.session_state.flow_auto_refresh_enabled.get("0DTE"):
+            st.success("✅ Auto-refresh ON")
+        else:
+            st.info("⏸️ Auto-refresh OFF")
+    
+    with status_col2:
+        st.markdown("#### 📈 Swing Status")
+        age_swing = get_data_age(flow_ticker, "Swing")
+        stale_swing = is_data_stale(flow_ticker, "Swing")
+        status_emoji = "🔴" if stale_swing else "🟢"
+        st.write(f"{status_emoji} **{age_swing}**")
+        st.caption("Staleness: 1 hour")
+        if st.session_state.flow_auto_refresh_enabled.get("Swing"):
+            st.success("✅ Auto-refresh ON")
+        else:
+            st.info("⏸️ Auto-refresh OFF")
+    
+    with status_col3:
+        st.markdown("#### 📊 LEAPS Status")
+        age_leaps = get_data_age(flow_ticker, "LEAPS")
+        stale_leaps = is_data_stale(flow_ticker, "LEAPS")
+        status_emoji = "🔴" if stale_leaps else "🟢"
+        st.write(f"{status_emoji} **{age_leaps}**")
+        st.caption("Staleness: 4 hours")
+        if st.session_state.flow_auto_refresh_enabled.get("LEAPS"):
+            st.success("✅ Auto-refresh ON")
+        else:
+            st.info("⏸️ Auto-refresh OFF")
+    
+    # Usage Guidelines
+    with st.expander("📖 Unified Refresh System Guide"):
+        st.markdown("""
+        ### How the Unified Refresh System Works
+        
+        **What Gets Refreshed Together:**
+        - Options chain data (strikes, volume, IV, bid/ask)
+        - Flow alerts from Unusual Whales
+        - Options volume analysis
+        - Hottest chains data
+        - AI analysis (regenerated with fresh data)
+        
+        **Refresh Intervals by Timeframe:**
+        
+        | Timeframe | Staleness Threshold | Recommended For |
+        |-----------|-------------------|-----------------|
+        | 0DTE | 15 minutes | Active intraday trading |
+        | Swing | 1 hour | Multi-day positions |
+        | LEAPS | 4 hours | Long-term positioning |
+        
+        **Manual Refresh:**
+        - Click the 🔄 button for any timeframe to force refresh
+        - "Force Refresh All" clears all cached data
+        - Refresh only fetches data for the specific timeframe
+        
+        **Auto-Refresh (Beta):**
+        - Enable "Auto" checkbox for automatic refresh detection
+        - Data is checked on page interactions (Streamlit limitation)
+        - If data is stale when you switch tabs, it will auto-refresh
+        - Not true background refresh - requires page interaction
+        
+        **Data Age Indicators:**
+        - 🟢 Green = Fresh data within threshold
+        - 🔴 Red = Stale data, refresh recommended
+        - Timestamp shows exact fetch time
+        
+        **Best Practices:**
+        - **0DTE traders**: Refresh every 15-30 minutes during active hours
+        - **Swing traders**: Refresh 1-2 times per day
+        - **LEAPS traders**: Refresh once per day or less
+        - Always check data age before making trading decisions
+        - Use "Force Refresh All" if switching between multiple tickers
+        
+        **Why This Matters:**
+        - Flow patterns change throughout the day
+        - Options prices and volume shift constantly
+        - AI analysis is only as good as the data it analyzes
+        - Stale data = potentially wrong trading signals
+        
+        **Technical Notes:**
+        - Data is cached per ticker + timeframe combination
+        - Cache is stored in Streamlit session state
+        - Changing tickers creates separate cache entries
+        - "Force Refresh All" is recommended after market open/close
+        """)
+    
+    # Auto-refresh check (checks at page load/interaction)
+    if auto_refresh_0dte and is_data_stale(flow_ticker, "0DTE"):
+        st.info("🔄 Auto-refresh triggered for 0DTE (data was stale)")
+        get_unified_flow_data(flow_ticker, "0DTE", force_refresh=True)
+        st.rerun()
+    
+    if auto_refresh_swing and is_data_stale(flow_ticker, "Swing"):
+        st.info("🔄 Auto-refresh triggered for Swing (data was stale)")
+        get_unified_flow_data(flow_ticker, "Swing", force_refresh=True)
+        st.rerun()
+    
+    if auto_refresh_leaps and is_data_stale(flow_ticker, "LEAPS"):
+        st.info("🔄 Auto-refresh triggered for LEAPS (data was stale)")
+        get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
+        st.rerun()               
+# TAB 8: Enhanced Lottos with Flow Analysis - All Expirations
 with tabs[7]:
     st.subheader("💰 Enhanced Lotto Plays with Flow Intelligence")
-    st.markdown("**High-risk, high-reward options under $1.00 with Unusual Whales flow analysis for better edge detection.**")
+    st.markdown("**High-risk, high-reward options under $1.00 across all expirations with Unusual Whales flow analysis.**")
 
-    # Ticker selection
-    col1, col2 = st.columns([3, 1])
+    # Ticker selection and refresh controls
+    col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
-        lotto_ticker = st.selectbox("Select Ticker for Lotto Analysis", options=CORE_TICKERS + st.session_state.watchlists[st.session_state.active_watchlist], key="lotto_ticker")
+        lotto_ticker = st.text_input(
+            "Select Ticker for Lotto Analysis",
+            value="AAPL",
+            placeholder="Enter ticker",
+            key="lotto_ticker"
+        ).upper().strip()
     with col2:
-        if st.button("Find Enhanced Lottos", key="find_enhanced_lottos"):
+        if st.button("🔄 Refresh Lottos", key="refresh_lottos"):
             st.cache_data.clear()
             st.rerun()
+    with col3:
+        max_lotto_price = st.number_input("Max Price", min_value=0.1, max_value=5.0, value=1.0, step=0.1, key="max_lotto_price")
 
-    # Fetch comprehensive data for lotto analysis
-    with st.spinner(f"Gathering comprehensive lotto intelligence for {lotto_ticker}..."):
-        option_chain = get_option_chain(lotto_ticker, st.session_state.selected_tz)
+    # Fetch comprehensive data
+    with st.spinner(f"Fetching all lotto opportunities for {lotto_ticker}..."):
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
+        lotto_data = get_all_expiration_lottos(lotto_ticker, st.session_state.selected_tz)
         
-        # Get UW flow data if available
+        # Get flow data if UW available
         if uw_client:
             flow_alerts_data = uw_client.get_flow_alerts(lotto_ticker)
             options_volume_data = uw_client.get_options_volume(lotto_ticker)
             flow_analysis = analyze_flow_alerts(flow_alerts_data, lotto_ticker)
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
-            hottest_chains_data = uw_client.get_hottest_chains()
-            hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
-            hottest_chains_analysis = {"error": "UW not available"}
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
-    else:
-        current_price = quote['last']
-        expiration = option_chain["expiration"]
-        is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
-        
-        st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
-        st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
-        # Filter for lotto plays (options under $1.00)
-        calls = option_chain["calls"]
-        puts = option_chain["puts"]
+    if lotto_data.get("error"):
+        st.error(lotto_data["error"])
+    else:
+        current_price = lotto_data.get("current_price", quote.get("last", 0))
+        all_lottos = lotto_data.get("lottos", [])
+        all_expirations = lotto_data.get("all_expirations", [])
+        data_source = lotto_data.get("data_source", "Yahoo Finance")
         
-        # Find lotto opportunities
-        lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
-        lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
-        # ADD THIS - Add expiration date to each contract:
-        if not lotto_calls.empty:
-            lotto_calls['expiration_date'] = expiration
-            lotto_calls['expiry'] = expiration
-            lotto_calls['type'] = 'call'
+        # Summary metrics
+        st.success(f"Found {len(all_lottos)} lotto contracts across {len(all_expirations)} expirations | Source: {data_source}")
         
-        if not lotto_puts.empty:
-            lotto_puts['expiration_date'] = expiration  
-            lotto_puts['expiry'] = expiration
-            lotto_puts['type'] = 'put'
-        # ADD THIS SECTION FOR LOTTOS EXPIRATION PROCESSING:
-        # Combine calls and puts for expiration processing
-        all_lotto_options = []
-        if not lotto_calls.empty:
-            all_lotto_options.extend(lotto_calls.to_dict('records'))
-        if not lotto_puts.empty:
-            all_lotto_options.extend(lotto_puts.to_dict('records'))
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Current Price", f"${current_price:.2f}", f"{quote.get('change_percent', 0):+.2f}%")
+        col2.metric("Total Lottos", len(all_lottos))
+        col3.metric("Expirations", len(all_expirations))
+        col4.metric("Volume", f"{quote.get('volume', 0):,}")
+        col5.metric("Data Source", data_source)
         
-        if all_lotto_options:
-            # Process expiration data
-            all_lotto_options = process_options_with_expiration(all_lotto_options)
+        # Session performance
+        st.markdown("#### Session Breakdown")
+        sess_col1, sess_col2, sess_col3 = st.columns(3)
+        sess_col1.metric("Premarket", f"{quote.get('premarket_change', 0):+.2f}%")
+        sess_col2.metric("Intraday", f"{quote.get('intraday_change', 0):+.2f}%")
+        sess_col3.metric("After Hours", f"{quote.get('postmarket_change', 0):+.2f}%")
+        
+        # Flow Intelligence Summary
+        if not flow_analysis.get("error"):
+            st.markdown("### 🔥 Flow Intelligence for Lottos")
+            flow_summary = flow_analysis.get("summary", {})
+            
+            flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
+            flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+            flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
+            flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
+            flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
+        
+        # Process lottos with expiration data
+        if all_lottos:
+            processed_lottos = process_options_with_expiration(all_lottos)
             
             # Get available expirations
-            available_expirations_lottos = sorted(list(set([
-                opt['expiration'] for opt in all_lotto_options 
-                if opt.get('expiration') and opt['expiration'] != ''
+            available_expirations = sorted(list(set([
+                lotto['expiration'] for lotto in processed_lottos 
+                if lotto.get('expiration') and lotto['expiration'] != ''
             ])))
             
             # Expiration filter and grouping controls
             col1, col2, col3 = st.columns([2, 1, 1])
-            
             with col1:
-                selected_expiration_lottos = st.selectbox(
+                selected_expiration = st.selectbox(
                     "📅 Filter by Expiration",
-                    options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations_lottos],
-                    key="lottos_exp_filter"
+                    options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations],
+                    key="lotto_exp_filter"
                 )
-            
             with col2:
-                group_by_exp_lottos = st.checkbox("Group by Expiration", key="lottos_group")
-            
+                group_by_exp = st.checkbox("Group by Expiration", key="lotto_group")
             with col3:
-                show_dte_only_lottos = st.checkbox("Show DTE Only", key="lottos_dte_only")
-        
-        # Sort by volume for most active lottos
-        if not lotto_calls.empty:
-            lotto_calls = lotto_calls.sort_values('volume', ascending=False)
-        if not lotto_puts.empty:
-            lotto_puts = lotto_puts.sort_values('volume', ascending=False)
-
-        # Enhanced Summary metrics with Flow Intelligence
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Current Price", f"${current_price:.2f}", f"{quote['change_percent']:+.2f}%")
-        col2.metric("Lotto Calls", len(lotto_calls))
-        col3.metric("Lotto Puts", len(lotto_puts))
-        col4.metric("Total Lotto Volume", int(lotto_calls['volume'].sum() + lotto_puts['volume'].sum()) if not lotto_calls.empty and not lotto_puts.empty else 0)
-        
-        # Flow Intelligence Summary
-        if not flow_analysis.get("error"):
-            flow_summary = flow_analysis.get("summary", {})
-            col5.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
-        else:
-            col5.metric("Flow Alerts", "N/A")
-
-        # UW Flow Intelligence for Lottos
-        if uw_client and not flow_analysis.get("error"):
-            st.markdown("### 🔥 Unusual Whales Flow Intelligence")
+                show_dte_only = st.checkbox("Show DTE Only", key="lotto_dte_only")
             
-            flow_summary = flow_analysis.get("summary", {})
-            flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
-            flow_col1.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
-            flow_col2.metric("Total Premium", f"${flow_summary.get('total_premium', 0):,.0f}")
-            flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
-            flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
-            
-            # Show recent flow alerts that might affect lotto plays
-            if flow_analysis.get("alerts"):
-                with st.expander("🚨 Recent Flow Alerts (Lotto Context)"):
-                    st.caption("Recent flow alerts that might indicate institutional positioning affecting lotto plays")
-                    alerts_df = pd.DataFrame(flow_analysis["alerts"][:10])
-                    if not alerts_df.empty:
-                        st.dataframe(alerts_df, use_container_width=True)
-
-        # Enhanced AI Analysis for Lotto Strategy with Flow Data
-        st.markdown("### 🤖 Enhanced AI Lotto Strategy with Flow Intelligence")
-        with st.spinner("Generating enhanced lotto analysis with flow data..."):
-            # Get comprehensive data for lotto analysis
-            if uw_client:
-                options_analysis = get_enhanced_options_analysis(lotto_ticker)
-            else:
-                options_analysis = get_advanced_options_analysis_yf(lotto_ticker)
-            
-            tech_analysis = get_comprehensive_technical_analysis(lotto_ticker)
-            
-            # Create enhanced lotto-specific prompt with flow data
-            if not flow_analysis.get("error"):
-                flow_context = f"""
-                🔥 UNUSUAL WHALES FLOW INTELLIGENCE:
-                - Flow Alerts: {flow_summary.get('total_alerts', 0)}
-                - Flow Sentiment: {flow_summary.get('flow_sentiment', 'Neutral')}
-                - Total Premium: ${flow_summary.get('total_premium', 0):,.0f}
-                - Bullish vs Bearish Flow: ${flow_summary.get('bullish_flow', 0):,.0f} vs ${flow_summary.get('bearish_flow', 0):,.0f}
+            # Enhanced AI Analysis for Lottos with Flow Data
+            st.markdown("### 🤖 AI Lotto Strategy with Flow Intelligence")
+            with st.spinner("Generating enhanced lotto analysis..."):
+                # Create lotto-specific analysis prompt
+                lotto_summary = f"""
+                ENHANCED LOTTO ANALYSIS FOR {lotto_ticker}:
                 
-                Recent Flow Patterns:
-                {pd.DataFrame(flow_analysis.get('alerts', [])[:5])[['type', 'strike', 'premium', 'volume']].to_string(index=False) if flow_analysis.get('alerts') else 'No recent alerts'}
+                Current Price: ${current_price:.2f} ({quote.get('change_percent', 0):+.2f}%)
+                Total Lotto Contracts: {len(processed_lottos)} (under ${max_lotto_price})
+                Expirations Available: {len(available_expirations)}
+                Data Source: {data_source}
                 """
-            else:
-                flow_context = "Flow data unavailable - using standard analysis"
+                
+                if not flow_analysis.get("error"):
+                    flow_summary = flow_analysis.get("summary", {})
+                    lotto_summary += f"""
+                    
+                    🔥 UNUSUAL WHALES FLOW INTELLIGENCE:
+                    - Flow Alerts: {flow_summary.get('total_alerts', 0)}
+                    - Flow Sentiment: {flow_summary.get('flow_sentiment', 'Neutral')}
+                    - Bullish Flow: ${flow_summary.get('bullish_flow', 0):,.0f}
+                    - Bearish Flow: ${flow_summary.get('bearish_flow', 0):,.0f}
+                    """
+                
+                # Get top lottos by volume
+                sorted_lottos = sorted(processed_lottos, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                lotto_summary += f"""
+                
+                Top 10 Lottos by Volume:
+                """
+                for lotto in sorted_lottos:
+                    lotto_summary += f"\n- {lotto.get('type', '').upper()}: Strike ${lotto.get('strike', 0)}, Price ${lotto.get('lastPrice', lotto.get('last_price', 0)):.2f}, Volume {lotto.get('volume', 0)}, Exp: {lotto.get('exp_display', 'Unknown')}"
+                
+                lotto_summary += """
+                
+                Provide enhanced lotto trading strategy covering:
+                1. Best lotto opportunities based on FLOW INTELLIGENCE (specific strikes and reasons)
+                2. How flow patterns affect lotto probability assessment  
+                3. Near-term vs far-dated lotto strategies
+                4. Quick exit strategy leveraging flow sentiment
+                5. Position sizing for high-risk plays with flow context
+                6. Catalysts that could trigger explosive moves
+                7. Flow pattern warnings and risk factors
+                
+                Focus on flow-based opportunities across all timeframes.
+                Keep analysis under 400 words but be specific.
+                """
+                
+                if uw_client:
+                    options_data = get_enhanced_options_analysis(lotto_ticker)
+                else:
+                    options_data = {"error": "UW not available"}
+                
+                lotto_analysis = ai_playbook(lotto_ticker, quote.get("change_percent", 0), lotto_summary, options_data)
+                st.markdown(lotto_analysis)
             
-            lotto_summary = f"""
-            ENHANCED LOTTO ANALYSIS FOR {lotto_ticker}:
+            # Display lottos
+            filtered_lottos = processed_lottos.copy()
+            if selected_expiration != "All Expirations":
+                target_expiration = selected_expiration.split(' (')[0]
+                filtered_lottos = [lotto for lotto in filtered_lottos if lotto.get('expiration') == target_expiration]
             
-            Current Price: ${current_price:.2f} ({quote['change_percent']:+.2f}%)
-            Expiration: {expiration} {'(0DTE - Same Day Expiry!)' if is_0dte else ''}
-            
-            Available Lotto Calls (≤$1.00): {len(lotto_calls)}
-            Available Lotto Puts (≤$1.00): {len(lotto_puts)}
-            
-            {flow_context}
-            
-            Most Active Lotto Calls:
-            {lotto_calls[['strike', 'lastPrice', 'volume', 'moneyness']].head(5).to_string(index=False) if not lotto_calls.empty else 'None'}
-            
-            Most Active Lotto Puts:
-            {lotto_puts[['strike', 'lastPrice', 'volume', 'moneyness']].head(5).to_string(index=False) if not lotto_puts.empty else 'None'}
-            
-            Technical Context: {generate_technical_summary(tech_analysis)}
-            
-            Provide enhanced lotto trading strategy covering:
-            1. Best lotto opportunities based on FLOW INTELLIGENCE (specific strikes and reasons)
-            2. How unusual flow patterns affect lotto probability assessment
-            3. Flow-based entry timing and conditions
-            4. Quick exit strategy leveraging flow sentiment
-            5. Position sizing for high-risk plays with flow context
-            6. Catalysts that could trigger explosive moves based on institutional positioning
-            7. Flow pattern warnings and risk factors
-            
-            Focus heavily on how the unusual flow data impacts lotto selection and timing.
-            Keep analysis under 400 words but be specific about flow-based opportunities.
-            """
-            
-            lotto_analysis = ai_playbook(lotto_ticker, quote["change_percent"], lotto_summary, options_analysis)
-            st.markdown(lotto_analysis)
-
-        # Enhanced Lotto Opportunities Display with Expiration
-        if all_lotto_options:
-            # Apply expiration filter if selected
-            filtered_lotto_options = all_lotto_options.copy()
-            if selected_expiration_lottos != "All Expirations":
-                target_expiration = selected_expiration_lottos.split(' (')[0]
-                filtered_lotto_options = [opt for opt in filtered_lotto_options if opt.get('expiration') == target_expiration]
-            
-            # Filter for lotto criteria (≤$1.00)
-            lotto_options_filtered = [opt for opt in filtered_lotto_options if opt.get('lastPrice', opt.get('last_price', 0)) <= 1.0]
-            
-            if group_by_exp_lottos and selected_expiration_lottos == "All Expirations":
-                # Grouped display
+            if group_by_exp and selected_expiration == "All Expirations":
                 st.markdown("### 🎰 Lotto Opportunities by Expiration")
-                display_grouped_options_by_expiration(lotto_options_filtered, show_dte_only_lottos, show_trade_time=True)
-            
+                display_grouped_options_by_expiration(filtered_lottos, show_dte_only, show_trade_time=True)
             else:
-                # Standard lotto display with expiration columns
-                st.markdown("### 🎰 Enhanced Lotto Opportunities")
+                st.markdown("### 🎰 Lotto Opportunities")
                 
                 # Separate calls and puts
-                lotto_calls_filtered = [opt for opt in lotto_options_filtered if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
-                lotto_puts_filtered = [opt for opt in lotto_options_filtered if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
+                lotto_calls = [l for l in filtered_lottos if 'call' in str(l.get('type', '')).lower()]
+                lotto_puts = [l for l in filtered_lottos if 'put' in str(l.get('type', '')).lower()]
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    st.markdown("#### 📞 Lotto Calls (≤$1.00)")
-                    if lotto_calls_filtered:
+                    st.markdown(f"#### 📞 Lotto Calls (≤${max_lotto_price})")
+                    if lotto_calls:
                         # Add breakeven calculations
-                        for opt in lotto_calls_filtered:
-                            price = opt.get('lastPrice', opt.get('last_price', 0))
-                            strike = opt.get('strike', 0)
-                            opt['breakeven'] = strike + price
-                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
+                        for lotto in lotto_calls:
+                            price = lotto.get('lastPrice', lotto.get('last_price', 0))
+                            strike = lotto.get('strike', 0)
+                            lotto['breakeven'] = strike + price
+                            lotto['breakeven_move'] = ((lotto['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
                         
-                        # Sort by volume and take top 10
-                        lotto_calls_sorted = sorted(lotto_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                        lotto_calls_sorted = sorted(lotto_calls, key=lambda x: x.get('volume', 0), reverse=True)[:15]
                         display_options_table_with_expiration(
                             lotto_calls_sorted,
                             option_type="lotto call",
                             show_expiration=True,
-                            show_dte=show_dte_only_lottos,
+                            show_dte=show_dte_only,
                             show_trade_time=True
                         )
                     else:
-                        st.info("No call options under $1.00 available")
+                        st.info(f"No call options under ${max_lotto_price}")
                 
                 with col2:
-                    st.markdown("#### 📉 Lotto Puts (≤$1.00)")
-                    if lotto_puts_filtered:
+                    st.markdown(f"#### 📉 Lotto Puts (≤${max_lotto_price})")
+                    if lotto_puts:
                         # Add breakeven calculations
-                        for opt in lotto_puts_filtered:
-                            price = opt.get('lastPrice', opt.get('last_price', 0))
-                            strike = opt.get('strike', 0)
-                            opt['breakeven'] = strike - price
-                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
+                        for lotto in lotto_puts:
+                            price = lotto.get('lastPrice', lotto.get('last_price', 0))
+                            strike = lotto.get('strike', 0)
+                            lotto['breakeven'] = strike - price
+                            lotto['breakeven_move'] = ((lotto['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
                         
-                        # Sort by volume and take top 10
-                        lotto_puts_sorted = sorted(lotto_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
+                        lotto_puts_sorted = sorted(lotto_puts, key=lambda x: x.get('volume', 0), reverse=True)[:15]
                         display_options_table_with_expiration(
                             lotto_puts_sorted,
                             option_type="lotto put",
                             show_expiration=True,
-                            show_dte=show_dte_only_lottos,
+                            show_dte=show_dte_only,
                             show_trade_time=True
                         )
                     else:
-                        st.info("No put options under $1.00 available")
-
+                        st.info(f"No put options under ${max_lotto_price}")
         else:
             st.info("No lotto opportunities found")
-
-        # Enhanced unusual activity in lottos with flow correlation (MOVED OUTSIDE)
-        st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
-        unusual_lottos = []
         
-        # Check for unusual volume in lotto calls
-        if not lotto_calls.empty:
-            for _, call in lotto_calls.iterrows():
-                vol_oi_ratio = call['volume'] / max(call['openInterest'], 1)
-                if vol_oi_ratio > 2 and call['volume'] > 100:  # High volume relative to OI
-                    unusual_lottos.append({
-                        'type': 'Call',
-                        'strike': call['strike'],
-                        'price': call['lastPrice'],
-                        'volume': call['volume'],
-                        'oi': call['openInterest'],
-                        'vol_oi_ratio': vol_oi_ratio,
-                        'moneyness': call['moneyness'],
-                        'flow_correlation': 'Check flow alerts for this strike level'
-                    })
-        
-        # Check for unusual volume in lotto puts
-        if not lotto_puts.empty:
-            for _, put in lotto_puts.iterrows():
-                vol_oi_ratio = put['volume'] / max(put['openInterest'], 1)
-                if vol_oi_ratio > 2 and put['volume'] > 100:
-                    unusual_lottos.append({
-                        'type': 'Put',
-                        'strike': put['strike'],
-                        'price': put['lastPrice'],
-                        'volume': put['volume'],
-                        'oi': put['openInterest'],
-                        'vol_oi_ratio': vol_oi_ratio,
-                        'moneyness': put['moneyness'],
-                        'flow_correlation': 'Check flow alerts for this strike level'
-                    })
-        
-        if unusual_lottos:
-            st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
-            unusual_df = pd.DataFrame(unusual_lottos)
-            unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
-            st.dataframe(unusual_df, use_container_width=True)
-            
-            if not flow_analysis.get("error") and flow_analysis.get("alerts"):
-                st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
-        else:
-            st.info("No unusual lotto activity detected with current criteria")
-
-        # Enhanced Risk Warning
+        # Risk Warning
         with st.expander("⚠️ Enhanced Lotto Trading Risk Warning"):
             st.markdown("""
             **EXTREME RISK WARNING FOR LOTTO PLAYS:**
             
             🚨 **High Probability of Total Loss**: Most lotto options expire worthless
-            🚨 **Time Decay**: Value decreases rapidly, especially on 0DTE
+            🚨 **Time Decay**: Value decreases rapidly, especially near expiration
             🚨 **Position Sizing**: Never risk more than you can afford to lose completely
             🚨 **Quick Exits**: Set profit targets and stick to them
             🚨 **No Emotional Trading**: These are mathematical probability plays
@@ -6074,6 +6103,11 @@ with tabs[7]:
             - Heavy call flow + bullish technical setup = higher probability lotto calls
             - Put flow alerts near resistance = potential lotto put opportunities
             - Conflicting flow vs. technical signals = avoid or reduce position size
+            
+            **Timeframe Considerations:**
+            - Near-term lottos (0-30 DTE): Highest risk, highest reward, need strong catalyst
+            - Medium-term lottos (31-90 DTE): More time for thesis, lower theta decay
+            - Long-dated lottos (90+ DTE): Less "lotto" behavior, more like regular options
             """)
 # TAB 9: Earnings Plays
 with tabs[8]:
