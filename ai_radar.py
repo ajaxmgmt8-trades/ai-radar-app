@@ -5396,8 +5396,8 @@ with tabs[5]:
                     - **Flow data refreshes every 15 minutes** - critical for intraday timing
                     """)
 
-       # Swing Tab with Flow Integration
-        with timeframe_tabs[1]:
+     # Swing Tab with Flow Integration
+      with timeframe_tabs[1]:
             st.markdown("### 📈 Swing Options (2-89 Days)")
             st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
@@ -5575,8 +5575,8 @@ with tabs[5]:
                             )
                 else:
                     st.info("No swing options data available")
-        # LEAPS Tab with Flow Integration
-        with timeframe_tabs[2]:
+     # LEAPS Tab with Flow Integration
+     with timeframe_tabs[2]:
             st.markdown("### 📊 LEAPS Options (90+ Days)")
             st.caption("Long-term strategic positions with lower time decay and institutional flow insights")
             
