@@ -5483,7 +5483,7 @@ with tabs[6]:
             
             with col4:
                 if is_stale:
-                    st.warning("⚠️ Stale", help="Data is >15 minutes old")
+                    st.warning("⚠️ Stale - Data is >15 minutes old")
             
             # Get or fetch unified data
             with st.spinner("Loading 0DTE data..."):
