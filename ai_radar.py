@@ -3686,7 +3686,7 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
- def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
+def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
     """Unified function to fetch both options chain and flow data together"""
     cache_key = f"{ticker}_{timeframe}"
     now = time.time()
@@ -3757,7 +3757,6 @@ def get_data_age(ticker: str, timeframe: str) -> str:
         return f"{int(age_seconds/60)}m ago"
     else:
         return f"{int(age_seconds/3600)}h ago"
-
 def is_data_stale(ticker: str, timeframe: str) -> bool:
     """Check if data is stale based on timeframe"""
     cache_key = f"{ticker}_{timeframe}"
