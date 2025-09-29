@@ -5270,8 +5270,11 @@ with tabs[5]:
 
             st.divider()
 
-# 0DTE Tab with Flow Integration
-        with timeframe_tabs[0]:
+    # Create the 3 timeframe tabs with enhanced flow integration
+    timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
+
+    # 0DTE Tab with Flow Integration
+    with timeframe_tabs[0]:
             st.markdown("### 🎯 0DTE Options (Same Day Expiration)")
             st.caption("High-risk, high-reward same-day expiration plays with flow analysis")
             
