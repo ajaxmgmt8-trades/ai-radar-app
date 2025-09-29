@@ -5270,11 +5270,195 @@ with tabs[5]:
 
             st.divider()
 
-    # Create the 3 timeframe tabs with enhanced flow integration
-    timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
+# TAB 7: Enhanced Options Flow with UW Integration
+with tabs[6]:
+    st.subheader("🎯 Enhanced Options Flow Analysis")
+    st.markdown("**Advanced options flow analysis with Unusual Whales integration and timeframe-specific strategies.**")
 
-    # 0DTE Tab with Flow Integration
-    with timeframe_tabs[0]:
+    # Ticker selection
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        flow_ticker = st.text_input(
+            "Select Ticker for Options Flow", 
+            value="AAPL",
+            placeholder="Enter any ticker (e.g., AAPL, TSLA, SPY)",
+            key="flow_ticker"
+        ).upper()
+    with col2:
+        if st.button("Refresh All Data", key="refresh_flow_data"):
+            st.cache_data.clear()
+            st.rerun()
+
+    # Get base data
+    quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
+    
+    if not quote.get("error"):
+        # Basic quote info
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
+        col2.metric("Volume", f"{quote['volume']:,}")
+        col3.metric("Data Source", quote.get('data_source', 'Unknown'))
+        col4.metric("Last Updated", quote['last_updated'][-8:])
+
+        # Enhanced UW Flow Analysis Section
+        if uw_client:
+            st.markdown("### 🔥 Unusual Whales Flow Intelligence")
+            
+            with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
+                
+                flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
+                st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
+                if flow_alerts_data.get('data'):
+                    st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
+                    st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
+                
+                options_volume_data = uw_client.get_options_volume(flow_ticker)
+                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
+                
+                hottest_chains_data = uw_client.get_hottest_chains()
+                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
+                
+
+                # Add this first to see what raw data looks like:
+                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
+                
+                # Then try the analysis:
+                try:
+                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
+                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
+                except Exception as e:
+                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
+                
+                # Test individual UW calls
+                st.write("**Testing individual UW endpoints:**")
+                try:
+                    test_stock_state = uw_client.get_stock_state(flow_ticker)
+                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
+                except Exception as e:
+                    st.write(f"Stock state error: {str(e)}")
+                
+                # Raw data inspection
+                with st.expander("🔬 Raw API Responses"):
+                    st.write("**Flow Alerts Raw:**")
+                    st.json(flow_alerts_data)
+                    st.write("**Options Volume Raw:**") 
+                    st.json(options_volume_data)
+                        
+                # Analyze the data
+                flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
+                volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
+                
+                # Display UW Flow Alerts
+                st.markdown("#### 🔥 Flow Alerts")
+                if not flow_analysis.get("error"):
+                    summary = flow_analysis.get("summary", {})
+                    
+                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
+                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
+                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
+                    alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
+                    
+                    # Premium metrics
+                    prem_col1, prem_col2, prem_col3 = st.columns(3)
+                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
+                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
+                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
+                    
+                    # Display top alerts
+                    if flow_analysis.get("alerts"):
+                        with st.expander("📋 Recent Flow Alerts"):
+                            alerts_df = pd.DataFrame(flow_analysis["alerts"])
+                            if not alerts_df.empty:
+                                # Sort by premium
+                                alerts_df = alerts_df.sort_values('premium', ascending=False)
+                                st.dataframe(alerts_df.head(10), use_container_width=True)
+                else:
+                    st.info(f"Flow Alerts: {flow_analysis.get('error', 'No data available')}")
+                
+                # Display UW Volume Analysis
+                st.markdown("#### 📊 Options Volume Analysis")
+                if not volume_analysis.get("error"):
+                    vol_summary = volume_analysis.get("summary", {})
+                    
+                    vol_col1, vol_col2, vol_col3, vol_col4 = st.columns(4)
+                    vol_col1.metric("Call Volume", f"{vol_summary.get('total_call_volume', 0):,}")
+                    vol_col2.metric("Put Volume", f"{vol_summary.get('total_put_volume', 0):,}")
+                    vol_col3.metric("P/C Ratio", f"{vol_summary.get('put_call_ratio', 0):.2f}")
+                    vol_col4.metric("Premium Ratio", f"{vol_summary.get('premium_ratio', 0):.2f}")
+                    
+                    # Display volume data - REPLACE THE EXISTING EXPANDER SECTION
+                    if volume_analysis.get("volume_data"):
+                        with st.expander("📊 Enhanced Volume Details"):
+                            # Get the raw UW data
+                            raw_data = volume_analysis.get("raw_data", {})
+                            
+                            if raw_data:
+                                # Enhanced two-column layout
+                                vol_col1, vol_col2 = st.columns(2)
+                                
+                                with vol_col1:
+                                    st.write("**📞 Call Options Data:**")
+                                    st.write(f"Volume: {raw_data.get('call_volume', 'N/A'):,}")
+                                    st.write(f"Premium: ${float(raw_data.get('call_premium', 0)):,.0f}")
+                                    st.write(f"Open Interest: {raw_data.get('call_open_interest', 'N/A'):,}")
+                                    st.write(f"Bid Side Volume: {raw_data.get('call_volume_bid_side', 'N/A'):,}")
+                                    st.write(f"Ask Side Volume: {raw_data.get('call_volume_ask_side', 'N/A'):,}")
+                                    st.write(f"Net Premium: ${float(raw_data.get('net_call_premium', 0)):,.0f}")
+                                
+                                with vol_col2:
+                                    st.write("**📉 Put Options Data:**")
+                                    st.write(f"Volume: {raw_data.get('put_volume', 'N/A'):,}")
+                                    st.write(f"Premium: ${float(raw_data.get('put_premium', 0)):,.0f}")
+                                    st.write(f"Open Interest: {raw_data.get('put_open_interest', 'N/A'):,}")
+                                    st.write(f"Bid Side Volume: {raw_data.get('put_volume_bid_side', 'N/A'):,}")
+                                    st.write(f"Ask Side Volume: {raw_data.get('put_volume_ask_side', 'N/A'):,}")
+                                    st.write(f"Net Premium: ${float(raw_data.get('net_put_premium', 0)):,.0f}")
+                                
+                                # Additional metrics row
+                                st.write("**📊 Additional Metrics:**")
+                                met_col1, met_col2, met_col3 = st.columns(3)
+                                met_col1.write(f"Bullish Flow: ${float(raw_data.get('bullish_premium', 0)):,.0f}")
+                                met_col2.write(f"Bearish Flow: ${float(raw_data.get('bearish_premium', 0)):,.0f}")
+                                met_col3.write(f"Date: {raw_data.get('date', 'N/A')}")
+                            
+                            # Keep the DataFrame if you want
+                            if volume_analysis.get("volume_data"):
+                                volume_df = pd.DataFrame(volume_analysis["volume_data"])
+                                if not volume_df.empty():
+                                    st.dataframe(volume_df, use_container_width=True)
+                    else:
+                        st.info(f"Volume Analysis: {volume_analysis.get('error', 'No data available')}")
+                
+                # Display Hottest Chains
+                st.markdown("#### 🌡️ Hottest Chains")
+                if not hottest_chains_data.get("error"):
+                    chains_summary = hottest_chains_analysis.get("summary", {})
+                    
+                    chain_col1, chain_col2, chain_col3 = st.columns(3)
+                    chain_col1.metric("Total Chains", chains_summary.get("total_chains", 0))
+                    chain_col2.metric("Combined Volume", f"{chains_summary.get('total_volume', 0):,}")
+                    chain_col3.metric("Combined Premium", f"${chains_summary.get('total_premium', 0):,.0f}")
+                    
+                    if hottest_chains_analysis.get("chains"):
+                        with st.expander("🔥 Top Hottest Chains"):
+                            chains_df = pd.DataFrame(hottest_chains_analysis["chains"][:20])
+                            if not chains_df.empty:
+                                st.dataframe(chains_df, use_container_width=True)
+                else:
+                    st.info(f"Hottest Chains: {hottest_chains_data.get('error', 'No data available')}")
+        else:
+            st.error("🔥 Unusual Whales API required for premium options flow analysis")
+            st.info("Configure your Unusual Whales API key to access enhanced flow data")
+            flow_analysis = {"error": "UW not available"}
+            volume_analysis = {"error": "UW not available"}
+            hottest_chains_data = {"error": "UW not available"}
+
+        # Create the 3 timeframe tabs with enhanced flow integration
+        timeframe_tabs = st.tabs(["🎯 0DTE (Same Day)", "📈 Swing (2-89d)", "📊 LEAPS (90+ days)"])
+
+        # 0DTE Tab with Flow Integration
+        with timeframe_tabs[0]:
             st.markdown("### 🎯 0DTE Options (Same Day Expiration)")
             st.caption("High-risk, high-reward same-day expiration plays with flow analysis")
             
@@ -5396,8 +5580,8 @@ with tabs[5]:
                     - **Flow data refreshes every 15 minutes** - critical for intraday timing
                     """)
 
-    # Swing Tab with Flow Integration
-    with timeframe_tabs[1]:
+        # Swing Tab with Flow Integration
+        with timeframe_tabs[1]:
             st.markdown("### 📈 Swing Options (2-89 Days)")
             st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
@@ -5575,8 +5759,8 @@ with tabs[5]:
                             )
                 else:
                     st.info("No swing options data available")
- # LEAPS Tab with Flow Integration
-    with timeframe_tabs[2]:
+        # LEAPS Tab with Flow Integration
+        with timeframe_tabs[2]:
             st.markdown("### 📊 LEAPS Options (90+ Days)")
             st.caption("Long-term strategic positions with lower time decay and institutional flow insights")
             
