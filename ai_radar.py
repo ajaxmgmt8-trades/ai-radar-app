@@ -3259,7 +3259,10 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
         
         # Process and filter by timeframe
         today = datetime.now(ZoneInfo('US/Eastern') if tz == "ET" else ZoneInfo('US/Central')).date()
-        
+        # Initialize current_price before the loop
+        current_price = 0
+        if data and len(data) > 0:
+            current_price = float(data[0].get('stock_price', 0))
         filtered_calls = []
         filtered_puts = []
         
