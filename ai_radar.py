@@ -5396,8 +5396,8 @@ with tabs[5]:
                     - **Flow data refreshes every 15 minutes** - critical for intraday timing
                     """)
 
-     # Swing Tab with Flow Integration
-      with timeframe_tabs[1]:
+    # Swing Tab with Flow Integration
+    with timeframe_tabs[1]:
             st.markdown("### 📈 Swing Options (2-89 Days)")
             st.caption("Medium-term plays with balanced risk/reward and flow intelligence")
             
