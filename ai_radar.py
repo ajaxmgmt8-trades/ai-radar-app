@@ -5754,8 +5754,45 @@ with tabs[7]:
 
     # Fetch comprehensive data for lotto analysis
     with st.spinner(f"Gathering comprehensive lotto intelligence for {lotto_ticker}..."):
-        option_chain = get_option_chain(lotto_ticker, st.session_state.selected_tz)
+        # Get ALL available option chains (multiple expirations)
+        stock = yf.Ticker(lotto_ticker)
+        all_expirations = stock.options[:6]  # Get first 6 expirations for reasonable scope
+        
+        all_lotto_calls = []
+        all_lotto_puts = []
+        
+        for exp_date in all_expirations:
+            try:
+                option_chain = stock.option_chain(exp_date)
+                calls = option_chain.calls
+                puts = option_chain.puts
+                
+                # Filter for lotto criteria (≤$1.00) immediately
+                lotto_calls_exp = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
+                lotto_puts_exp = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
+                
+                if not lotto_calls_exp.empty:
+                    lotto_calls_exp['expiration_date'] = exp_date
+                    lotto_calls_exp['expiry'] = exp_date
+                    lotto_calls_exp['type'] = 'call'
+                    all_lotto_calls.append(lotto_calls_exp)
+                    
+                if not lotto_puts_exp.empty:
+                    lotto_puts_exp['expiration_date'] = exp_date
+                    lotto_puts_exp['expiry'] = exp_date
+                    lotto_puts_exp['type'] = 'put'
+                    all_lotto_puts.append(lotto_puts_exp)
+                    
+            except:
+                continue
+        
+        # Combine all expirations
+        lotto_calls = pd.concat(all_lotto_calls, ignore_index=True) if all_lotto_calls else pd.DataFrame()
+        lotto_puts = pd.concat(all_lotto_puts, ignore_index=True) if all_lotto_puts else pd.DataFrame()
+        
+        # Get current price and basic info
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
+        current_price = quote['last']
         
         # Get UW flow data if available
         if uw_client:
@@ -5769,23 +5806,48 @@ with tabs[7]:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
             hottest_chains_analysis = {"error": "UW not available"}
-    if option_chain.get("error"):
-        st.error(option_chain["error"])
+    # Check if we have any lotto data
+    if not all_lotto_calls and not all_lotto_puts:
+        st.info("No lotto opportunities found for this ticker")
     else:
         current_price = quote['last']
-        expiration = option_chain["expiration"]
-        is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
+        # Get current date for 0DTE check
+        current_date = datetime.now(ZoneInfo('US/Eastern')).date()
         
-        st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        # Check if we have any lotto data
+        if all_lotto_calls or all_lotto_puts:
+            # Get expiration from first available option
+            if all_lotto_calls:
+                first_option = all_lotto_calls[0]
+            else:
+                first_option = all_lotto_puts[0]
+            
+            expiration = first_option.get('expiration_date', 'Unknown')
+            
+            # Check for 0DTE
+            try:
+                is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == current_date) if expiration != 'Unknown' else False
+            except:
+                is_0dte = False
+    
+            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
+        else:
+            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}**")
+            expiration = "No data"
+            is_0dte = False
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
-        # Filter for lotto plays (options under $1.00)
-        calls = option_chain["calls"]
-        puts = option_chain["puts"]
+        # Convert lists to DataFrames for filtering
+        if all_lotto_calls:
+            lotto_calls = pd.DataFrame(all_lotto_calls)
+        else:
+            lotto_calls = pd.DataFrame()
         
-        # Find lotto opportunities
-        lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
-        lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
+        if all_lotto_puts:
+            lotto_puts = pd.DataFrame(all_lotto_puts)  
+        else:
+            lotto_puts = pd.DataFrame()
+        
         # ADD THIS - Add expiration date to each contract:
         if not lotto_calls.empty:
             lotto_calls['expiration_date'] = expiration
@@ -6075,7 +6137,6 @@ with tabs[7]:
             - Put flow alerts near resistance = potential lotto put opportunities
             - Conflicting flow vs. technical signals = avoid or reduce position size
             """)
-
 # TAB 9: Earnings Plays
 with tabs[8]:
     st.subheader("🗓️ Earnings Plays with UW Integration")
