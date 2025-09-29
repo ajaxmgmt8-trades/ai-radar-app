@@ -3672,12 +3672,12 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         return {"error": hottest_chains_data["error"]}
     
     try:
-        # Handle double-nested data structure (same as other UW endpoints)
+        # Handle double-nested data structure
         data = hottest_chains_data.get("data", {})
         if isinstance(data, dict) and "data" in data:
-            chains = data["data"]  # Double nested
+            chains = data["data"]
         elif isinstance(data, list):
-            chains = data  # Single nested
+            chains = data
         else:
             chains = []
         
@@ -3686,21 +3686,34 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
         total_volume = 0
         total_premium = 0
+        processed_chains = []
         
         for chain in chains:
             if isinstance(chain, dict):
                 volume = int(chain.get("volume", 0))
-                premium = float(chain.get("premium", 0))
+                premium = float(chain.get("premium", chain.get("total_premium", 0)))
                 total_volume += volume
                 total_premium += premium
+                
+                # Reformat to expected structure
+                option_symbol = chain.get("option_symbol", "")
+                processed_chain = {
+                    "ticker": chain.get("ticker", option_symbol.rstrip("0123456789CP") if option_symbol else ""),
+                    "type": "call" if "C" in option_symbol else "put" if "P" in option_symbol else "unknown",
+                    "strike": chain.get("strike", chain.get("strike_price", 0)),
+                    "volume": volume,
+                    "premium": premium,
+                    "option_symbol": option_symbol
+                }
+                processed_chains.append(processed_chain)
         
         return {
             "summary": {
                 "total_chains": len(chains),
-                "total_volume": total_volume,        # Changed from 'combined_volume' 
-                "total_premium": total_premium,      # Changed from 'combined_premium'
+                "total_volume": total_volume,
+                "total_premium": total_premium,
             },
-            "chains": chains[:10],  # Top 10 chains
+            "chains": processed_chains[:10],  # Top 10 reformatted chains
             "error": None
         }
         
