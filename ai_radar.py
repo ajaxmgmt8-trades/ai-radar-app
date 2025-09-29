@@ -3668,53 +3668,59 @@ def get_uw_market_screener_movers():
     
     return sorted(unique_movers.values(), key=lambda x: abs(x["change_pct"]), reverse=True)
 def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
-    """Analyze hottest chains data from UW"""
+    """Get and analyze hottest option chains"""
     if hottest_chains_data.get("error"):
         return {"error": hottest_chains_data["error"]}
     
     try:
-        # Handle double-nested data structure
         data = hottest_chains_data.get("data", {})
+        
+        # Handle UW nested structure
         if isinstance(data, dict) and "data" in data:
-            chains = data["data"]
+            chains_list = data["data"]
         elif isinstance(data, list):
-            chains = data
+            chains_list = data
         else:
-            chains = []
+            chains_list = []
         
-        if not chains:
-            return {"summary": "No hottest chains data", "chains": []}
+        if not chains_list:
+            return {"summary": "No hottest chains data found", "chains": []}
         
+        processed_chains = []
         total_volume = 0
         total_premium = 0
-        processed_chains = []
         
-        for chain in chains:
+        for chain in chains_list:
             if isinstance(chain, dict):
-                volume = int(chain.get("volume", 0))
-                premium = float(chain.get("premium", chain.get("total_premium", 0)))
-                total_volume += volume
-                total_premium += premium
+                volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
+                premium = float(chain.get("total_premium", 0)) if chain.get("total_premium") else 0
                 
-                # Reformat to expected structure
-                option_symbol = chain.get("option_symbol", "")
                 processed_chain = {
-                    "ticker": chain.get("ticker", option_symbol.rstrip("0123456789CP") if option_symbol else ""),
-                    "type": "call" if "C" in option_symbol else "put" if "P" in option_symbol else "unknown",
-                    "strike": chain.get("strike", chain.get("strike_price", 0)),
+                    "ticker": chain.get("ticker", ""),
+                    "strike": float(chain.get("strike", 0)) if chain.get("strike") else 0,
+                    "type": chain.get("type", ""),
                     "volume": volume,
                     "premium": premium,
-                    "option_symbol": option_symbol
+                    "expiry": chain.get("expiry", ""),
+                    "underlying_price": float(chain.get("underlying_price", 0)) if chain.get("underlying_price") else 0,
+                    "price": float(chain.get("price", 0)) if chain.get("price") else 0,
+                    "iv": float(chain.get("iv", 0)) if chain.get("iv") else 0
                 }
+                
                 processed_chains.append(processed_chain)
+                total_volume += volume
+                total_premium += premium
+        
+        # Sort by volume
+        processed_chains.sort(key=lambda x: x["volume"], reverse=True)
         
         return {
             "summary": {
-                "total_chains": len(chains),
+                "total_chains": len(processed_chains),
                 "total_volume": total_volume,
-                "total_premium": total_premium,
+                "total_premium": total_premium
             },
-            "chains": processed_chains[:10],  # Top 10 reformatted chains
+            "chains": processed_chains,
             "error": None
         }
         
