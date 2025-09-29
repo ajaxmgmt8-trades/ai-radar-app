@@ -3982,7 +3982,7 @@ def display_grouped_options_by_expiration(options_data, show_dte_only=False, sho
                 st.info("No put options")
         
         st.divider()
- def get_lotto_contracts(self, ticker: str = None, max_price: float = 1.0) -> Dict:
+def get_lotto_contracts(self, ticker: str = None, max_price: float = 1.0) -> Dict:
     """Get lotto plays (cheap options under $1) across all expirations"""
     endpoint = "/api/screener/option-contracts"
     params = {
