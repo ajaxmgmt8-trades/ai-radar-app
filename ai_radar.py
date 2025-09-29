@@ -3416,7 +3416,8 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
         avg_iv = 0
     
     # Generate enhanced flow analysis prompt
-    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains)
+    hottest_chains_analysis = analyze_hottest_chains(hottest_chains)
+    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains_analysis)
     
     # Create timeframe-specific prompt with flow integration
     prompt = f"""
