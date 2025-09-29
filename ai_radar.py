@@ -5776,7 +5776,7 @@ with tabs[7]:
     else:
         current_price = quote['last']
         expiration = option_chain["expiration"]
-        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
+        is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.now(ZoneInfo('US/Eastern')).date())
         
         st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
