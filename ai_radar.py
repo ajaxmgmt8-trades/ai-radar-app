@@ -5754,45 +5754,8 @@ with tabs[7]:
 
     # Fetch comprehensive data for lotto analysis
     with st.spinner(f"Gathering comprehensive lotto intelligence for {lotto_ticker}..."):
-        # Get ALL available option chains (multiple expirations)
-        stock = yf.Ticker(lotto_ticker)
-        all_expirations = stock.options[:6]  # Get first 6 expirations for reasonable scope
-        
-        all_lotto_calls = []
-        all_lotto_puts = []
-        
-        for exp_date in all_expirations:
-            try:
-                option_chain = stock.option_chain(exp_date)
-                calls = option_chain.calls
-                puts = option_chain.puts
-                
-                # Filter for lotto criteria (≤$1.00) immediately
-                lotto_calls_exp = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
-                lotto_puts_exp = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
-                
-                if not lotto_calls_exp.empty:
-                    lotto_calls_exp['expiration_date'] = exp_date
-                    lotto_calls_exp['expiry'] = exp_date
-                    lotto_calls_exp['type'] = 'call'
-                    all_lotto_calls.append(lotto_calls_exp)
-                    
-                if not lotto_puts_exp.empty:
-                    lotto_puts_exp['expiration_date'] = exp_date
-                    lotto_puts_exp['expiry'] = exp_date
-                    lotto_puts_exp['type'] = 'put'
-                    all_lotto_puts.append(lotto_puts_exp)
-                    
-            except:
-                continue
-        
-        # Combine all expirations
-        lotto_calls = pd.concat(all_lotto_calls, ignore_index=True) if all_lotto_calls else pd.DataFrame()
-        lotto_puts = pd.concat(all_lotto_puts, ignore_index=True) if all_lotto_puts else pd.DataFrame()
-        
-        # Get current price and basic info
+        option_chain = get_option_chain(lotto_ticker, st.session_state.selected_tz)
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
-        current_price = quote['last']
         
         # Get UW flow data if available
         if uw_client:
@@ -5802,95 +5765,29 @@ with tabs[7]:
             volume_analysis = analyze_options_volume(options_volume_data, lotto_ticker)
             hottest_chains_data = uw_client.get_hottest_chains()
             hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
+            # ADD THIS DEBUG LINE:
+            st.write(f"DEBUG: Hottest chains analysis = {hottest_chains_analysis}")
         else:
             flow_analysis = {"error": "UW not available"}
             volume_analysis = {"error": "UW not available"}
             hottest_chains_analysis = {"error": "UW not available"}
-    # Check if we have any lotto data
-    if not all_lotto_calls and not all_lotto_puts:
-        st.info("No lotto opportunities found for this ticker")
+    if option_chain.get("error"):
+        st.error(option_chain["error"])
     else:
         current_price = quote['last']
-        # Get current date for 0DTE check
-        current_date = datetime.now(ZoneInfo('US/Eastern')).date()
+        expiration = option_chain["expiration"]
+        is_0dte = (datetime.datetime.strptime(expiration, '%Y-%m-%d').date() == datetime.datetime.now(ZoneInfo('US/Eastern')).date())
         
-        # Check if we have any lotto data
-        if all_lotto_calls or all_lotto_puts:
-            # Get expiration from first available option
-            if all_lotto_calls:
-                first_option = all_lotto_calls[0]
-            else:
-                first_option = all_lotto_puts[0]
-            
-            expiration = first_option.get('expiration_date', 'Unknown')
-            
-            # Check for 0DTE
-            try:
-                is_0dte = (datetime.strptime(expiration, '%Y-%m-%d').date() == current_date) if expiration != 'Unknown' else False
-            except:
-                is_0dte = False
-    
-            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
-        else:
-            st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}**")
-            expiration = "No data"
-            is_0dte = False
+        st.markdown(f"**Enhanced Lotto Scanner for {lotto_ticker}** (Expiration: {expiration}{' - 0DTE' if is_0dte else ''})")
         st.markdown(f"**Current Price:** ${current_price:.2f} | **Source:** {quote.get('data_source', 'Yahoo Finance')}")
 
-        # Convert lists to DataFrames for filtering
-        if all_lotto_calls:
-            lotto_calls = pd.DataFrame(all_lotto_calls)
-        else:
-            lotto_calls = pd.DataFrame()
+        # Filter for lotto plays (options under $1.00)
+        calls = option_chain["calls"]
+        puts = option_chain["puts"]
         
-        if all_lotto_puts:
-            lotto_puts = pd.DataFrame(all_lotto_puts)  
-        else:
-            lotto_puts = pd.DataFrame()
-        
-        # ADD THIS - Add expiration date to each contract:
-        if not lotto_calls.empty:
-            lotto_calls['expiration_date'] = expiration
-            lotto_calls['expiry'] = expiration
-            lotto_calls['type'] = 'call'
-        
-        if not lotto_puts.empty:
-            lotto_puts['expiration_date'] = expiration  
-            lotto_puts['expiry'] = expiration
-            lotto_puts['type'] = 'put'
-        # ADD THIS SECTION FOR LOTTOS EXPIRATION PROCESSING:
-        # Combine calls and puts for expiration processing
-        all_lotto_options = []
-        if not lotto_calls.empty:
-            all_lotto_options.extend(lotto_calls.to_dict('records'))
-        if not lotto_puts.empty:
-            all_lotto_options.extend(lotto_puts.to_dict('records'))
-        
-        if all_lotto_options:
-            # Process expiration data
-            all_lotto_options = process_options_with_expiration(all_lotto_options)
-            
-            # Get available expirations
-            available_expirations_lottos = sorted(list(set([
-                opt['expiration'] for opt in all_lotto_options 
-                if opt.get('expiration') and opt['expiration'] != ''
-            ])))
-            
-            # Expiration filter and grouping controls
-            col1, col2, col3 = st.columns([2, 1, 1])
-            
-            with col1:
-                selected_expiration_lottos = st.selectbox(
-                    "📅 Filter by Expiration",
-                    options=["All Expirations"] + [f"{exp} ({calculate_days_to_expiration(exp)} DTE)" for exp in available_expirations_lottos],
-                    key="lottos_exp_filter"
-                )
-            
-            with col2:
-                group_by_exp_lottos = st.checkbox("Group by Expiration", key="lottos_group")
-            
-            with col3:
-                show_dte_only_lottos = st.checkbox("Show DTE Only", key="lottos_dte_only")
+        # Find lotto opportunities
+        lotto_calls = calls[calls['lastPrice'] <= 1.0].copy() if not calls.empty else pd.DataFrame()
+        lotto_puts = puts[puts['lastPrice'] <= 1.0].copy() if not puts.empty else pd.DataFrame()
         
         # Sort by volume for most active lottos
         if not lotto_calls.empty:
@@ -5992,125 +5889,88 @@ with tabs[7]:
             lotto_analysis = ai_playbook(lotto_ticker, quote["change_percent"], lotto_summary, options_analysis)
             st.markdown(lotto_analysis)
 
-        # Enhanced Lotto Opportunities Display with Expiration
-        if all_lotto_options:
-            # Apply expiration filter if selected
-            filtered_lotto_options = all_lotto_options.copy()
-            if selected_expiration_lottos != "All Expirations":
-                target_expiration = selected_expiration_lottos.split(' (')[0]
-                filtered_lotto_options = [opt for opt in filtered_lotto_options if opt.get('expiration') == target_expiration]
+        # Display enhanced lotto opportunities
+        if not lotto_calls.empty or not lotto_puts.empty:
+            st.markdown("### 🎰 Enhanced Lotto Opportunities")
             
-            # Filter for lotto criteria (≤$1.00)
-            lotto_options_filtered = [opt for opt in filtered_lotto_options if opt.get('lastPrice', opt.get('last_price', 0)) <= 1.0]
+            col1, col2 = st.columns(2)
             
-            if group_by_exp_lottos and selected_expiration_lottos == "All Expirations":
-                # Grouped display
-                st.markdown("### 🎰 Lotto Opportunities by Expiration")
-                display_grouped_options_by_expiration(lotto_options_filtered, show_dte_only_lottos, show_trade_time=True)
+            with col1:
+                st.markdown("#### 📞 Lotto Calls (≤$1.00)")
+                if not lotto_calls.empty:
+                    # Calculate percentage to breakeven
+                    lotto_calls['breakeven'] = lotto_calls['strike'] + lotto_calls['lastPrice']
+                    lotto_calls['breakeven_move'] = ((lotto_calls['breakeven'] - current_price) / current_price * 100).round(2)
+                    
+                    display_calls = lotto_calls[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness', 'breakeven_move']].head(10)
+                    display_calls.columns = ['Strike', 'Price', 'Volume', 'IV%', 'ITM/OTM', 'Move Needed%']
+                    st.dataframe(display_calls, use_container_width=True)
+                else:
+                    st.info("No call options under $1.00 available")
             
+            with col2:
+                st.markdown("#### 📞 Lotto Puts (≤$1.00)")
+                if not lotto_puts.empty:
+                    # Calculate percentage to breakeven
+                    lotto_puts['breakeven'] = lotto_puts['strike'] - lotto_puts['lastPrice']
+                    lotto_puts['breakeven_move'] = ((lotto_puts['breakeven'] - current_price) / current_price * 100).round(2)
+                    
+                    display_puts = lotto_puts[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness', 'breakeven_move']].head(10)
+                    display_puts.columns = ['Strike', 'Price', 'Volume', 'IV%', 'ITM/OTM', 'Move Needed%']
+                    st.dataframe(display_puts, use_container_width=True)
+                else:
+                    st.info("No put options under $1.00 available")
+
+            # Enhanced unusual activity in lottos with flow correlation
+            st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
+            unusual_lottos = []
+            
+            # Check for unusual volume in lotto calls
+            if not lotto_calls.empty:
+                for _, call in lotto_calls.iterrows():
+                    vol_oi_ratio = call['volume'] / max(call['openInterest'], 1)
+                    if vol_oi_ratio > 2 and call['volume'] > 100:  # High volume relative to OI
+                        unusual_lottos.append({
+                            'type': 'Call',
+                            'strike': call['strike'],
+                            'price': call['lastPrice'],
+                            'volume': call['volume'],
+                            'oi': call['openInterest'],
+                            'vol_oi_ratio': vol_oi_ratio,
+                            'moneyness': call['moneyness'],
+                            'flow_correlation': 'Check flow alerts for this strike level'
+                        })
+            
+            # Check for unusual volume in lotto puts
+            if not lotto_puts.empty:
+                for _, put in lotto_puts.iterrows():
+                    vol_oi_ratio = put['volume'] / max(put['openInterest'], 1)
+                    if vol_oi_ratio > 2 and put['volume'] > 100:
+                        unusual_lottos.append({
+                            'type': 'Put',
+                            'strike': put['strike'],
+                            'price': put['lastPrice'],
+                            'volume': put['volume'],
+                            'oi': put['openInterest'],
+                            'vol_oi_ratio': vol_oi_ratio,
+                            'moneyness': put['moneyness'],
+                            'flow_correlation': 'Check flow alerts for this strike level'
+                        })
+            
+            if unusual_lottos:
+                st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
+                unusual_df = pd.DataFrame(unusual_lottos)
+                unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
+                st.dataframe(unusual_df, use_container_width=True)
+                
+                if not flow_analysis.get("error") and flow_analysis.get("alerts"):
+                    st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
             else:
-                # Standard lotto display with expiration columns
-                st.markdown("### 🎰 Enhanced Lotto Opportunities")
-                
-                # Separate calls and puts
-                lotto_calls_filtered = [opt for opt in lotto_options_filtered if 'call' in str(opt.get('type', '')).lower() or opt.get('strike', 0) > current_price]
-                lotto_puts_filtered = [opt for opt in lotto_options_filtered if 'put' in str(opt.get('type', '')).lower() or opt.get('strike', 0) <= current_price]
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("#### 📞 Lotto Calls (≤$1.00)")
-                    if lotto_calls_filtered:
-                        # Add breakeven calculations
-                        for opt in lotto_calls_filtered:
-                            price = opt.get('lastPrice', opt.get('last_price', 0))
-                            strike = opt.get('strike', 0)
-                            opt['breakeven'] = strike + price
-                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
-                        
-                        # Sort by volume and take top 10
-                        lotto_calls_sorted = sorted(lotto_calls_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
-                        display_options_table_with_expiration(
-                            lotto_calls_sorted,
-                            option_type="lotto call",
-                            show_expiration=True,
-                            show_dte=show_dte_only_lottos,
-                            show_trade_time=True
-                        )
-                    else:
-                        st.info("No call options under $1.00 available")
-                
-                with col2:
-                    st.markdown("#### 📉 Lotto Puts (≤$1.00)")
-                    if lotto_puts_filtered:
-                        # Add breakeven calculations
-                        for opt in lotto_puts_filtered:
-                            price = opt.get('lastPrice', opt.get('last_price', 0))
-                            strike = opt.get('strike', 0)
-                            opt['breakeven'] = strike - price
-                            opt['breakeven_move'] = ((opt['breakeven'] - current_price) / current_price * 100) if current_price > 0 else 0
-                        
-                        # Sort by volume and take top 10
-                        lotto_puts_sorted = sorted(lotto_puts_filtered, key=lambda x: x.get('volume', 0), reverse=True)[:10]
-                        display_options_table_with_expiration(
-                            lotto_puts_sorted,
-                            option_type="lotto put",
-                            show_expiration=True,
-                            show_dte=show_dte_only_lottos,
-                            show_trade_time=True
-                        )
-                    else:
-                        st.info("No put options under $1.00 available")
+                st.info("No unusual lotto activity detected with current criteria")
 
         else:
-            st.info("No lotto opportunities found")
-
-        # Enhanced unusual activity in lottos with flow correlation (MOVED OUTSIDE)
-        st.markdown("### 🔥 Unusual Lotto Activity with Flow Correlation")
-        unusual_lottos = []
-        
-        # Check for unusual volume in lotto calls
-        if not lotto_calls.empty:
-            for _, call in lotto_calls.iterrows():
-                vol_oi_ratio = call['volume'] / max(call['openInterest'], 1)
-                if vol_oi_ratio > 2 and call['volume'] > 100:  # High volume relative to OI
-                    unusual_lottos.append({
-                        'type': 'Call',
-                        'strike': call['strike'],
-                        'price': call['lastPrice'],
-                        'volume': call['volume'],
-                        'oi': call['openInterest'],
-                        'vol_oi_ratio': vol_oi_ratio,
-                        'moneyness': call['moneyness'],
-                        'flow_correlation': 'Check flow alerts for this strike level'
-                    })
-        
-        # Check for unusual volume in lotto puts
-        if not lotto_puts.empty:
-            for _, put in lotto_puts.iterrows():
-                vol_oi_ratio = put['volume'] / max(put['openInterest'], 1)
-                if vol_oi_ratio > 2 and put['volume'] > 100:
-                    unusual_lottos.append({
-                        'type': 'Put',
-                        'strike': put['strike'],
-                        'price': put['lastPrice'],
-                        'volume': put['volume'],
-                        'oi': put['openInterest'],
-                        'vol_oi_ratio': vol_oi_ratio,
-                        'moneyness': put['moneyness'],
-                        'flow_correlation': 'Check flow alerts for this strike level'
-                    })
-        
-        if unusual_lottos:
-            st.success(f"Found {len(unusual_lottos)} unusual lotto activities with flow intelligence!")
-            unusual_df = pd.DataFrame(unusual_lottos)
-            unusual_df = unusual_df.sort_values('vol_oi_ratio', ascending=False)
-            st.dataframe(unusual_df, use_container_width=True)
-            
-            if not flow_analysis.get("error") and flow_analysis.get("alerts"):
-                st.info("💡 Cross-reference unusual lotto strikes with flow alerts above for institutional confirmation")
-        else:
-            st.info("No unusual lotto activity detected with current criteria")
+            st.warning(f"No lotto opportunities found for {lotto_ticker} at current expiration")
+            st.info("Try a different ticker or check if options are available for this expiration")
 
         # Enhanced Risk Warning
         with st.expander("⚠️ Enhanced Lotto Trading Risk Warning"):
