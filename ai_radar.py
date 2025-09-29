@@ -851,9 +851,14 @@ def generate_flow_analysis_prompt(ticker: str, flow_data: Dict, volume_data: Dic
         volume = chain.get('volume', 0)
         premium = chain.get('premium', chain.get('total_premium', 0))
         
+        # Ensure numeric values are actually numbers, not None
+        strike = float(strike) if strike is not None else 0
+        volume = int(volume) if volume is not None else 0
+        premium = float(premium) if premium is not None else 0
+        
         # Determine type from symbol if available
         if option_symbol != 'N/A':
-            option_type = 'CALL' if 'C' in option_symbol else 'PUT' if 'P' in option_symbol else 'UNKNOWN'
+            option_type = 'CALL' if 'C' in str(option_symbol) else 'PUT' if 'P' in str(option_symbol) else 'UNKNOWN'
         else:
             option_type = 'UNKNOWN'
         
