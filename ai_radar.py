@@ -5606,7 +5606,7 @@ with tabs[6]:
             
             with col4:
                 if is_stale:
-                    st.warning("⚠️ Stale", help="Data is >1 hour old")
+                    st.warning("⚠️ Stale - Data is >1 hour old")
             
             # Get or fetch unified data
             with st.spinner("Loading Swing data..."):
