@@ -2840,7 +2840,7 @@ class MultiAIAnalyzer:
         
         return self.grok_client.analyze_trading_setup(prompt)
     
-     def multi_ai_consensus_enhanced(self, comprehensive_prompt: str) -> Dict[str, str]:
+    def multi_ai_consensus_enhanced(self, comprehensive_prompt: str) -> Dict[str, str]:
         """Get consensus analysis from all available AI models - PARALLEL execution"""
         analyses = {}
         
