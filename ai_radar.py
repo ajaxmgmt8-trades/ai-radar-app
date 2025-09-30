@@ -3669,7 +3669,15 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
             chains_list = []
         
         if not chains_list:
-            return {"summary": "No hottest chains data found", "chains": []}
+            return {
+                "summary": {
+                    "total_chains": 0,
+                    "total_volume": 0,
+                    "total_premium": 0
+                },
+                "chains": [],
+                "error": None
+            }
         
         processed_chains = []
         total_volume = 0
