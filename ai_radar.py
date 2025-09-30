@@ -5349,6 +5349,20 @@ with tabs[6]:
                 st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
                 
                 hottest_chains_data = uw_client.get_hottest_chains()
+                # ADD THIS DEBUG
+                if hottest_chains_data.get("data"):
+                    data = hottest_chains_data["data"]
+                    if isinstance(data, dict) and "data" in data:
+                        sample = data["data"][0] if data["data"] else None
+                    elif isinstance(data, list):
+                        sample = data[0] if data else None
+                    else:
+                        sample = None
+                    
+                    if sample:
+                        st.write("**DEBUG: Actual UW hottest chains field names:**")
+                        st.write(list(sample.keys()))
+                        st.json(sample)
                 st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
                 
 
