@@ -247,6 +247,31 @@ class UnusualWhalesClient:
         endpoint = f"/api/stock/{ticker}/options-volume"
         params = {"limit": limit}
         return self._make_request(endpoint, params)
+    def get_lotto_contracts(self, ticker: str = None, max_price: float = 1.0) -> Dict:
+        """Get lotto plays (cheap options under $1) across all expirations"""
+        endpoint = "/api/screener/option-contracts"
+        params = {
+            "limit": 250,  # Max allowed
+            "order": "volume",
+            "order_direction": "desc",
+            
+            # Price filters for lottos
+            "max_option_price": max_price,  # Options under $1.00
+            "min_volume": 10,  # Some liquidity
+            
+            # Include all timeframes - no max_dte to get everything
+            "min_dte": 0,  # Include 0DTE
+            
+            # Basic filters
+            "min_underlying_price": 2.0,  # Avoid penny stocks
+            "min_open_interest": 10,  # Some existing OI
+            "issue_types[]": ["Common Stock", "ETF"]
+        }
+        
+        if ticker:
+            params["ticker_symbol"] = ticker
+        
+        return self._make_request(endpoint, params)           
     def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
         """Get hottest option chains with comprehensive filtering"""
         endpoint = "/api/screener/option-contracts"
@@ -4033,31 +4058,7 @@ def display_grouped_options_by_expiration(options_data, show_dte_only=False, sho
                 st.info("No put options")
         
         st.divider()
-def get_lotto_contracts(self, ticker: str = None, max_price: float = 1.0) -> Dict:
-    """Get lotto plays (cheap options under $1) across all expirations"""
-    endpoint = "/api/screener/option-contracts"
-    params = {
-        "limit": 250,  # Max allowed
-        "order": "volume",
-        "order_direction": "desc",
-        
-        # Price filters for lottos
-        "max_option_price": max_price,  # Options under $1.00
-        "min_volume": 10,  # Some liquidity
-        
-        # Include all timeframes - no max_dte to get everything
-        "min_dte": 0,  # Include 0DTE
-        
-        # Basic filters
-        "min_underlying_price": 2.0,  # Avoid penny stocks
-        "min_open_interest": 10,  # Some existing OI
-        "issue_types[]": ["Common Stock", "ETF"]
-    }
-    
-    if ticker:
-        params["ticker_symbol"] = ticker
-    
-    return self._make_request(endpoint, params)       
+
 # =============================================================================
 # MAIN APPLICATION
 # =============================================================================
