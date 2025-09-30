@@ -6127,7 +6127,7 @@ with tabs[7]:
     # Fetch comprehensive data
     with st.spinner(f"Fetching all lotto opportunities for {lotto_ticker}..."):
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
-       lotto_data = uw_client.get_lotto_contracts(lotto_ticker, max_lotto_price)
+        lotto_data = uw_client.get_lotto_contracts(lotto_ticker, max_lotto_price)
         
         # Get flow data if UW available
         if uw_client:
