@@ -5836,7 +5836,7 @@ with tabs[6]:
             
             with col4:
                 if is_stale:
-                    st.warning("⚠️ Stale", help="Data is >4 hours old")
+                    st.warning("⚠️ Stale - Data is >4 hours old")
             
             # Get or fetch unified data
             with st.spinner("Loading LEAPS data..."):
