@@ -6196,7 +6196,23 @@ with tabs[7]:
                 "data_source": "Unusual Whales",
                 "error": None
             }
-        
+            # Debug: Check what we actually have
+            st.write("### DEBUG: Lotto Data Structure")
+            st.write(f"Total lottos processed: {len(lotto_data.get('lottos', []))}")
+            st.write(f"Expirations found: {lotto_data.get('all_expirations', [])}")
+            
+            if lotto_data.get('lottos'):
+                st.write("**First 3 lotto contracts:**")
+                for i, lotto in enumerate(lotto_data['lottos'][:3]):
+                    st.write(f"\n**Contract {i+1}:**")
+                    st.json(lotto)
+                
+                # Check type distribution
+                types = [l.get('type', 'unknown') for l in lotto_data['lottos']]
+                st.write(f"\n**Type distribution:**")
+                st.write(f"Calls: {types.count('call')}")
+                st.write(f"Puts: {types.count('put')}")
+                st.write(f"Unknown: {types.count('unknown')}")
         # Get flow data if UW available
         if uw_client:
             flow_alerts_data = uw_client.get_flow_alerts(lotto_ticker)
