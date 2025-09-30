@@ -834,6 +834,8 @@ def generate_flow_analysis_prompt(ticker: str, flow_data: Dict, volume_data: Dic
     
     if not hottest_chains.get("error"):
         chains_summary = hottest_chains.get("summary", {})
+        if chains_summary is None:
+            chains_summary = {}
         prompt += f"""
         - Total Hottest Chains: {chains_summary.get('total_chains', 0)}
         - Combined Volume: {chains_summary.get('total_volume', 0):,}
