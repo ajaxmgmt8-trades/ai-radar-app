@@ -2840,41 +2840,65 @@ class MultiAIAnalyzer:
         
         return self.grok_client.analyze_trading_setup(prompt)
     
-    def multi_ai_consensus_enhanced(self, comprehensive_prompt: str) -> Dict[str, str]:
-        """Get consensus analysis from all available AI models with enhanced prompts"""
-        analyses = {}
-        
-        # Get analysis from each available model
-        if self.openai_client:
-            analyses["OpenAI"] = self.analyze_with_openai(comprehensive_prompt)
-        
-        if self.gemini_model:
-            analyses["Gemini"] = self.analyze_with_gemini(comprehensive_prompt)
-        
-        if self.grok_client:
-            analyses["Grok"] = self.analyze_with_grok(comprehensive_prompt)
-        
-        return analyses
+ def multi_ai_consensus_enhanced(self, comprehensive_prompt: str) -> Dict[str, str]:
+    """Get consensus analysis from all available AI models - PARALLEL execution"""
+    analyses = {}
     
-    def multi_ai_consensus(self, ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> Dict[str, str]:
-        """Get consensus analysis from all available AI models with enhanced prompts"""
+    # Use ThreadPoolExecutor to call all models simultaneously
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {}
         
-        # Use the enhanced comprehensive prompt
-        prompt = construct_comprehensive_analysis_prompt(ticker, {"last": 0, "change_percent": change}, {}, {}, options_data or {}, catalyst)
-        
-        analyses = {}
-        
-        # Get analysis from each available model
+        # Submit all available models at once
         if self.openai_client:
-            analyses["OpenAI"] = self.analyze_with_openai(prompt)
+            futures['OpenAI'] = executor.submit(self.analyze_with_openai, comprehensive_prompt)
         
         if self.gemini_model:
-            analyses["Gemini"] = self.analyze_with_gemini(prompt)
+            futures['Gemini'] = executor.submit(self.analyze_with_gemini, comprehensive_prompt)
         
         if self.grok_client:
-            analyses["Grok"] = self.analyze_with_grok(prompt)
+            futures['Grok'] = executor.submit(self.analyze_with_grok, comprehensive_prompt)
         
-        return analyses
+        # Collect results as they complete (with timeout)
+        for model, future in futures.items():
+            try:
+                analyses[model] = future.result(timeout=30)
+            except concurrent.futures.TimeoutError:
+                analyses[model] = f"{model} timed out"
+            except Exception as e:
+                analyses[model] = f"{model} error: {str(e)}"
+    
+    return analyses
+
+def multi_ai_consensus(self, ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> Dict[str, str]:
+    """Get consensus analysis from all available AI models - PARALLEL execution"""
+    
+    # Use the enhanced comprehensive prompt
+    prompt = construct_comprehensive_analysis_prompt(ticker, {"last": 0, "change_percent": change}, {}, {}, options_data or {}, catalyst)
+    
+    analyses = {}
+    
+    # Use ThreadPoolExecutor for parallel execution
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {}
+        
+        if self.openai_client:
+            futures['OpenAI'] = executor.submit(self.analyze_with_openai, prompt)
+        
+        if self.gemini_model:
+            futures['Gemini'] = executor.submit(self.analyze_with_gemini, prompt)
+        
+        if self.grok_client:
+            futures['Grok'] = executor.submit(self.analyze_with_grok, prompt)
+        
+        for model, future in futures.items():
+            try:
+                analyses[model] = future.result(timeout=30)
+            except concurrent.futures.TimeoutError:
+                analyses[model] = f"{model} timed out"
+            except Exception as e:
+                analyses[model] = f"{model} error: {str(e)}"
+    
+    return analyses
     
     def synthesize_consensus(self, analyses: Dict[str, str], ticker: str) -> str:
         """Synthesize multiple AI analyses into a consensus view"""
@@ -6158,11 +6182,12 @@ with tabs[7]:
                     'volume': int(contract.get('volume', 0)),
                     'openInterest': int(contract.get('open_interest', 0)),
                     'type': contract.get('type', ''),
-                    'expiration_date': contract.get('expiry', ''),
-                    'expiry': contract.get('expiry', '')
+                    'expiration_date': contract.get('expiration_date', contract.get('expiry', contract.get('exp_date', ''))),
+                    'expiry': contract.get('expiration_date', contract.get('expiry', contract.get('exp_date', '')))
                 })
-                if contract.get('expiry'):
-                    all_exps.add(contract.get('expiry'))
+                exp_date = contract.get('expiration_date', contract.get('expiry', contract.get('exp_date', '')))
+                if exp_date:
+                    all_exps.add(exp_date)
             
             lotto_data = {
                 "lottos": processed_lottos,
