@@ -3653,7 +3653,7 @@ def get_uw_market_screener_movers():
     
     return sorted(unique_movers.values(), key=lambda x: abs(x["change_pct"]), reverse=True)
 def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
-    """Get and analyze hottest option chains"""
+    """Analyze hottest chains data from UW"""
     if hottest_chains_data.get("error"):
         return {"error": hottest_chains_data["error"]}
     
@@ -3685,19 +3685,37 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
         for chain in chains_list:
             if isinstance(chain, dict):
-                volume = int(chain.get("volume", 0)) if chain.get("volume") else 0
-                premium = float(chain.get("total_premium", 0)) if chain.get("total_premium") else 0
+                # Use ACTUAL UW field names
+                volume = int(chain.get("volume", 0))
+                premium = float(chain.get("premium", 0))
+                option_symbol = chain.get("option_symbol", "")
+                ticker_symbol = chain.get("ticker_symbol", "")
+                
+                # Extract strike from option_symbol (UW format: TICKER+YYMMDD+C/P+STRIKE*1000)
+                strike = 0
+                option_type = "unknown"
+                if option_symbol:
+                    try:
+                        # UW option symbol format
+                        import re
+                        pattern = r'^(?P<symbol>[\w]*)(?P<expiry>(\d{2})(\d{2})(\d{2}))(?P<type>[CP])(?P<strike>\d{8})$'
+                        match = re.match(pattern, option_symbol)
+                        if match:
+                            strike = int(match.group('strike')) / 1000.0
+                            option_type = 'call' if match.group('type') == 'C' else 'put'
+                    except:
+                        pass
                 
                 processed_chain = {
-                    "ticker": chain.get("ticker", ""),
-                    "strike": float(chain.get("strike", 0)) if chain.get("strike") else 0,
-                    "type": chain.get("type", ""),
+                    "ticker": ticker_symbol,
+                    "strike": strike,
+                    "type": option_type,
                     "volume": volume,
                     "premium": premium,
-                    "expiry": chain.get("expiry", ""),
-                    "underlying_price": float(chain.get("underlying_price", 0)) if chain.get("underlying_price") else 0,
-                    "price": float(chain.get("price", 0)) if chain.get("price") else 0,
-                    "iv": float(chain.get("iv", 0)) if chain.get("iv") else 0
+                    "expiry": chain.get("last_fill", ""),
+                    "underlying_price": float(chain.get("stock_price", 0)),
+                    "price": float(chain.get("avg_price", 0)),
+                    "iv": float(chain.get("vega", 0))  # Using vega as proxy since no direct IV
                 }
                 
                 processed_chains.append(processed_chain)
@@ -5349,20 +5367,6 @@ with tabs[6]:
                 st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
                 
                 hottest_chains_data = uw_client.get_hottest_chains()
-                # ADD THIS DEBUG
-                if hottest_chains_data.get("data"):
-                    data = hottest_chains_data["data"]
-                    if isinstance(data, dict) and "data" in data:
-                        sample = data["data"][0] if data["data"] else None
-                    elif isinstance(data, list):
-                        sample = data[0] if data else None
-                    else:
-                        sample = None
-                    
-                    if sample:
-                        st.write("**DEBUG: Actual UW hottest chains field names:**")
-                        st.write(list(sample.keys()))
-                        st.json(sample)
                 st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
                 
 
