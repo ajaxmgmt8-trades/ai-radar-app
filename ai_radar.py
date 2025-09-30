@@ -6128,7 +6128,49 @@ with tabs[7]:
     # Fetch comprehensive data
     with st.spinner(f"Fetching all lotto opportunities for {lotto_ticker}..."):
         quote = get_live_quote(lotto_ticker, st.session_state.selected_tz)
-        lotto_data = uw_client.get_lotto_contracts(lotto_ticker, max_lotto_price)
+        # Get lotto data from UW
+        uw_lotto_response = uw_client.get_lotto_contracts(lotto_ticker, max_lotto_price)
+        
+        if uw_lotto_response.get("error"):
+            lotto_data = {"error": uw_lotto_response["error"]}
+        else:
+            # Process UW screener response into expected format
+            raw_data = uw_lotto_response.get("data", {})
+            if isinstance(raw_data, dict) and "data" in raw_data:
+                contracts = raw_data["data"]
+            elif isinstance(raw_data, list):
+                contracts = raw_data
+            else:
+                contracts = []
+            
+            # Get current price from quote
+            current_price = quote.get("last", 0)
+            
+            # Format contracts
+            processed_lottos = []
+            all_exps = set()
+            for contract in contracts:
+                processed_lottos.append({
+                    'contractSymbol': contract.get('option_symbol', ''),
+                    'strike': float(contract.get('strike', 0)),
+                    'lastPrice': float(contract.get('last_price', 0)),
+                    'last_price': float(contract.get('last_price', 0)),
+                    'volume': int(contract.get('volume', 0)),
+                    'openInterest': int(contract.get('open_interest', 0)),
+                    'type': contract.get('type', ''),
+                    'expiration_date': contract.get('expiry', ''),
+                    'expiry': contract.get('expiry', '')
+                })
+                if contract.get('expiry'):
+                    all_exps.add(contract.get('expiry'))
+            
+            lotto_data = {
+                "lottos": processed_lottos,
+                "current_price": current_price,
+                "all_expirations": sorted(list(all_exps)),
+                "data_source": "Unusual Whales",
+                "error": None
+            }
         
         # Get flow data if UW available
         if uw_client:
