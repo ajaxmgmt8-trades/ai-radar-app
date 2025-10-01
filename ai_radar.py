@@ -6244,8 +6244,48 @@ with tabs[7]:
         for i, inst in enumerate(popular_institutions):
             with cols[i % 4]:
                 if st.button(inst, key=f"pop_inst_{i}"):
-                    st.session_state.institution_search = inst
-                    st.rerun()
+                    # Trigger search for this institution
+                    inst_result = uw_client.get_institution_activity(inst)
+                    
+                    if inst_result.get("error"):
+                        st.error(f"Error: {inst_result['error']}")
+                    else:
+                        data = inst_result.get("data", {})
+                        if isinstance(data, dict) and "data" in data:
+                            activities = data["data"]
+                        elif isinstance(data, list):
+                            activities = data
+                        else:
+                            activities = []
+                        
+                        if not activities:
+                            st.warning(f"No activity found for {inst}")
+                        else:
+                            st.success(f"Found {len(activities)} trades for {inst}")
+                            
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Total Trades", len(activities))
+                            col2.metric("Institution", inst)
+                            col3.metric("Data Source", "Unusual Whales")
+                            
+                            st.markdown("### 📊 Recent Trades")
+                            for j, trade in enumerate(activities[:20]):
+                                with st.expander(f"Trade {j+1}: {trade.get('ticker', 'N/A')}"):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.write(f"**Ticker:** {trade.get('ticker', 'N/A')}")
+                                        st.write(f"**Security Type:** {trade.get('security_type', 'N/A')}")
+                                        st.write(f"**Filing Date:** {trade.get('filing_date', 'N/A')}")
+                                    
+                                    with col2:
+                                        avg_price = float(trade.get("avg_price", 0))
+                                        shares = int(trade.get("shares_outstanding", 0))
+                                        value = avg_price * shares
+                                        
+                                        st.write(f"**Avg Price:** ${avg_price:.2f}")
+                                        st.write(f"**Shares:** {shares:,}")
+                                        st.write(f"**Value:** ${value:,.0f}")
         
         with st.expander("📖 About Institutional Flow Data"):
             st.markdown("""
