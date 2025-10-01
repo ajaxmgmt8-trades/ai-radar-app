@@ -6197,11 +6197,19 @@ with tabs[7]:
                     else:
                         st.success(f"Found {len(activities)} trades for {institution_name}")
                         
-                        # Summary metrics
+                        # Summary metrics - full width display
+                        st.markdown("---")
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Trades", len(activities))
-                        col2.metric("Institution", institution_name)
-                        col3.metric("Data Source", "Unusual Whales")
+                        with col1:
+                            st.markdown(f"**Total Trades**")
+                            st.markdown(f"# {len(activities)}")
+                        with col2:
+                            st.markdown(f"**Institution**")
+                            st.markdown(f"# {institution_name}")
+                        with col3:
+                            st.markdown(f"**Data Source**")
+                            st.markdown(f"# Unusual Whales")
+                        st.markdown("---")
                         
                         # Display trades
                         st.markdown("### 📊 Recent Trades")
@@ -6216,14 +6224,28 @@ with tabs[7]:
                                     st.write(f"**Report Date:** {trade.get('report_date', 'N/A')}")
                                 
                                 with col2:
-                                    avg_price = float(trade.get("avg_price", 0))
-                                    shares = int(trade.get("shares_outstanding", 0))
+                                    # Safe conversion with error handling
+                                    try:
+                                        avg_price = float(trade.get("avg_price") or 0)
+                                    except (ValueError, TypeError):
+                                        avg_price = 0.0
+                                    
+                                    try:
+                                        shares = int(trade.get("shares_outstanding") or 0)
+                                    except (ValueError, TypeError):
+                                        shares = 0
+                                    
+                                    try:
+                                        close_price = float(trade.get("close") or 0)
+                                    except (ValueError, TypeError):
+                                        close_price = 0.0
+                                    
                                     value = avg_price * shares
                                     
                                     st.write(f"**Avg Price:** ${avg_price:.2f}")
                                     st.write(f"**Shares:** {shares:,}")
                                     st.write(f"**Total Value:** ${value:,.0f}")
-                                    st.write(f"**Close Price:** ${float(trade.get('close', 0)):.2f}")
+                                    st.write(f"**Close Price:** ${close_price:.2f}")
                                 
                                 ticker = trade.get('ticker', '')
                                 if ticker and st.button(f"Add {ticker} to Watchlist", key=f"inst_add_{i}_{ticker}"):
@@ -6263,10 +6285,19 @@ with tabs[7]:
                         else:
                             st.success(f"Found {len(activities)} trades for {inst}")
                             
+                            # Full width display
+                            st.markdown("---")
                             col1, col2, col3 = st.columns(3)
-                            col1.metric("Total Trades", len(activities))
-                            col2.metric("Institution", inst)
-                            col3.metric("Data Source", "Unusual Whales")
+                            with col1:
+                                st.markdown(f"**Total Trades**")
+                                st.markdown(f"# {len(activities)}")
+                            with col2:
+                                st.markdown(f"**Institution**")
+                                st.markdown(f"# {inst}")
+                            with col3:
+                                st.markdown(f"**Data Source**")
+                                st.markdown(f"# Unusual Whales")
+                            st.markdown("---")
                             
                             st.markdown("### 📊 Recent Trades")
                             for j, trade in enumerate(activities[:20]):
@@ -6279,8 +6310,17 @@ with tabs[7]:
                                         st.write(f"**Filing Date:** {trade.get('filing_date', 'N/A')}")
                                     
                                     with col2:
-                                        avg_price = float(trade.get("avg_price", 0))
-                                        shares = int(trade.get("shares_outstanding", 0))
+                                        # Safe conversion with error handling
+                                        try:
+                                            avg_price = float(trade.get("avg_price") or 0)
+                                        except (ValueError, TypeError):
+                                            avg_price = 0.0
+                                        
+                                        try:
+                                            shares = int(trade.get("shares_outstanding") or 0)
+                                        except (ValueError, TypeError):
+                                            shares = 0
+                                        
                                         value = avg_price * shares
                                         
                                         st.write(f"**Avg Price:** ${avg_price:.2f}")
