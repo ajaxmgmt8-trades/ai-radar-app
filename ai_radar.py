@@ -62,7 +62,11 @@ if "flow_last_refresh" not in st.session_state:
 if "flow_data_cache" not in st.session_state:
     st.session_state.flow_data_cache = {}
 if "flow_auto_refresh_enabled" not in st.session_state:
-    st.session_state.flow_auto_refresh_enabled = {"0DTE": False, "Swing": False, "LEAPS": False}    
+    st.session_state.flow_auto_refresh_enabled = {"0DTE": False, "Swing": False, "LEAPS": False}
+if "force_fresh_flow" not in st.session_state:
+    st.session_state.force_fresh_flow = {}
+
+# API Keys    
 
 # API Keys
 try:
@@ -547,6 +551,14 @@ class UnusualWhalesClient:
             date = datetime.date.today().isoformat()
         endpoint = "/api/institutions/latest_filings"
         params = {"name": name, "date": date}
+        return self._make_request(endpoint, params)
+    
+    def get_institution_activity(self, name: str, date: str = None, limit: int = 100) -> Dict:
+        """Get institution trading activity"""
+        endpoint = f"/api/institution/{name}/activity"
+        params = {"limit": limit}
+        if date:
+            params["date"] = date
         return self._make_request(endpoint, params)
     
     # =================================================================
@@ -4219,7 +4231,8 @@ tabs = st.tabs([
     "📈 Market Analysis", 
     "🤖 AI Playbooks", 
     "🌍 Sector/ETF Tracking", 
-    "🎯 Options Flow", 
+    "🎯 Options Flow",
+    "🏦 Institutional Flow", 
     "💰 Lottos", 
     "🗓️ Earnings Plays", 
     "📰 Important News",
@@ -5548,9 +5561,8 @@ with tabs[6]:
             
             with col2:
                 if st.button("🔄 Refresh 0DTE Data", key="refresh_0dte"):
-                    with st.spinner("Refreshing 0DTE options and flow data..."):
-                        get_unified_flow_data(flow_ticker, "0DTE", force_refresh=True)
-                        st.rerun()
+                    st.session_state.force_fresh_flow[f"{flow_ticker}_0DTE"] = True
+                    st.rerun()
             
             with col3:
                 auto_refresh_0dte = st.checkbox("Auto", key="auto_0dte", 
@@ -5563,7 +5575,11 @@ with tabs[6]:
             
             # Get or fetch unified data
             with st.spinner("Loading 0DTE data..."):
-                unified_data = get_unified_flow_data(flow_ticker, "0DTE", force_refresh=False)
+                cache_key = f"{flow_ticker}_0DTE"
+                should_force_refresh = st.session_state.force_fresh_flow.get(cache_key, False)
+                unified_data = get_unified_flow_data(flow_ticker, "0DTE", force_refresh=should_force_refresh)
+                if should_force_refresh:
+                    st.session_state.force_fresh_flow[cache_key] = False
             
             dte_options = unified_data["options"]
             flow_analysis = unified_data.get("flow_analysis", {})
@@ -5611,18 +5627,19 @@ with tabs[6]:
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
                 # Enhanced AI Analysis for 0DTE with Fresh Flow Data
-                st.markdown("### 🤖 AI 0DTE Flow Analysis (Live)")
-                with st.spinner("Generating fresh 0DTE analysis..."):
-                    if not flow_analysis.get("error"):
-                        dte_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, dte_options, flow_analysis, volume_analysis, 
-                            hottest_chains_data, "0DTE"
-                        )
-                    else:
-                        dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, {}, "0DTE")
-                    
-                    st.markdown(dte_analysis)
-                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                st.markdown("### 🤖 AI 0DTE Flow Analysis")
+                if st.button("🤖 Generate 0DTE AI Analysis", key="generate_0dte_ai", type="primary"):
+                    with st.spinner("Generating fresh 0DTE analysis..."):
+                        if not flow_analysis.get("error"):
+                            dte_analysis = analyze_timeframe_options_with_flow(
+                                flow_ticker, dte_options, flow_analysis, volume_analysis, 
+                                hottest_chains_data, "0DTE"
+                            )
+                        else:
+                            dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, {}, "0DTE")
+                        
+                        st.markdown(dte_analysis)
+                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
                 # 0DTE Options Display
                 if not calls_0dte.empty or not puts_0dte.empty:
@@ -5671,9 +5688,8 @@ with tabs[6]:
             
             with col2:
                 if st.button("🔄 Refresh Swing Data", key="refresh_swing"):
-                    with st.spinner("Refreshing Swing options and flow data..."):
-                        get_unified_flow_data(flow_ticker, "Swing", force_refresh=True)
-                        st.rerun()
+                    st.session_state.force_fresh_flow[f"{flow_ticker}_Swing"] = True
+                    st.rerun()
             
             with col3:
                 auto_refresh_swing = st.checkbox("Auto", key="auto_swing",
@@ -5686,7 +5702,11 @@ with tabs[6]:
             
             # Get or fetch unified data
             with st.spinner("Loading Swing data..."):
-                unified_data = get_unified_flow_data(flow_ticker, "Swing", force_refresh=False)
+                cache_key = f"{flow_ticker}_Swing"
+                should_force_refresh = st.session_state.force_fresh_flow.get(cache_key, False)
+                unified_data = get_unified_flow_data(flow_ticker, "Swing", force_refresh=should_force_refresh)
+                if should_force_refresh:
+                    st.session_state.force_fresh_flow[cache_key] = False
             
             swing_options = unified_data["options"]
             flow_analysis = unified_data.get("flow_analysis", {})
@@ -5783,18 +5803,19 @@ with tabs[6]:
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
                 # Enhanced AI Analysis for Swing with Fresh Flow Data
-                st.markdown("### 🤖 AI Swing Flow Analysis (Live)")
-                with st.spinner("Generating fresh swing analysis..."):
-                    if not flow_analysis.get("error"):
-                        swing_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, swing_options, flow_analysis, volume_analysis, 
-                            hottest_chains_data, "Swing"
-                        )
-                    else:
-                        swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, {}, "Swing")
-                    
-                    st.markdown(swing_analysis)
-                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                st.markdown("### 🤖 AI Swing Flow Analysis")
+                if st.button("🤖 Generate Swing AI Analysis", key="generate_swing_ai", type="primary"):
+                    with st.spinner("Generating fresh swing analysis..."):
+                        if not flow_analysis.get("error"):
+                            swing_analysis = analyze_timeframe_options_with_flow(
+                                flow_ticker, swing_options, flow_analysis, volume_analysis, 
+                                hottest_chains_data, "Swing"
+                            )
+                        else:
+                            swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, {}, "Swing")
+                        
+                        st.markdown(swing_analysis)
+                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
                 # Display Swing options
                 if all_swing_options:
@@ -5850,9 +5871,8 @@ with tabs[6]:
             
             with col2:
                 if st.button("🔄 Refresh LEAPS Data", key="refresh_leaps"):
-                    with st.spinner("Refreshing LEAPS options and flow data..."):
-                        get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
-                        st.rerun()
+                    st.session_state.force_fresh_flow[f"{flow_ticker}_LEAPS"] = True
+                    st.rerun()
             
             with col3:
                 auto_refresh_leaps = st.checkbox("Auto", key="auto_leaps",
@@ -5865,7 +5885,11 @@ with tabs[6]:
             
             # Get or fetch unified data
             with st.spinner("Loading LEAPS data..."):
-                unified_data = get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=False)
+                cache_key = f"{flow_ticker}_LEAPS"
+                should_force_refresh = st.session_state.force_fresh_flow.get(cache_key, False)
+                unified_data = get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=should_force_refresh)
+                if should_force_refresh:
+                    st.session_state.force_fresh_flow[cache_key] = False
             
             leaps_options = unified_data["options"]
             flow_analysis = unified_data.get("flow_analysis", {})
@@ -5941,18 +5965,19 @@ with tabs[6]:
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
                 # Enhanced AI Analysis for LEAPS with Fresh Flow Data
-                st.markdown("### 🤖 AI LEAPS Flow Analysis (Live)")
-                with st.spinner("Generating fresh LEAPS analysis..."):
-                    if not flow_analysis.get("error"):
-                        leaps_analysis = analyze_timeframe_options_with_flow(
-                            flow_ticker, leaps_options, flow_analysis, volume_analysis,
-                            hottest_chains_data, "LEAPS"
-                        )
-                    else:
-                        leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, {}, "LEAPS")
-                    
-                    st.markdown(leaps_analysis)
-                    st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                st.markdown("### 🤖 AI LEAPS Flow Analysis")
+                if st.button("🤖 Generate LEAPS AI Analysis", key="generate_leaps_ai", type="primary"):
+                    with st.spinner("Generating fresh LEAPS analysis..."):
+                        if not flow_analysis.get("error"):
+                            leaps_analysis = analyze_timeframe_options_with_flow(
+                                flow_ticker, leaps_options, flow_analysis, volume_analysis,
+                                hottest_chains_data, "LEAPS"
+                            )
+                        else:
+                            leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, {}, "LEAPS")
+                        
+                        st.markdown(leaps_analysis)
+                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
                 
                 # Display LEAPS options
                 if all_leaps_options:
@@ -6128,8 +6153,115 @@ with tabs[6]:
         st.info("🔄 Auto-refresh triggered for LEAPS (data was stale)")
         get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
         st.rerun()               
-# TAB 8: Enhanced Lottos with Flow Analysis - All Expirations
+# TAB 8: Institutional Flow
 with tabs[7]:
+    st.subheader("🏦 Institutional Trading Activity")
+    st.markdown("**Track hedge fund and institutional trading activity from 13F filings.**")
+    
+    if not uw_client:
+        st.error("Unusual Whales API required for institutional flow data")
+        st.info("Configure your Unusual Whales API key to access institutional trading activity")
+    else:
+        st.success("✅ Unusual Whales institutional data available")
+        
+        # Institution search
+        st.markdown("### 🔍 Search Institution Activity")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            institution_name = st.text_input(
+                "Enter institution name",
+                placeholder="e.g., Vanguard Group, BlackRock, Citadel",
+                key="institution_search"
+            )
+        with col2:
+            search_institution = st.button("Search Activity", key="search_inst_btn")
+        
+        if search_institution and institution_name:
+            with st.spinner(f"Fetching institutional activity for {institution_name}..."):
+                inst_result = uw_client.get_institution_activity(institution_name)
+                
+                if inst_result.get("error"):
+                    st.error(f"Error: {inst_result['error']}")
+                    st.info("Try searching by exact institution name or check Unusual Whales documentation")
+                else:
+                    data = inst_result.get("data", {})
+                    if isinstance(data, dict) and "data" in data:
+                        activities = data["data"]
+                    elif isinstance(data, list):
+                        activities = data
+                    else:
+                        activities = []
+                    
+                    if not activities:
+                        st.warning(f"No activity found for {institution_name}")
+                    else:
+                        st.success(f"Found {len(activities)} trades for {institution_name}")
+                        
+                        # Summary metrics
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Total Trades", len(activities))
+                        col2.metric("Institution", institution_name)
+                        col3.metric("Data Source", "Unusual Whales")
+                        
+                        # Display trades
+                        st.markdown("### 📊 Recent Trades")
+                        for i, trade in enumerate(activities[:20]):
+                            with st.expander(f"Trade {i+1}: {trade.get('ticker', 'N/A')} - {trade.get('security_type', 'N/A')}"):
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    st.write(f"**Ticker:** {trade.get('ticker', 'N/A')}")
+                                    st.write(f"**Security Type:** {trade.get('security_type', 'N/A')}")
+                                    st.write(f"**Filing Date:** {trade.get('filing_date', 'N/A')}")
+                                    st.write(f"**Report Date:** {trade.get('report_date', 'N/A')}")
+                                
+                                with col2:
+                                    avg_price = float(trade.get("avg_price", 0))
+                                    shares = int(trade.get("shares_outstanding", 0))
+                                    value = avg_price * shares
+                                    
+                                    st.write(f"**Avg Price:** ${avg_price:.2f}")
+                                    st.write(f"**Shares:** {shares:,}")
+                                    st.write(f"**Total Value:** ${value:,.0f}")
+                                    st.write(f"**Close Price:** ${float(trade.get('close', 0)):.2f}")
+                                
+                                ticker = trade.get('ticker', '')
+                                if ticker and st.button(f"Add {ticker} to Watchlist", key=f"inst_add_{i}_{ticker}"):
+                                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                    if ticker not in current_list:
+                                        current_list.append(ticker)
+                                        st.success(f"Added {ticker}!")
+                                        st.rerun()
+        
+        # Popular institutions
+        st.markdown("### ⭐ Popular Institutions")
+        popular_institutions = [
+            "Vanguard Group", "BlackRock", "State Street", "Fidelity",
+            "Citadel", "Renaissance Technologies", "Two Sigma", "Bridgewater"
+        ]
+        
+        cols = st.columns(4)
+        for i, inst in enumerate(popular_institutions):
+            with cols[i % 4]:
+                if st.button(inst, key=f"pop_inst_{i}"):
+                    st.session_state.institution_search = inst
+                    st.rerun()
+        
+        with st.expander("📖 About Institutional Flow Data"):
+            st.markdown("""
+            **What is Institutional Flow?**
+            
+            Data from 13F filings showing hedge fund positions (quarterly, delayed 45+ days).
+            
+            **Key Points:**
+            - Shows positions over $100M
+            - Useful for long-term sentiment
+            - Different from real-time options flow
+            - Backward-looking (2-3 months old)
+            """)
+
+# TAB 9: Enhanced Lottos with Flow Analysis - All Expirations
+with tabs[8]:
     st.subheader("💰 Enhanced Lotto Plays with Flow Intelligence")
     st.markdown("**High-risk, high-reward options under $1.00 across all expirations with Unusual Whales flow analysis.**")
 
@@ -6430,8 +6562,8 @@ with tabs[7]:
             - Medium-term lottos (31-90 DTE): More time for thesis, lower theta decay
             - Long-dated lottos (90+ DTE): Less "lotto" behavior, more like regular options
             """)
-# TAB 9: Earnings Plays
-with tabs[8]:
+# TAB 10: Earnings Plays
+with tabs[9]:
     st.subheader("🗓️ Earnings Plays with UW Integration")
     
     st.write("Track upcoming earnings reports and get AI analysis for potential earnings plays using Unusual Whales and other data sources.")
@@ -6519,8 +6651,8 @@ with tabs[8]:
                         st.markdown(ai_analysis)
                     st.divider()
 
-# TAB 10: Important News & Economic Calendar
-with tabs[9]:
+# TAB 11: Important News & Economic Calendar
+with tabs[10]:
     st.subheader("📰 Important News & Economic Calendar")
 
     if st.button("📊 Get This Week's Events", type="primary"):
@@ -6552,8 +6684,8 @@ with tabs[9]:
                     st.write(f"**Impact:** {event['impact']}")
                     st.divider()
 
-# TAB 11: Twitter/X Market Sentiment & Rumors
-with tabs[10]:
+# TAB 12: Twitter/X Market Sentiment & Rumors
+with tabs[11]:
     st.subheader("🦅 Twitter/X Market Sentiment & Rumors")
 
     # Important disclaimer
