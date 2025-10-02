@@ -944,24 +944,26 @@ Assess key risk levels that would invalidate the trade setup.
 Explain what heavy flow at specific strikes suggests about smart money positioning.
 
 **SPECIFIC TRADE RECOMMENDATION**
-Provide ONE clear trade setup using this EXACT format with proper spacing:
 
-"Take {ticker} [strike number] [calls or puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[price level]. 
+YOU MUST USE PERFECT SPACING. NO WORDS CAN BE STUCK TOGETHER.
 
-Best entry timing: [specific time window like 9:30-10:30 AM EST].
+Use this template and fill in the blanks with spaces between every word:
 
-Stop loss at $[price level].
+TRADE: Take [TICKER] [STRIKE] [calls or puts] [TIMEFRAME] at price $[X.XX] when [TICKER] moves [above or below] $[LEVEL].
 
-TP1 at $[price] (close 33%), TP2 at $[price] (close 33%), Final TP at $[price] (close 34%)."
+TIMING: Best entry [TIME WINDOW like 9:30-10:30 AM EST].
 
-Example format:
-"Take SPY 669 puts 0DTE at a price of $0.01 when SPY gets below $668.37. 
+STOP: Stop loss at $[LEVEL].
 
-Best entry timing: 9:30-10:30 AM EST for maximum volatility.
+TARGETS: TP1 at $[PRICE] close 33 percent. TP2 at $[PRICE] close 33 percent. Final TP at $[PRICE] close 34 percent.
 
-Stop loss at $670.57.
+Example:
+TRADE: Take SPY 669 puts 0DTE at price $0.01 when SPY moves below $668.37.
+TIMING: Best entry 9:30-10:30 AM EST for volatility.
+STOP: Stop loss at $670.57.
+TARGETS: TP1 at $666.78 close 33 percent. TP2 at $665.00 close 33 percent. Final TP at $663.50 close 34 percent.
 
-TP1 at $666.78 (close 33%), TP2 at $665.00 (close 33%), Final TP at $663.50 (close 34%)."
+CRITICAL: Use only strikes from the Best Strikes list above. Put spaces between all words. Do not combine words together.
 
 FORMATTING REQUIREMENTS:
 - Use proper spacing between all words
