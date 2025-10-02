@@ -912,37 +912,40 @@ Best Put Strikes:
     
     prompt += f"""
 
-=== REQUIRED ANALYSIS FORMAT ===
+=== ANALYSIS REQUIREMENTS ===
 
-Provide your analysis in these EXACT sections:
+Provide analysis in these EXACT sections with clean formatting:
 
 **Flow Sentiment Analysis & Key Patterns**
-Analyze the overall flow direction and what the patterns indicate about institutional positioning.
+Analyze the overall flow direction and institutional positioning patterns.
 
-**Volume & Premium Flow**
-Discuss the volume characteristics and where the big money is flowing.
+**Volume & Premium Flow**  
+Discuss volume characteristics and where big money is flowing.
 
 **Trading Opportunities & Key Strikes**
 Identify the most significant strikes based on volume and flow activity.
 
 **Risk Assessment & Management**
-Assess the key risk level for this setup (typically the major support/resistance that would invalidate the trade).
+Assess key risk levels that would invalidate the trade setup.
 
 **Institutional Activity & Flow-Based Strategy**
-Explain what the heavy flow at specific strikes suggests about smart money positioning and best entry timing.
+Explain what heavy flow at specific strikes suggests about smart money positioning and optimal entry timing. Include specific time windows (e.g., "9:30-10:30 AM EST" or "2:00-3:00 PM EST") when this type of flow typically performs best.
 
 **SPECIFIC TRADE RECOMMENDATION**
-Based on all the above analysis, provide ONE specific trade setup in this format:
+Provide ONE clear trade setup using this exact format:
 
-"Take {ticker} [strike number] [calls/puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[price level].
-Stop loss at $[price level].
+"Take {ticker} [strike] [calls/puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[level].
+Stop loss at $[level].
 TP1 at $[price] (close 33%), TP2 at $[price] (close 33%), Final TP at $[price] (close 34%)."
 
-Example: "Take SPY 670 calls 0DTE at a price of $1.30 when SPY gets above $666.00. Stop loss at $664.50. TP1 at $668.00 (close 33%), TP2 at $669.00 (close 33%), Final TP at $672.00 (close 34%)."
-
-CRITICAL: Use ONLY the strike prices from the "Best Call Strikes" or "Best Put Strikes" listed above. Use the actual "Price" shown as your entry price basis.
-
-Keep analysis under 400 words but be specific with all price levels.
+CRITICAL REQUIREMENTS:
+- Use ONLY strike prices from the "Best Call Strikes" or "Best Put Strikes" listed above
+- Use the actual "Price" shown as your entry price basis
+- Base entry conditions on the resistance/support levels provided
+- Include optimal timing window for entry (specific hours EST)
+- Keep all text clean and readable - no run-on italicized words
+- Total analysis under 400 words
+- Be specific with all price levels and timing
 """
     
     return prompt       
