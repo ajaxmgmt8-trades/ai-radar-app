@@ -792,7 +792,7 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
         
     except Exception as e:                                    
             return {"error": f"Error analyzing options volume: {str(e)}"}
- def get_real_time_technical_levels(ticker: str, quote: Dict) -> Dict:
+def get_real_time_technical_levels(ticker: str, quote: Dict) -> Dict:
     """Get real-time technical levels for trading"""
     try:
         stock = yf.Ticker(ticker)
