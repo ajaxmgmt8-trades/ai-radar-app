@@ -914,6 +914,18 @@ Best Put Strikes:
 
 === ANALYSIS REQUIREMENTS ===
 
+CRITICAL FORMATTING RULES:
+- Write each sentence on its own line
+- Put spaces between every single word  
+- Never combine words without spaces
+- Use periods to end sentences
+- Make text easy to read
+
+Write like this: "Take SPY 669 puts 0DTE at a price of $0.01"
+NOT like this: "TakeSPY669puts0DTEatapriceof$0.01"
+
+If you write words without spaces, the analysis will be rejected.
+
 Provide analysis in these EXACT sections with clean formatting:
 
 **Flow Sentiment Analysis & Key Patterns**
