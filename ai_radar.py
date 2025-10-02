@@ -929,23 +929,35 @@ Identify the most significant strikes based on volume and flow activity.
 Assess key risk levels that would invalidate the trade setup.
 
 **Institutional Activity & Flow-Based Strategy**
-Explain what heavy flow at specific strikes suggests about smart money positioning and optimal entry timing. Include specific time windows (e.g., "9:30-10:30 AM EST" or "2:00-3:00 PM EST") when this type of flow typically performs best.
+Explain what heavy flow at specific strikes suggests about smart money positioning.
 
 **SPECIFIC TRADE RECOMMENDATION**
-Provide ONE clear trade setup using this exact format:
+Provide ONE clear trade setup using this EXACT format with proper spacing:
 
-"Take {ticker} [strike] [calls/puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[level].
-Stop loss at $[level].
+"Take {ticker} [strike number] [calls or puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[price level]. 
+
+Best entry timing: [specific time window like 9:30-10:30 AM EST].
+
+Stop loss at $[price level].
+
 TP1 at $[price] (close 33%), TP2 at $[price] (close 33%), Final TP at $[price] (close 34%)."
 
-CRITICAL REQUIREMENTS:
-- Use ONLY strike prices from the "Best Call Strikes" or "Best Put Strikes" listed above
-- Use the actual "Price" shown as your entry price basis
-- Base entry conditions on the resistance/support levels provided
-- Include optimal timing window for entry (specific hours EST)
-- Keep all text clean and readable - no run-on italicized words
+Example format:
+"Take SPY 669 puts 0DTE at a price of $0.01 when SPY gets below $668.37. 
+
+Best entry timing: 9:30-10:30 AM EST for maximum volatility.
+
+Stop loss at $670.57.
+
+TP1 at $666.78 (close 33%), TP2 at $665.00 (close 33%), Final TP at $663.50 (close 34%)."
+
+FORMATTING REQUIREMENTS:
+- Use proper spacing between all words
+- Put each instruction on a separate line
+- Use ONLY strike prices from the Best Strikes listed above
+- Include specific entry timing window
+- Be precise with all price levels
 - Total analysis under 400 words
-- Be specific with all price levels and timing
 """
     
     return prompt       
