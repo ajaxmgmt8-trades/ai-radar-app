@@ -791,7 +791,161 @@ def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
             }
         
     except Exception as e:                                    
-            return {"error": f"Error analyzing options volume: {str(e)}"}   
+            return {"error": f"Error analyzing options volume: {str(e)}"}
+ def get_real_time_technical_levels(ticker: str, quote: Dict) -> Dict:
+    """Get real-time technical levels for trading"""
+    try:
+        stock = yf.Ticker(ticker)
+        hist_1d = stock.history(period="1d", interval="5m")
+        hist_5d = stock.history(period="5d", interval="15m")
+        
+        if hist_1d.empty or hist_5d.empty:
+            return {"error": "No technical data"}
+        
+        current_price = quote.get('last', 0)
+        today_high = hist_1d['High'].max()
+        today_low = hist_1d['Low'].min()
+        week_high = hist_5d['High'].max()
+        week_low = hist_5d['Low'].min()
+        vwap = (hist_1d['Close'] * hist_1d['Volume']).sum() / hist_1d['Volume'].sum()
+        
+        recent_highs = hist_5d['High'].nlargest(3).tolist()
+        recent_lows = hist_5d['Low'].nsmallest(3).tolist()
+        
+        return {
+            "current_price": current_price,
+            "today_high": today_high,
+            "today_low": today_low,
+            "week_high": week_high,
+            "week_low": week_low,
+            "vwap": vwap,
+            "resistance_levels": sorted(recent_highs, reverse=True),
+            "support_levels": sorted(recent_lows),
+            "error": None
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+def pick_best_strikes_from_flow(options_data: Dict, flow_analysis: Dict, current_price: float, option_type: str = "call") -> List[Dict]:
+    """Analyze options chain and flow to pick best strikes"""
+    calls = options_data.get("calls", pd.DataFrame())
+    puts = options_data.get("puts", pd.DataFrame())
+    chain = calls if option_type == "call" else puts
+    
+    if chain.empty:
+        return []
+    
+    chain = chain.copy()
+    chain['volume_score'] = chain['volume'] / chain['volume'].max() if chain['volume'].max() > 0 else 0
+    
+    if option_type == "call":
+        chain['moneyness_score'] = chain['strike'].apply(
+            lambda x: 1.0 if 1.001 <= x/current_price <= 1.015 else 0.5
+        )
+    else:
+        chain['moneyness_score'] = chain['strike'].apply(
+            lambda x: 1.0 if 0.985 <= x/current_price <= 0.999 else 0.5
+        )
+    
+    chain['total_score'] = (chain['volume_score'] * 0.6) + (chain['moneyness_score'] * 0.4)
+    top_strikes = chain.nlargest(3, 'total_score')
+    
+    return top_strikes[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'total_score']].to_dict('records')
+
+def generate_actionable_flow_analysis(ticker: str, option_data: Dict, flow_data: Dict, 
+                                     volume_data: Dict, technical_levels: Dict, 
+                                     timeframe: str) -> str:
+    """Generate actionable trading analysis with specific plays for timeframe tabs"""
+    current_price = technical_levels.get("current_price", 0)
+    vwap = technical_levels.get("vwap", current_price)
+    resistance = technical_levels.get("resistance_levels", [current_price * 1.01])[0]
+    support = technical_levels.get("support_levels", [current_price * 0.99])[0]
+    
+    flow_summary = flow_data.get("summary", {})
+    flow_sentiment = flow_summary.get("flow_sentiment", "Neutral")
+    total_alerts = flow_summary.get("total_alerts", 0)
+    bullish_flow = flow_summary.get("bullish_flow", 0)
+    bearish_flow = flow_summary.get("bearish_flow", 0)
+    
+    best_call_strikes = pick_best_strikes_from_flow(option_data, flow_data, current_price, "call")
+    best_put_strikes = pick_best_strikes_from_flow(option_data, flow_data, current_price, "put")
+    
+    prompt = f"""
+REAL-TIME {timeframe} OPTIONS FLOW TRADING ANALYSIS FOR {ticker}
+TIMESTAMP: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+=== MARKET DATA ===
+Current Price: ${current_price:.2f}
+VWAP: ${vwap:.2f}
+Today's Range: ${technical_levels.get('today_low', 0):.2f} - ${technical_levels.get('today_high', 0):.2f}
+Immediate Resistance: ${resistance:.2f}
+Immediate Support: ${support:.2f}
+
+=== FLOW DATA ===
+Total Flow Alerts: {total_alerts}
+Flow Sentiment: {flow_sentiment}
+Bullish Premium Flow: ${bullish_flow:,.0f}
+Bearish Premium Flow: ${bearish_flow:,.0f}
+Net Flow Bias: ${bullish_flow - bearish_flow:,.0f} ({'BULLISH' if bullish_flow > bearish_flow else 'BEARISH'})
+"""
+    
+    if not volume_data.get("error"):
+        vol_summary = volume_data.get("summary", {})
+        prompt += f"""
+Call Volume: {vol_summary.get('total_call_volume', 0):,}
+Put Volume: {vol_summary.get('total_put_volume', 0):,}
+Put/Call Ratio: {vol_summary.get('put_call_ratio', 0):.2f}
+"""
+    
+    prompt += f"""
+=== TOP STRIKES BY FLOW ACTIVITY ===
+Best Call Strikes:
+"""
+    for i, strike in enumerate(best_call_strikes[:3], 1):
+        prompt += f"{i}. ${strike['strike']:.0f} - Price: ${strike['lastPrice']:.2f}, Volume: {strike['volume']:,}, IV: {strike['impliedVolatility']:.1f}%\n"
+    
+    prompt += f"""
+Best Put Strikes:
+"""
+    for i, strike in enumerate(best_put_strikes[:3], 1):
+        prompt += f"{i}. ${strike['strike']:.0f} - Price: ${strike['lastPrice']:.2f}, Volume: {strike['volume']:,}, IV: {strike['impliedVolatility']:.1f}%\n"
+    
+    prompt += f"""
+
+=== REQUIRED ANALYSIS FORMAT ===
+
+Provide your analysis in these EXACT sections:
+
+**Flow Sentiment Analysis & Key Patterns**
+Analyze the overall flow direction and what the patterns indicate about institutional positioning.
+
+**Volume & Premium Flow**
+Discuss the volume characteristics and where the big money is flowing.
+
+**Trading Opportunities & Key Strikes**
+Identify the most significant strikes based on volume and flow activity.
+
+**Risk Assessment & Management**
+Assess the key risk level for this setup (typically the major support/resistance that would invalidate the trade).
+
+**Institutional Activity & Flow-Based Strategy**
+Explain what the heavy flow at specific strikes suggests about smart money positioning and best entry timing.
+
+**SPECIFIC TRADE RECOMMENDATION**
+Based on all the above analysis, provide ONE specific trade setup in this format:
+
+"Take {ticker} [strike number] [calls/puts] {timeframe} at a price of $[X.XX] when {ticker} gets above/below $[price level].
+Stop loss at $[price level].
+TP1 at $[price] (close 33%), TP2 at $[price] (close 33%), Final TP at $[price] (close 34%)."
+
+Example: "Take SPY 670 calls 0DTE at a price of $1.30 when SPY gets above $666.00. Stop loss at $664.50. TP1 at $668.00 (close 33%), TP2 at $669.00 (close 33%), Final TP at $672.00 (close 34%)."
+
+CRITICAL: Use ONLY the strike prices from the "Best Call Strikes" or "Best Put Strikes" listed above. Use the actual "Price" shown as your entry price basis.
+
+Keep analysis under 400 words but be specific with all price levels.
+"""
+    
+    return prompt       
             
 def get_hottest_chains(self, date: str = None, limit: int = 50) -> Dict:
     """Get hottest option chains - loosened filters"""
@@ -5396,43 +5550,10 @@ with tabs[6]:
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
                 
                 flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
-                st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
-                if flow_alerts_data.get('data'):
-                    st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
-                    st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
-                
                 options_volume_data = uw_client.get_options_volume(flow_ticker)
-                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
-                
                 hottest_chains_data = uw_client.get_hottest_chains()
-                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
+                hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
                 
-
-                # Add this first to see what raw data looks like:
-                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
-                
-                # Then try the analysis:
-                try:
-                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
-                except Exception as e:
-                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
-                
-                # Test individual UW calls
-                st.write("**Testing individual UW endpoints:**")
-                try:
-                    test_stock_state = uw_client.get_stock_state(flow_ticker)
-                    st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
-                except Exception as e:
-                    st.write(f"Stock state error: {str(e)}")
-                
-                # Raw data inspection
-                with st.expander("🔬 Raw API Responses"):
-                    st.write("**Flow Alerts Raw:**")
-                    st.json(flow_alerts_data)
-                    st.write("**Options Volume Raw:**") 
-                    st.json(options_volume_data)
-                        
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
                 volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
@@ -5626,20 +5747,79 @@ with tabs[6]:
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
-                # Enhanced AI Analysis for 0DTE with Fresh Flow Data
-                st.markdown("### 🤖 AI 0DTE Flow Analysis")
-                if st.button("🤖 Generate 0DTE AI Analysis", key="generate_0dte_ai", type="primary"):
-                    with st.spinner("Generating fresh 0DTE analysis..."):
-                        if not flow_analysis.get("error"):
-                            dte_analysis = analyze_timeframe_options_with_flow(
-                                flow_ticker, dte_options, flow_analysis, volume_analysis, 
-                                hottest_chains_data, "0DTE"
-                            )
-                        else:
-                            dte_analysis = analyze_timeframe_options(flow_ticker, dte_options, {}, "0DTE")
+                # Enhanced AI Analysis for 0DTE with Fresh Flow Data and Specific Plays
+                st.markdown("### 🤖 AI 0DTE Flow Analysis with Specific Trade Setup")
+                if st.button("🤖 Generate Fresh 0DTE Analysis", key="generate_0dte_ai", type="primary"):
+                    with st.spinner("Analyzing real-time flow data and generating specific trade setup..."):
+                        # Get FRESH technical levels
+                        technical_levels = get_real_time_technical_levels(flow_ticker, quote)
                         
-                        st.markdown(dte_analysis)
-                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                        if technical_levels.get("error"):
+                            st.warning(f"Could not fetch technical levels: {technical_levels['error']}")
+                            technical_levels = {
+                                "current_price": quote.get('last', 0),
+                                "vwap": quote.get('last', 0),
+                                "today_high": quote.get('last', 0) * 1.02,
+                                "today_low": quote.get('last', 0) * 0.98,
+                                "resistance_levels": [quote.get('last', 0) * 1.01],
+                                "support_levels": [quote.get('last', 0) * 0.99]
+                            }
+                        
+                        # Generate enhanced prompt with fresh data
+                        enhanced_prompt = generate_actionable_flow_analysis(
+                            flow_ticker, 
+                            dte_options, 
+                            flow_analysis, 
+                            volume_analysis,
+                            technical_levels,
+                            "0DTE"
+                        )
+                        
+                        # Get AI analysis using selected model
+                        if st.session_state.ai_model == "Multi-AI":
+                            analyses = multi_ai.multi_ai_consensus_enhanced(enhanced_prompt)
+                            if analyses:
+                                result = f"## 🤖 Real-Time 0DTE Flow Analysis\n\n"
+                                result += f"**Data Fetched:** {unified_data['timestamp']}\n"
+                                result += f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                result += f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n"
+                                
+                                for model, analysis in analyses.items():
+                                    result += f"### {model} Trade Setup:\n{analysis}\n\n---\n\n"
+                                
+                                st.markdown(result)
+                            else:
+                                st.error("No AI models available")
+                        elif st.session_state.ai_model == "OpenAI":
+                            if openai_client:
+                                analysis = multi_ai.analyze_with_openai(enhanced_prompt)
+                                st.markdown(f"## 🤖 OpenAI 0DTE Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("OpenAI not configured")
+                        elif st.session_state.ai_model == "Gemini":
+                            if gemini_model:
+                                analysis = multi_ai.analyze_with_gemini(enhanced_prompt)
+                                st.markdown(f"## 🤖 Gemini 0DTE Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("Gemini not configured")
+                        elif st.session_state.ai_model == "Grok":
+                            if grok_enhanced:
+                                analysis = multi_ai.analyze_with_grok(enhanced_prompt)
+                                st.markdown(f"## 🤖 Grok 0DTE Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("Grok not configured")
                 
                 # 0DTE Options Display
                 if not calls_0dte.empty or not puts_0dte.empty:
@@ -5802,20 +5982,79 @@ with tabs[6]:
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
-                # Enhanced AI Analysis for Swing with Fresh Flow Data
-                st.markdown("### 🤖 AI Swing Flow Analysis")
-                if st.button("🤖 Generate Swing AI Analysis", key="generate_swing_ai", type="primary"):
-                    with st.spinner("Generating fresh swing analysis..."):
-                        if not flow_analysis.get("error"):
-                            swing_analysis = analyze_timeframe_options_with_flow(
-                                flow_ticker, swing_options, flow_analysis, volume_analysis, 
-                                hottest_chains_data, "Swing"
-                            )
-                        else:
-                            swing_analysis = analyze_timeframe_options(flow_ticker, swing_options, {}, "Swing")
+                # Enhanced AI Analysis for Swing with Fresh Flow Data and Specific Plays
+                st.markdown("### 🤖 AI Swing Flow Analysis with Specific Trade Setup")
+                if st.button("🤖 Generate Fresh Swing Analysis", key="generate_swing_ai", type="primary"):
+                    with st.spinner("Analyzing real-time flow data and generating specific trade setup..."):
+                        # Get FRESH technical levels
+                        technical_levels = get_real_time_technical_levels(flow_ticker, quote)
                         
-                        st.markdown(swing_analysis)
-                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                        if technical_levels.get("error"):
+                            st.warning(f"Could not fetch technical levels: {technical_levels['error']}")
+                            technical_levels = {
+                                "current_price": quote.get('last', 0),
+                                "vwap": quote.get('last', 0),
+                                "today_high": quote.get('last', 0) * 1.02,
+                                "today_low": quote.get('last', 0) * 0.98,
+                                "resistance_levels": [quote.get('last', 0) * 1.01],
+                                "support_levels": [quote.get('last', 0) * 0.99]
+                            }
+                        
+                        # Generate enhanced prompt with fresh data
+                        enhanced_prompt = generate_actionable_flow_analysis(
+                            flow_ticker, 
+                            swing_options, 
+                            flow_analysis, 
+                            volume_analysis,
+                            technical_levels,
+                            "Swing"
+                        )
+                        
+                        # Get AI analysis using selected model
+                        if st.session_state.ai_model == "Multi-AI":
+                            analyses = multi_ai.multi_ai_consensus_enhanced(enhanced_prompt)
+                            if analyses:
+                                result = f"## 🤖 Real-Time Swing Flow Analysis\n\n"
+                                result += f"**Data Fetched:** {unified_data['timestamp']}\n"
+                                result += f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                result += f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n"
+                                
+                                for model, analysis in analyses.items():
+                                    result += f"### {model} Trade Setup:\n{analysis}\n\n---\n\n"
+                                
+                                st.markdown(result)
+                            else:
+                                st.error("No AI models available")
+                        elif st.session_state.ai_model == "OpenAI":
+                            if openai_client:
+                                analysis = multi_ai.analyze_with_openai(enhanced_prompt)
+                                st.markdown(f"## 🤖 OpenAI Swing Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("OpenAI not configured")
+                        elif st.session_state.ai_model == "Gemini":
+                            if gemini_model:
+                                analysis = multi_ai.analyze_with_gemini(enhanced_prompt)
+                                st.markdown(f"## 🤖 Gemini Swing Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("Gemini not configured")
+                        elif st.session_state.ai_model == "Grok":
+                            if grok_enhanced:
+                                analysis = multi_ai.analyze_with_grok(enhanced_prompt)
+                                st.markdown(f"## 🤖 Grok Swing Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("Grok not configured")
                 
                 # Display Swing options
                 if all_swing_options:
@@ -5964,20 +6203,63 @@ with tabs[6]:
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
                 
-                # Enhanced AI Analysis for LEAPS with Fresh Flow Data
-                st.markdown("### 🤖 AI LEAPS Flow Analysis")
-                if st.button("🤖 Generate LEAPS AI Analysis", key="generate_leaps_ai", type="primary"):
-                    with st.spinner("Generating fresh LEAPS analysis..."):
-                        if not flow_analysis.get("error"):
-                            leaps_analysis = analyze_timeframe_options_with_flow(
-                                flow_ticker, leaps_options, flow_analysis, volume_analysis,
-                                hottest_chains_data, "LEAPS"
-                            )
-                        else:
-                            leaps_analysis = analyze_timeframe_options(flow_ticker, leaps_options, {}, "LEAPS")
+                # Enhanced AI Analysis for LEAPS with Fresh Flow Data and Specific Plays
+                st.markdown("### 🤖 AI LEAPS Flow Analysis with Specific Trade Setup")
+                if st.button("🤖 Generate Fresh LEAPS Analysis", key="generate_leaps_ai", type="primary"):
+                    with st.spinner("Analyzing real-time flow data and generating specific trade setup..."):
+                        # Get FRESH technical levels
+                        technical_levels = get_real_time_technical_levels(flow_ticker, quote)
                         
-                        st.markdown(leaps_analysis)
-                        st.caption(f"Analysis generated from data fetched at: {unified_data['timestamp']}")
+                        if technical_levels.get("error"):
+                            st.warning(f"Could not fetch technical levels: {technical_levels['error']}")
+                            technical_levels = {
+                                "current_price": quote.get('last', 0),
+                                "vwap": quote.get('last', 0),
+                                "today_high": quote.get('last', 0) * 1.02,
+                                "today_low": quote.get('last', 0) * 0.98,
+                                "resistance_levels": [quote.get('last', 0) * 1.01],
+                                "support_levels": [quote.get('last', 0) * 0.99]
+                            }
+                        
+                        # Generate enhanced prompt with fresh data
+                        enhanced_prompt = generate_actionable_flow_analysis(
+                            flow_ticker, 
+                            leaps_options, 
+                            flow_analysis, 
+                            volume_analysis,
+                            technical_levels,
+                            "LEAPS"
+                        )
+                        
+                        # Get AI analysis using selected model
+                        if st.session_state.ai_model == "Multi-AI":
+                            analyses = multi_ai.multi_ai_consensus_enhanced(enhanced_prompt)
+                            if analyses:
+                                result = f"## 🤖 Real-Time LEAPS Flow Analysis\n\n"
+                                result += f"**Data Fetched:** {unified_data['timestamp']}\n"
+                                result += f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                result += f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n"
+                                
+                                for model, analysis in analyses.items():
+                                    result += f"### {model} Trade Setup:\n{analysis}\n\n---\n\n"
+                                
+                                st.markdown(result)
+                            else:
+                                st.error("No AI models available")
+                        elif st.session_state.ai_model == "OpenAI":
+                            if openai_client:
+                                analysis = multi_ai.analyze_with_openai(enhanced_prompt)
+                                st.markdown(f"## 🤖 OpenAI LEAPS Analysis\n\n")
+                                st.markdown(f"**Data Fetched:** {unified_data['timestamp']}\n")
+                                st.markdown(f"**Flow Alerts:** {flow_analysis.get('summary', {}).get('total_alerts', 0)} | "
+                                          f"**Sentiment:** {flow_analysis.get('summary', {}).get('flow_sentiment', 'Unknown')}\n\n")
+                                st.markdown(analysis)
+                            else:
+                                st.error("OpenAI not configured")
+                        elif st.session_state.ai_model == "Gemini":
+                            if gemini_model:
+                                analysis = multi_ai.analyze_with_gemini(enhanced_prompt)
+                                st.markdown(f"## 🤖 Gemini LEAPS Analysis\n\n")
                 
                 # Display LEAPS options
                 if all_leaps_options:
