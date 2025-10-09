@@ -5456,6 +5456,16 @@ with tabs[6]:
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
                 volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
+
+                # ADD THIS DEBUG RIGHT BEFORE THE FLOW ALERTS DISPLAY (line ~5460)
+                st.write("🔬 DEBUG: Flow Analysis Structure")
+                st.json({
+                    "has_error": bool(flow_analysis.get("error")),
+                    "error": flow_analysis.get("error"),
+                    "has_summary": "summary" in flow_analysis,
+                    "summary_value": flow_analysis.get("summary"),
+                    "keys": list(flow_analysis.keys()) if isinstance(flow_analysis, dict) else "Not a dict"
+                })
                 
                 # Display UW Flow Alerts
                 st.markdown("#### 🔥 Flow Alerts")
