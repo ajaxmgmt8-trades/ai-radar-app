@@ -947,23 +947,25 @@ Explain what heavy flow at specific strikes suggests about smart money positioni
 
 YOU MUST USE PERFECT SPACING. NO WORDS CAN BE STUCK TOGETHER.
 
-Use this template and fill in the blanks with spaces between every word:
+Provide ONE specific trade recommendation using this format:
 
-TRADE: Take [TICKER] [STRIKE] [calls or puts] [TIMEFRAME] at price $[X.XX] when [TICKER] moves [above or below] $[LEVEL].
+TRADE: Take {ticker} [actual strike number] [calls or puts] {timeframe} at price $[actual option price] when {ticker} moves [above or below] $[actual price level].
 
-TIMING: Best entry [TIME WINDOW like 9:30-10:30 AM EST].
+TIMING: Best entry [specific time window].
 
-STOP: Stop loss at $[LEVEL].
+STOP: Stop loss at $[actual price level].
 
-TARGETS: TP1 at $[PRICE] close 33 percent. TP2 at $[PRICE] close 33 percent. Final TP at $[PRICE] close 34 percent.
+TARGETS: TP1 at $[actual price] close 33 percent. TP2 at $[actual price] close 33 percent. Final TP at $[actual price] close 34 percent.
 
-Example:
-TRADE: Take SPY 669 puts 0DTE at price $0.01 when SPY moves below $668.37.
-TIMING: Best entry 9:30-10:30 AM EST for volatility.
-STOP: Stop loss at $670.57.
-TARGETS: TP1 at $666.78 close 33 percent. TP2 at $665.00 close 33 percent. Final TP at $663.50 close 34 percent.
-
-CRITICAL: Use only strikes from the Best Strikes list above. Put spaces between all words. Do not combine words together.
+CRITICAL INSTRUCTIONS:
+- Use ONLY strike prices from the Best Strikes data provided above
+- Use the actual "Price" values shown in the strike data  
+- Calculate realistic target prices based on technical levels
+- Replace ALL placeholder text with real numbers
+- Do not write "$[PRICE]" - write actual dollar amounts
+- Provide 3 target levels without percentage allocations
+- Use proper spacing between all words
+- DO NOT copy any examples - analyze the actual data provided
 
 FORMATTING REQUIREMENTS:
 - Use proper spacing between all words
@@ -5592,17 +5594,37 @@ with tabs[6]:
                 if not flow_analysis.get("error"):
                     summary = flow_analysis.get("summary", {})
                     
-                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
-                    alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
+                    # Safe handling for metric values
+                    total_alerts = summary.get("total_alerts", 0) if summary else 0
+                    call_alerts = summary.get("call_alerts", 0) if summary else 0
+                    put_alerts = summary.get("put_alerts", 0) if summary else 0
+                    flow_sentiment = summary.get("flow_sentiment", "Neutral") if summary else "Neutral"
                     
-                    # Premium metrics
+                    # Ensure values are valid numbers
+                    total_alerts = int(total_alerts) if total_alerts is not None else 0
+                    call_alerts = int(call_alerts) if call_alerts is not None else 0
+                    put_alerts = int(put_alerts) if put_alerts is not None else 0
+                    
+                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
+                    alert_col1.metric("Total Alerts", total_alerts)
+                    alert_col2.metric("Call Alerts", call_alerts)
+                    alert_col3.metric("Put Alerts", put_alerts)
+                    alert_col4.metric("Flow Sentiment", flow_sentiment)
+                    
+                    # Premium metrics with safe handling
+                    total_premium = summary.get("total_premium", 0) if summary else 0
+                    bullish_flow = summary.get("bullish_flow", 0) if summary else 0
+                    bearish_flow = summary.get("bearish_flow", 0) if summary else 0
+                    
+                    # Ensure premium values are valid numbers
+                    total_premium = float(total_premium) if total_premium is not None else 0
+                    bullish_flow = float(bullish_flow) if bullish_flow is not None else 0
+                    bearish_flow = float(bearish_flow) if bearish_flow is not None else 0
+                    
                     prem_col1, prem_col2, prem_col3 = st.columns(3)
-                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
-                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
-                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
+                    prem_col1.metric("Total Premium", f"${total_premium:,.0f}")
+                    prem_col2.metric("Bullish Flow", f"${bullish_flow:,.0f}")
+                    prem_col3.metric("Bearish Flow", f"${bearish_flow:,.0f}")
                     
                     # Display top alerts
                     if flow_analysis.get("alerts"):
