@@ -5594,32 +5594,45 @@ with tabs[6]:
                 if not flow_analysis.get("error"):
                     summary = flow_analysis.get("summary", {})
                     
-                    # Safe handling for metric values
-                    total_alerts = summary.get("total_alerts", 0) if summary else 0
-                    call_alerts = summary.get("call_alerts", 0) if summary else 0
-                    put_alerts = summary.get("put_alerts", 0) if summary else 0
-                    flow_sentiment = summary.get("flow_sentiment", "Neutral") if summary else "Neutral"
+                    # Extra safe handling for metric values
+                    if flow_analysis and isinstance(flow_analysis, dict) and not flow_analysis.get("error"):
+                        summary = flow_analysis.get("summary")
+                        if summary and isinstance(summary, dict):
+                            total_alerts = summary.get("total_alerts", 0)
+                            call_alerts = summary.get("call_alerts", 0)
+                            put_alerts = summary.get("put_alerts", 0)
+                            flow_sentiment = summary.get("flow_sentiment", "Neutral")
+                            total_premium = summary.get("total_premium", 0)
+                            bullish_flow = summary.get("bullish_flow", 0)
+                            bearish_flow = summary.get("bearish_flow", 0)
+                        else:
+                            # Default values if summary is invalid
+                            total_alerts = call_alerts = put_alerts = 0
+                            flow_sentiment = "Neutral"
+                            total_premium = bullish_flow = bearish_flow = 0
+                    else:
+                        # Default values if flow_analysis is invalid
+                        total_alerts = call_alerts = put_alerts = 0
+                        flow_sentiment = "Neutral" 
+                        total_premium = bullish_flow = bearish_flow = 0
                     
-                    # Ensure values are valid numbers
-                    total_alerts = int(total_alerts) if total_alerts is not None else 0
-                    call_alerts = int(call_alerts) if call_alerts is not None else 0
-                    put_alerts = int(put_alerts) if put_alerts is not None else 0
+                    # Ensure all values are proper types
+                    try:
+                        total_alerts = int(total_alerts) if total_alerts is not None else 0
+                        call_alerts = int(call_alerts) if call_alerts is not None else 0
+                        put_alerts = int(put_alerts) if put_alerts is not None else 0
+                        total_premium = float(total_premium) if total_premium is not None else 0.0
+                        bullish_flow = float(bullish_flow) if bullish_flow is not None else 0.0
+                        bearish_flow = float(bearish_flow) if bearish_flow is not None else 0.0
+                    except (ValueError, TypeError):
+                        total_alerts = call_alerts = put_alerts = 0
+                        total_premium = bullish_flow = bearish_flow = 0.0
                     
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
                     alert_col1.metric("Total Alerts", total_alerts)
                     alert_col2.metric("Call Alerts", call_alerts)
                     alert_col3.metric("Put Alerts", put_alerts)
                     alert_col4.metric("Flow Sentiment", flow_sentiment)
-                    
-                    # Premium metrics with safe handling
-                    total_premium = summary.get("total_premium", 0) if summary else 0
-                    bullish_flow = summary.get("bullish_flow", 0) if summary else 0
-                    bearish_flow = summary.get("bearish_flow", 0) if summary else 0
-                    
-                    # Ensure premium values are valid numbers
-                    total_premium = float(total_premium) if total_premium is not None else 0
-                    bullish_flow = float(bullish_flow) if bullish_flow is not None else 0
-                    bearish_flow = float(bearish_flow) if bearish_flow is not None else 0
                     
                     prem_col1, prem_col2, prem_col3 = st.columns(3)
                     prem_col1.metric("Total Premium", f"${total_premium:,.0f}")
