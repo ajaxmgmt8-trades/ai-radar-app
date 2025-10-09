@@ -5416,6 +5416,8 @@ with tabs[6]:
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
                 
                 flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
+                st.write("🔬 DEBUG: Raw Flow Alerts Response")  # ← ADD THIS
+                st.json(flow_alerts_data)                        # ← ADD THIS
                 st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
                 if flow_alerts_data.get('data'):
                     st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
