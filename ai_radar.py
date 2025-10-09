@@ -5594,26 +5594,22 @@ with tabs[6]:
                 if not flow_analysis.get("error"):
                     summary = flow_analysis.get("summary", {})
                     
-                    alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
-                    alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
+                    # DEBUG: Show what's actually in the data
+                    st.write("DEBUG flow_analysis keys:", list(flow_analysis.keys()) if flow_analysis else "None")
+                    st.write("DEBUG summary:", summary)
+                    st.write("DEBUG total_alerts type:", type(summary.get("total_alerts")))
+                    st.write("DEBUG total_alerts value:", summary.get("total_alerts"))
                     
-                    # Premium metrics
-                    prem_col1, prem_col2, prem_col3 = st.columns(3)
-                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
-                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
-                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
-                    
-                    # Display top alerts
-                    if flow_analysis.get("alerts"):
-                        with st.expander("📋 Recent Flow Alerts"):
-                            alerts_df = pd.DataFrame(flow_analysis["alerts"])
-                            if not alerts_df.empty:
-                                # Sort by premium
-                                alerts_df = alerts_df.sort_values('premium', ascending=False)
-                                st.dataframe(alerts_df.head(10), use_container_width=True)
+                    # Try safe display
+                    try:
+                        alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
+                        alert_col1.metric("Total Alerts", str(summary.get("total_alerts", 0)))
+                        alert_col2.metric("Call Alerts", str(summary.get("call_alerts", 0)))
+                        alert_col3.metric("Put Alerts", str(summary.get("put_alerts", 0)))
+                        alert_col4.metric("Flow Sentiment", str(summary.get("flow_sentiment", "Neutral")))
+                    except Exception as e:
+                        st.error(f"Metric display error: {e}")
+                        st.write("Raw summary data:", summary)
                 else:
                     st.info(f"Flow Alerts: {flow_analysis.get('error', 'No data available')}")
                 
