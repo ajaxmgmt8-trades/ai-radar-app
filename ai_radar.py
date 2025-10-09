@@ -4148,43 +4148,23 @@ st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", avail
 
 # Data source status
 st.sidebar.subheader("Data Sources Status")
+
 if uw_client:
     st.sidebar.success("🔥 Unusual Whales Connected (PRIMARY)")
 else:
     st.sidebar.error("❌ Unusual Whales Not Connected")
+
 if twelvedata_client:
     st.sidebar.success("✅ Twelve Data Connected")
 else:
     st.sidebar.warning("⚠️ Twelve Data Not Connected")
+
 st.sidebar.success("✅ Yahoo Finance Connected (Fallback)")
+
 if FINNHUB_KEY:
     st.sidebar.success("✅ Finnhub API Connected")
 else:
     st.sidebar.warning("⚠️ Finnhub API Not Found")
-
-# ADD THIS DEBUG SECTION HERE ⬇️
-st.sidebar.subheader("🔬 Diagnostics")
-if st.sidebar.button("Test UW API Call"):
-    st.sidebar.write("**Testing UW API...**")
-    
-    if not uw_client:
-        st.sidebar.error("UW client not initialized")
-    else:
-        st.sidebar.write(f"API Key: `{UNUSUAL_WHALES_KEY[:20]}...`")
-        st.sidebar.write(f"Headers:")
-        st.sidebar.code(str(uw_client.headers))
-        
-        try:
-            import requests
-            response = requests.get(
-                "https://api.unusualwhales.com/api/stock/AAPL/stock-state",
-                headers=uw_client.headers,
-                timeout=10
-            )
-            st.sidebar.write(f"Status: **{response.status_code}**")
-            st.sidebar.json(response.json() if response.status_code == 200 else {"error": response.text})
-        except Exception as e:
-            st.sidebar.error(str(e))
 
 # Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🛠 Debug Mode", help="Show API response details")
@@ -5416,8 +5396,6 @@ with tabs[6]:
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
                 
                 flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
-                st.write("🔬 DEBUG: Raw Flow Alerts Response")  # ← ADD THIS
-                st.json(flow_alerts_data)                        # ← ADD THIS
                 st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
                 if flow_alerts_data.get('data'):
                     st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
@@ -5458,16 +5436,6 @@ with tabs[6]:
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
                 volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
-
-                # ADD THIS DEBUG RIGHT BEFORE THE FLOW ALERTS DISPLAY (line ~5460)
-                st.write("🔬 DEBUG: Flow Analysis Structure")
-                st.json({
-                    "has_error": bool(flow_analysis.get("error")),
-                    "error": flow_analysis.get("error"),
-                    "has_summary": "summary" in flow_analysis,
-                    "summary_value": flow_analysis.get("summary"),
-                    "keys": list(flow_analysis.keys()) if isinstance(flow_analysis, dict) else "Not a dict"
-                })
                 
                 # Display UW Flow Alerts
                 st.markdown("#### 🔥 Flow Alerts")
@@ -6981,6 +6949,8 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
+
 
 
 
