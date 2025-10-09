@@ -5595,17 +5595,16 @@ with tabs[6]:
                     summary = flow_analysis.get("summary", {})
                     
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", int(summary.get("total_alerts", 0)) if summary.get("total_alerts") is not None else 0)
-                    alert_col2.metric("Call Alerts", int(summary.get("call_alerts", 0)) if summary.get("call_alerts") is not None else 0)
-                    alert_col3.metric("Put Alerts", int(summary.get("put_alerts", 0)) if summary.get("put_alerts") is not None else 0)
+                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
+                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
                     alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
                     
                     # Premium metrics
                     prem_col1, prem_col2, prem_col3 = st.columns(3)
-                    prem_col1.metric("Total Premium", f"${float(summary.get('total_premium', 0)) if summary.get('total_premium') is not None else 0:,.0f}")
-                    prem_col2.metric("Bullish Flow", f"${float(summary.get('bullish_flow', 0)) if summary.get('bullish_flow') is not None else 0:,.0f}")
-                    prem_col3.metric("Bearish Flow", f"${float(summary.get('bearish_flow', 0)) if summary.get('bearish_flow') is not None else 0:,.0f}")
-                    
+                    prem_col1.metric("Total Premium", f"${summary.get('total_premium', 0):,.0f}")
+                    prem_col2.metric("Bullish Flow", f"${summary.get('bullish_flow', 0):,.0f}")
+                    prem_col3.metric("Bearish Flow", f"${summary.get('bearish_flow', 0):,.0f}")
                     
                     # Display top alerts
                     if flow_analysis.get("alerts"):
