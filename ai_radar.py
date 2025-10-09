@@ -4148,23 +4148,43 @@ st.session_state.data_source = st.sidebar.selectbox("Primary Data Source", avail
 
 # Data source status
 st.sidebar.subheader("Data Sources Status")
-
 if uw_client:
     st.sidebar.success("🔥 Unusual Whales Connected (PRIMARY)")
 else:
     st.sidebar.error("❌ Unusual Whales Not Connected")
-
 if twelvedata_client:
     st.sidebar.success("✅ Twelve Data Connected")
 else:
     st.sidebar.warning("⚠️ Twelve Data Not Connected")
-
 st.sidebar.success("✅ Yahoo Finance Connected (Fallback)")
-
 if FINNHUB_KEY:
     st.sidebar.success("✅ Finnhub API Connected")
 else:
     st.sidebar.warning("⚠️ Finnhub API Not Found")
+
+# ADD THIS DEBUG SECTION HERE ⬇️
+st.sidebar.subheader("🔬 Diagnostics")
+if st.sidebar.button("Test UW API Call"):
+    st.sidebar.write("**Testing UW API...**")
+    
+    if not uw_client:
+        st.sidebar.error("UW client not initialized")
+    else:
+        st.sidebar.write(f"API Key: `{UNUSUAL_WHALES_KEY[:20]}...`")
+        st.sidebar.write(f"Headers:")
+        st.sidebar.code(str(uw_client.headers))
+        
+        try:
+            import requests
+            response = requests.get(
+                "https://api.unusualwhales.com/api/stock/AAPL/stock-state",
+                headers=uw_client.headers,
+                timeout=10
+            )
+            st.sidebar.write(f"Status: **{response.status_code}**")
+            st.sidebar.json(response.json() if response.status_code == 200 else {"error": response.text})
+        except Exception as e:
+            st.sidebar.error(str(e))
 
 # Debug toggle and API test
 debug_mode = st.sidebar.checkbox("🛠 Debug Mode", help="Show API response details")
