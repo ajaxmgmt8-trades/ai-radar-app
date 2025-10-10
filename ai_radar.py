@@ -5440,8 +5440,8 @@ with tabs[6]:
                 # Display UW Flow Alerts
                 st.markdown("#### 🔥 Flow Alerts")
                 if not flow_analysis.get("error"):
+                    #summary = flow_analysis.get("summary", {})
                     summary = flow_analysis.get("summary", {})
-                    
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
                     alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
                     alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
