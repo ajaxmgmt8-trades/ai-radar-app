@@ -5458,6 +5458,78 @@ with tabs[6]:
 
     # Get base data
     quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
+
+    # ============ ADD DEBUG CODE HERE ============
+    if uw_client:
+        st.markdown("---")
+        st.markdown("### 🔬 DEBUG: Testing UW Flow Alerts API")
+        
+        with st.expander("🧪 Click to view API test results", expanded=True):
+            st.write(f"**Testing flow alerts for: {flow_ticker}**")
+            
+            # Test raw API call
+            st.write("**Step 1: Raw API Response**")
+            test_result = uw_client.get_flow_alerts(flow_ticker)
+            
+            if test_result.get("error"):
+                st.error(f"❌ API Error: {test_result['error']}")
+            else:
+                st.success("✅ API call successful")
+                st.write(f"Response keys: {list(test_result.keys())}")
+                
+                # Check data structure
+                if "data" in test_result:
+                    data = test_result["data"]
+                    st.write(f"Data type: {type(data)}")
+                    
+                    if isinstance(data, list):
+                        st.write(f"Number of alerts: {len(data)}")
+                        if len(data) > 0:
+                            st.write("**First alert sample:**")
+                            st.json(data[0])
+                    elif isinstance(data, dict):
+                        st.write(f"Data is dict with keys: {list(data.keys())}")
+                        if "data" in data:
+                            nested = data["data"]
+                            st.write(f"Nested data type: {type(nested)}")
+                            if isinstance(nested, list):
+                                st.write(f"Number of nested alerts: {len(nested)}")
+                                if len(nested) > 0:
+                                    st.write("**First nested alert sample:**")
+                                    st.json(nested[0])
+            
+            # Test analysis function
+            st.write("**Step 2: Analysis Function**")
+            test_analysis = analyze_flow_alerts(test_result, flow_ticker)
+            
+            if test_analysis.get("error"):
+                st.error(f"❌ Analysis Error: {test_analysis['error']}")
+            else:
+                st.success("✅ Analysis successful")
+                summary = test_analysis.get("summary", {})
+                st.write(f"Summary type: {type(summary)}")
+                st.write(f"Is dict? {isinstance(summary, dict)}")
+                
+                if isinstance(summary, dict):
+                    st.write("**Summary metrics:**")
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                    col2.metric("Call Alerts", summary.get("call_alerts", 0))
+                    col3.metric("Put Alerts", summary.get("put_alerts", 0))
+                    
+                    st.write("**Full summary:**")
+                    st.json(summary)
+                else:
+                    st.error(f"⚠️ Summary is not a dict! Type: {type(summary)}")
+                    st.write(f"Summary value: {summary}")
+            
+            st.write("**Step 3: Full Analysis Structure**")
+            st.json(test_analysis)
+        
+        st.markdown("---")
+    else:
+        st.error("UW client not available for debugging")
+    # ============ END DEBUG CODE ============
     
     if not quote.get("error"):
         # Basic quote info
