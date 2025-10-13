@@ -5451,10 +5451,15 @@ with tabs[6]:
                 # Display UW Flow Alerts
                 st.markdown("#### 🔥 Flow Alerts")
                 if not flow_analysis.get("error"):
-                    #summary = flow_analysis.get("summary", {})
                     summary = flow_analysis.get("summary", {})
+                    # DEBUG: Show what's actually in summary
+                    st.write("🔍 DEBUG summary type:", type(summary))
+                    st.write("🔍 DEBUG summary value:", summary)
+                    st.write("🔍 DEBUG summary keys:", list(summary.keys()) if isinstance(summary, dict) else "Not a dict")
+                    st.write("🔍 DEBUG call_alerts exists?", "call_alerts" in summary if isinstance(summary, dict) else False)
+    
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                   # alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
                     alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
                     alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
                     alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
