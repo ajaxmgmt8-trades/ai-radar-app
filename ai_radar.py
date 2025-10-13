@@ -17,6 +17,28 @@ from datetime import datetime, date
 from datetime import timedelta
 import re
 
+# ============ PASSWORD PROTECTION ============
+# Put this BEFORE st.set_page_config()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 AI Radar Pro - Login Required")
+    password = st.text_input("Enter Password", type="password", key="login_password")
+    
+    if st.button("Login"):
+        if password == "Dreauken08$":  # CHANGE THIS PASSWORD
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("❌ Incorrect password")
+    
+    st.stop()  # Stops execution here if not authenticated
+
+# If we get here, user is authenticated
+# ============ END PASSWORD PROTECTION ============
+
 # Configure page
 st.set_page_config(page_title="AI Radar Pro", layout="wide")
 
