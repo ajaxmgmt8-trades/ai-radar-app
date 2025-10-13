@@ -5465,7 +5465,7 @@ with tabs[6]:
                     #summary = flow_analysis.get("summary", {})
                     summary = flow_analysis.get("summary", {})
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
+                   # alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
                     alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
                     alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
                     alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
