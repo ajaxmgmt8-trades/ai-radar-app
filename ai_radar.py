@@ -215,59 +215,59 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-    """Get options flow alerts with comprehensive filtering"""
-    endpoint = "/api/option-trades/flow-alerts"
-    
-    params = {
-        # Basic filters (all default to True)
-        "all_opening": True,
-        "is_ask_side": True,
-        "is_bid_side": True,
-        "is_call": True,
-        "is_put": True,
-        "is_sweep": True,
-        "is_floor": True,
+        """Get options flow alerts with comprehensive filtering"""
+        endpoint = "/api/option-trades/flow-alerts"
         
-        # Result limits
-        "limit": 100,  # Max 200
+        params = {
+            # Basic filters (all default to True)
+            "all_opening": True,
+            "is_ask_side": True,
+            "is_bid_side": True,
+            "is_call": True,
+            "is_put": True,
+            "is_sweep": True,
+            "is_floor": True,
+            
+            # Result limits
+            "limit": 100,  # Max 200
+            
+            # Premium filters (for significant alerts)
+            "min_premium": 10000,  # $10k minimum premium
+            "max_premium": 5000000,  # $5M max to filter out huge outliers
+            
+            # Size filters
+            "min_size": 25,  # Minimum 25 contracts
+            
+            # Volume filters
+            "min_volume": 100,  # Minimum volume
+            "min_volume_oi_ratio": 1,  # Volume must be >= OI (new activity)
+            
+            # Days to expiry filters
+            "min_dte": 0,  # Include 0DTE
+            "max_dte": 365,  # Up to 1 year out
+            
+            # Open Interest filters
+            "min_open_interest": 50,  # Some existing OI
+            
+            # Issue types
+            "issue_types[]": ["Common Stock", "ETF"],
+            
+            # Rule names for quality alerts
+            "rule_name[]": [
+                "RepeatedHits",
+                "RepeatedHitsAscendingFill", 
+                "RepeatedHitsDescendingFill",
+                "FloorTradeLargeCap",
+                "FloorTradeMidCap",
+                "SweepsFollowedByFloor"
+            ]
+        }
         
-        # Premium filters (for significant alerts)
-        "min_premium": 10000,  # $10k minimum premium
-        "max_premium": 5000000,  # $5M max to filter out huge outliers
+        # Add ticker filter if specified
+        if ticker:
+            params["ticker_symbol"] = ticker
         
-        # Size filters
-        "min_size": 25,  # Minimum 25 contracts
-        
-        # Volume filters
-        "min_volume": 100,  # Minimum volume
-        "min_volume_oi_ratio": 1,  # Volume must be >= OI (new activity)
-        
-        # Days to expiry filters
-        "min_dte": 0,  # Include 0DTE
-        "max_dte": 365,  # Up to 1 year out
-        
-        # Open Interest filters
-        "min_open_interest": 50,  # Some existing OI
-        
-        # Issue types
-        "issue_types[]": ["Common Stock", "ETF"],
-        
-        # Rule names for quality alerts
-        "rule_name[]": [
-            "RepeatedHits",
-            "RepeatedHitsAscendingFill", 
-            "RepeatedHitsDescendingFill",
-            "FloorTradeLargeCap",
-            "FloorTradeMidCap",
-            "SweepsFollowedByFloor"
-        ]
-    }
-    
-    # Add ticker filter if specified
-    if ticker:
-        params["ticker_symbol"] = ticker
-    
-    return self._make_request(endpoint, params)
+        return self._make_request(endpoint, params)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
