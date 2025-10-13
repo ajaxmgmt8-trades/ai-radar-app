@@ -5422,6 +5422,28 @@ with tabs[6]:
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
                 
                 flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
+                # Add RIGHT AFTER:
+                st.write("🔍 DEBUG: Raw API Response")
+                st.write("Keys:", list(flow_alerts_data.keys()) if isinstance(flow_alerts_data, dict) else "Not a dict")
+                st.write("Has 'data' key?", "data" in flow_alerts_data if isinstance(flow_alerts_data, dict) else False)
+                
+                if "data" in flow_alerts_data:
+                    data_field = flow_alerts_data["data"]
+                    st.write("Type of 'data' field:", type(data_field))
+                    st.write("Is it a list?", isinstance(data_field, list))
+                    st.write("Is it a dict?", isinstance(data_field, dict))
+                    
+                    if isinstance(data_field, list):
+                        st.write("Length of data array:", len(data_field))
+                        if len(data_field) > 0:
+                            st.write("First alert:")
+                            st.json(data_field[0])
+                    elif isinstance(data_field, dict):
+                        st.write("Data is a dict with keys:", list(data_field.keys()))
+                        if "data" in data_field:
+                            st.write("DOUBLE NESTED! data.data exists")
+                            nested = data_field["data"]
+                            st.write("Length of nested data:", len(nested) if isinstance(nested, list) else "Not a list")
                 st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
                 if flow_alerts_data.get('data'):
                     st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
