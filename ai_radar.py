@@ -215,11 +215,12 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get options flow alerts with comprehensive filtering"""
+        """Get options flow alerts with comprehensive filtering - CORRECT API PARAMS"""
         endpoint = "/api/option-trades/flow-alerts"
         
+        # Use EXACT parameter names from UW API documentation
         params = {
-            # Basic filters (all default to True)
+            # Basic filters (all default to True per API docs)
             "all_opening": True,
             "is_ask_side": True,
             "is_bid_side": True,
@@ -229,30 +230,28 @@ class UnusualWhalesClient:
             "is_floor": True,
             
             # Result limits
-            "limit": 100,  # Max 200
+            "limit": 100,  # Max 200 per API docs
             
-            # Premium filters (for significant alerts)
-            "min_premium": 10000,  # $10k minimum premium
-            "max_premium": 5000000,  # $5M max to filter out huge outliers
+            # Premium filters - RELAXED for better results
+            "min_premium": 5000,  # $5k minimum (was too high before)
             
-            # Size filters
-            "min_size": 25,  # Minimum 25 contracts
+            # Size filters - RELAXED
+            "min_size": 10,  # Minimum 10 contracts (was 25)
             
-            # Volume filters
-            "min_volume": 100,  # Minimum volume
-            "min_volume_oi_ratio": 1,  # Volume must be >= OI (new activity)
+            # Volume filters - RELAXED
+            "min_volume": 50,  # Minimum volume (was 100)
             
             # Days to expiry filters
             "min_dte": 0,  # Include 0DTE
             "max_dte": 365,  # Up to 1 year out
             
-            # Open Interest filters
-            "min_open_interest": 50,  # Some existing OI
+            # Open Interest filters - RELAXED
+            "min_open_interest": 10,  # Some existing OI (was 50)
             
-            # Issue types
+            # Issue types - CORRECT format from API docs
             "issue_types[]": ["Common Stock", "ETF"],
             
-            # Rule names for quality alerts
+            # Rule names for quality alerts - CORRECT format
             "rule_name[]": [
                 "RepeatedHits",
                 "RepeatedHitsAscendingFill", 
@@ -659,18 +658,21 @@ def debug_atm_chains(ticker: str):
 # =================================================================
 
 def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
-    """Analyze flow alerts data from UW"""
+    """Analyze flow alerts data from UW - CORRECT API RESPONSE HANDLING"""
+    
     # 1. Check for errors FIRST
     if flow_alerts_data.get("error"):
         return {"error": flow_alerts_data["error"]}
     
     try:
-        # 2. Extract data (handle double-nesting)
-        data = flow_alerts_data.get("data", {})
-        if isinstance(data, dict) and "data" in data:
-            alerts = data["data"]  # Double nested: data.data
-        elif isinstance(data, list):
-            alerts = data  # Single nested: data
+        # 2. Extract data - API returns {"data": [...]}
+        raw_data = flow_alerts_data.get("data", [])
+        
+        # Handle if data is nested (sometimes UW returns {"data": {"data": [...]}})
+        if isinstance(raw_data, dict) and "data" in raw_data:
+            alerts = raw_data["data"]
+        elif isinstance(raw_data, list):
+            alerts = raw_data
         else:
             alerts = []
         
@@ -692,7 +694,7 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
                 "error": None
             }
         
-        # 4. Process alerts data
+        # 4. Process alerts using EXACT field names from API response
         processed_alerts = []
         call_alerts = []
         put_alerts = []
@@ -702,52 +704,87 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         bearish_flow = 0
         
         for alert in alerts:
-            if isinstance(alert, dict):
-                alert_type = alert.get("type", "").lower()
-                
-                # Extract premium safely
-                try:
-                    premium = float(alert.get("total_premium", 0))
-                except:
-                    premium = 0
-                
-                volume = int(alert.get("volume", 0)) if alert.get("volume") else 0
-                
-                processed_alert = {
-                    "type": alert_type,
-                    "strike": alert.get("strike", 0),
-                    "premium": premium,
-                    "volume": volume,
-                    "ticker": alert.get("ticker", ticker),
-                    "expiry": alert.get("expiry", ""),
-                    "price": alert.get("price", 0),
-                    "underlying_price": alert.get("underlying_price", 0),
-                    "time": alert.get("created_at", ""),
-                    "is_sweep": alert.get("has_sweep", False),
-                    "is_opening": alert.get("all_opening_trades", False)
-                }
-                
-                processed_alerts.append(processed_alert)
-                total_premium += premium
-                
-                if alert_type == "call":
-                    call_alerts.append(processed_alert)
-                    bullish_flow += premium
-                elif alert_type == "put":
-                    put_alerts.append(processed_alert)
-                    bearish_flow += premium
+            if not isinstance(alert, dict):
+                continue
+            
+            # Use EXACT field names from API documentation
+            alert_type = alert.get("type", "").lower()  # "call" or "put"
+            
+            # Extract premium - API returns as STRING
+            try:
+                premium = float(alert.get("total_premium", "0"))
+            except (ValueError, TypeError):
+                premium = 0
+            
+            # Extract volume - API returns as INTEGER
+            try:
+                volume = int(alert.get("volume", 0))
+            except (ValueError, TypeError):
+                volume = 0
+            
+            # Extract strike - API returns as STRING "375"
+            try:
+                strike = float(alert.get("strike", "0"))
+            except (ValueError, TypeError):
+                strike = 0
+            
+            # Extract underlying price - API returns as STRING
+            try:
+                underlying_price = float(alert.get("underlying_price", "0"))
+            except (ValueError, TypeError):
+                underlying_price = 0
+            
+            # Extract price - API returns as STRING
+            try:
+                price = float(alert.get("price", "0"))
+            except (ValueError, TypeError):
+                price = 0
+            
+            processed_alert = {
+                "type": alert_type,
+                "strike": strike,
+                "premium": premium,
+                "volume": volume,
+                "ticker": alert.get("ticker", ticker),
+                "expiry": alert.get("expiry", ""),
+                "price": price,
+                "underlying_price": underlying_price,
+                "created_at": alert.get("created_at", ""),
+                "option_chain": alert.get("option_chain", ""),
+                "alert_rule": alert.get("alert_rule", ""),
+                "open_interest": int(alert.get("open_interest", 0)),
+                "has_sweep": alert.get("has_sweep", False),
+                "has_floor": alert.get("has_floor", False),
+                "all_opening_trades": alert.get("all_opening_trades", False),
+                "total_ask_side_prem": float(alert.get("total_ask_side_prem", "0")),
+                "total_bid_side_prem": float(alert.get("total_bid_side_prem", "0")),
+                "trade_count": int(alert.get("trade_count", 0))
+            }
+            
+            processed_alerts.append(processed_alert)
+            total_premium += premium
+            
+            # Categorize by type
+            if alert_type == "call":
+                call_alerts.append(processed_alert)
+                bullish_flow += premium
+            elif alert_type == "put":
+                put_alerts.append(processed_alert)
+                bearish_flow += premium
         
         # 5. Calculate summary metrics
         total_alerts = len(processed_alerts)
         call_count = len(call_alerts)
         put_count = len(put_alerts)
         
+        # Determine sentiment
         flow_sentiment = "Neutral"
         if bullish_flow > bearish_flow * 1.2:
             flow_sentiment = "Bullish"
         elif bearish_flow > bullish_flow * 1.2:
             flow_sentiment = "Bearish"
         
+        # 6. Return properly structured dictionary
         return {
             "summary": {
                 "total_alerts": total_alerts,
@@ -765,7 +802,22 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         }
         
     except Exception as e:
-        return {"error": f"Error analyzing flow alerts: {str(e)}"}
+        # Always return a dict with error key
+        return {
+            "error": f"Error analyzing flow alerts: {str(e)}",
+            "summary": {
+                "total_alerts": 0,
+                "call_alerts": 0,
+                "put_alerts": 0,
+                "total_premium": 0,
+                "bullish_flow": 0,
+                "bearish_flow": 0,
+                "flow_sentiment": "Neutral"
+            },
+            "alerts": [],
+            "call_alerts": [],
+            "put_alerts": []
+        }
 
 def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
     """Analyze options volume data from UW"""
