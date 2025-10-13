@@ -215,32 +215,32 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-    """Get options flow alerts - MINIMAL FILTERS FOR TESTING"""
-    endpoint = "/api/option-trades/flow-alerts"
-    
-    # MINIMAL params - just get SOME data first!
-    params = {
-        # Basic filters - all True
-        "all_opening": True,
-        "is_ask_side": True,
-        "is_bid_side": True,
-        "is_call": True,
-        "is_put": True,
-        "is_sweep": True,
-        "is_floor": True,
+        """Get options flow alerts - MINIMAL FILTERS FOR TESTING"""
+        endpoint = "/api/option-trades/flow-alerts"
         
-        # Just limit, nothing else!
-        "limit": 100,
+        # MINIMAL params - just get SOME data first!
+        params = {
+            # Basic filters - all True
+            "all_opening": True,
+            "is_ask_side": True,
+            "is_bid_side": True,
+            "is_call": True,
+            "is_put": True,
+            "is_sweep": True,
+            "is_floor": True,
+            
+            # Just limit, nothing else!
+            "limit": 100,
+            
+            # REMOVE ALL RESTRICTIVE FILTERS FOR NOW
+            # We'll add them back once we confirm we can get data
+        }
         
-        # REMOVE ALL RESTRICTIVE FILTERS FOR NOW
-        # We'll add them back once we confirm we can get data
-    }
-    
-    # Add ticker filter if specified
-    if ticker:
-        params["ticker_symbol"] = ticker
-    
-    return self._make_request(endpoint, params)
+        # Add ticker filter if specified
+        if ticker:
+            params["ticker_symbol"] = ticker
+        
+        return self._make_request(endpoint, params)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
