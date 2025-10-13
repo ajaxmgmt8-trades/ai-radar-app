@@ -659,22 +659,12 @@ def debug_atm_chains(ticker: str):
 
 def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
     """Analyze flow alerts data from UW"""
-    data = flow_alerts_data.get("data", {})
-    if isinstance(data, dict) and "data" in data:
-        alerts = data["data"]
-    elif isinstance(data, list):
-        alerts = data
-    else:
-        alerts = []
-    if flow_alerts_data.get("error"):
-        return {"error": flow_alerts_data["error"]}
-    
-    # ... rest of your function
+    # 1. Check for errors FIRST
     if flow_alerts_data.get("error"):
         return {"error": flow_alerts_data["error"]}
     
     try:
-        # FIX: Handle double-nested data structure
+        # 2. Extract data (handle double-nesting)
         data = flow_alerts_data.get("data", {})
         if isinstance(data, dict) and "data" in data:
             alerts = data["data"]  # Double nested: data.data
@@ -683,10 +673,11 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         else:
             alerts = []
         
+        # 3. Return early if no alerts
         if not alerts:
             return {"summary": "No flow alerts found", "alerts": []}
         
-        # Process alerts data (rest of function stays the same)
+        # 4. Process alerts data
         processed_alerts = []
         call_alerts = []
         put_alerts = []
@@ -699,13 +690,11 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
             if isinstance(alert, dict):
                 alert_type = alert.get("type", "").lower()
                 
-                # Fix premium extraction
-                premium = 0
-                if alert.get("total_premium"):
-                    try:
-                        premium = float(alert["total_premium"])
-                    except:
-                        premium = 0
+                # Extract premium safely
+                try:
+                    premium = float(alert.get("total_premium", 0))
+                except:
+                    premium = 0
                 
                 volume = int(alert.get("volume", 0)) if alert.get("volume") else 0
                 
@@ -733,7 +722,7 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
                     put_alerts.append(processed_alert)
                     bearish_flow += premium
         
-        # Calculate summary metrics (rest stays the same)
+        # 5. Calculate summary metrics
         total_alerts = len(processed_alerts)
         call_count = len(call_alerts)
         put_count = len(put_alerts)
