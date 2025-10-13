@@ -215,58 +215,32 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get options flow alerts with comprehensive filtering - CORRECT API PARAMS"""
-        endpoint = "/api/option-trades/flow-alerts"
+    """Get options flow alerts - MINIMAL FILTERS FOR TESTING"""
+    endpoint = "/api/option-trades/flow-alerts"
+    
+    # MINIMAL params - just get SOME data first!
+    params = {
+        # Basic filters - all True
+        "all_opening": True,
+        "is_ask_side": True,
+        "is_bid_side": True,
+        "is_call": True,
+        "is_put": True,
+        "is_sweep": True,
+        "is_floor": True,
         
-        # Use EXACT parameter names from UW API documentation
-        params = {
-            # Basic filters (all default to True per API docs)
-            "all_opening": True,
-            "is_ask_side": True,
-            "is_bid_side": True,
-            "is_call": True,
-            "is_put": True,
-            "is_sweep": True,
-            "is_floor": True,
-            
-            # Result limits
-            "limit": 100,  # Max 200 per API docs
-            
-            # Premium filters - RELAXED for better results
-            "min_premium": 5000,  # $5k minimum (was too high before)
-            
-            # Size filters - RELAXED
-            "min_size": 10,  # Minimum 10 contracts (was 25)
-            
-            # Volume filters - RELAXED
-            "min_volume": 50,  # Minimum volume (was 100)
-            
-            # Days to expiry filters
-            "min_dte": 0,  # Include 0DTE
-            "max_dte": 365,  # Up to 1 year out
-            
-            # Open Interest filters - RELAXED
-            "min_open_interest": 10,  # Some existing OI (was 50)
-            
-            # Issue types - CORRECT format from API docs
-            "issue_types[]": ["Common Stock", "ETF"],
-            
-            # Rule names for quality alerts - CORRECT format
-            "rule_name[]": [
-                "RepeatedHits",
-                "RepeatedHitsAscendingFill", 
-                "RepeatedHitsDescendingFill",
-                "FloorTradeLargeCap",
-                "FloorTradeMidCap",
-                "SweepsFollowedByFloor"
-            ]
-        }
+        # Just limit, nothing else!
+        "limit": 100,
         
-        # Add ticker filter if specified
-        if ticker:
-            params["ticker_symbol"] = ticker
-        
-        return self._make_request(endpoint, params)
+        # REMOVE ALL RESTRICTIVE FILTERS FOR NOW
+        # We'll add them back once we confirm we can get data
+    }
+    
+    # Add ticker filter if specified
+    if ticker:
+        params["ticker_symbol"] = ticker
+    
+    return self._make_request(endpoint, params)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
