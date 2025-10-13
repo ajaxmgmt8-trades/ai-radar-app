@@ -676,7 +676,21 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         
         # 3. Return early if no alerts
         if not alerts:
-            return {"summary": "No flow alerts found", "alerts": []}
+            return {
+                "summary": {
+                    "total_alerts": 0,
+                    "call_alerts": 0,
+                    "put_alerts": 0,
+                    "total_premium": 0,
+                    "bullish_flow": 0,
+                    "bearish_flow": 0,
+                    "flow_sentiment": "Neutral"
+                },
+                "alerts": [],
+                "call_alerts": [],
+                "put_alerts": [],
+                "error": None
+            }
         
         # 4. Process alerts data
         processed_alerts = []
