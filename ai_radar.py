@@ -215,10 +215,9 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get options flow alerts - MINIMAL FILTERS FOR TESTING"""
+        """Get options flow alerts - MARKET WIDE FOR TESTING"""
         endpoint = "/api/option-trades/flow-alerts"
         
-        # MINIMAL params - just get SOME data first!
         params = {
             # Basic filters - all True
             "all_opening": True,
@@ -229,16 +228,16 @@ class UnusualWhalesClient:
             "is_sweep": True,
             "is_floor": True,
             
-            # Just limit, nothing else!
-            "limit": 100,
+            # Get MORE results
+            "limit": 200,  # Maximum allowed
             
-            # REMOVE ALL RESTRICTIVE FILTERS FOR NOW
-            # We'll add them back once we confirm we can get data
+            # NO ticker filter - get market-wide alerts
+            # NO time filters - get latest available
         }
         
-        # Add ticker filter if specified
-        if ticker:
-            params["ticker_symbol"] = ticker
+        # DON'T filter by ticker for now - just get ANY alerts
+        # if ticker:
+        #     params["ticker_symbol"] = ticker
         
         return self._make_request(endpoint, params)
         
