@@ -214,89 +214,16 @@ class UnusualWhalesClient:
         except Exception as e:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
-    def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get flow alerts - OPTIMIZED FOR BIG MONEY TRACKING"""
-        endpoint = "/api/option-trades/flow-alerts"
-        
-        params = {
-            # ========================================
-            # BASIC FILTERS - Keep ALL activity types
-            # ========================================
-            "all_opening": True,      # Include opening trades
-            "is_ask_side": True,      # Include ask side (bullish aggression)
-            "is_bid_side": True,      # Include bid side (bearish aggression)
-            "is_call": True,          # Include calls
-            "is_put": True,           # Include puts
-            "is_sweep": True,         # CRITICAL: Sweeps = whale activity
-            "is_floor": True,         # CRITICAL: Floor trades = institutions
-            
-            # ========================================
-            # RESULT LIMITS
-            # ========================================
-            "limit": 200,             # Max allowed - get as many as possible
-            
-            # ========================================
-            # BIG MONEY FILTERS - Only filter for size
-            # ========================================
-            "min_premium": 25000,     # $25k+ = meaningful institutional size
-            "min_size": 50,           # 50+ contracts = serious positioning
-            
-            # ========================================
-            # REMOVE ALL OTHER FILTERS
-            # Let the RULE NAMES do the filtering!
-            # ========================================
-            # No min_volume - let rules decide
-            # No min_volume_oi_ratio - let rules decide
-            # No min_open_interest - catches new positions
-            # No max_dte - catch all timeframes
-            
-            # ========================================
-            # CRITICAL: Alert Rules for Institutional Activity
-            # ========================================
-            "rule_name[]": [
-                "RepeatedHits",                    # Someone aggressively accumulating
-                "RepeatedHitsAscendingFill",       # Buying with increasing urgency
-                "RepeatedHitsDescendingFill",      # Selling with increasing urgency
-                "FloorTradeLargeCap",              # Institutional desk trading large caps
-                "FloorTradeMidCap",                # Institutional desk trading mid caps
-                "SweepsFollowedByFloor",           # Coordination between sweep and floor
-                "LowHistoricVolume",               # Unusual activity on quiet contracts
-                "FloorTradeSmallCap",              # Even small cap floor trades
-                "SweepsFollowedByFloor"            # Institutional coordination
-            ],
-            
-            # ========================================
-            # ISSUE TYPES - Stocks and ETFs only
-            # ========================================
-            "issue_types[]": ["Common Stock", "ETF"]
-        }
-        
-        # Add ticker filter if specified
-        if ticker:
-            params["ticker_symbol"] = ticker
-        
-        # IMPORTANT: If ticker-specific returns 0, try without ticker
-        result = self._make_request(endpoint, params)
-        
-        # Debug: Check if we got data
-        if result.get("data"):
-            data = result["data"]
-            if isinstance(data, dict) and "data" in data:
-                alerts = data["data"]
-            elif isinstance(data, list):
-                alerts = data
-            else:
-                alerts = []
-            
-            # If 0 results for specific ticker, try market-wide
-            if len(alerts) == 0 and ticker:
-                print(f"No alerts for {ticker}, trying market-wide...")
-                params_no_ticker = params.copy()
-                if "ticker_symbol" in params_no_ticker:
-                    del params_no_ticker["ticker_symbol"]
-                result = self._make_request(endpoint, params_no_ticker)
-        
-        return result
+    def get_flow_recent(self, ticker: str, min_premium: int = 0, side: str = "ALL") -> Dict:
+    """Get recent flow for ticker - SIMPLER ENDPOINT"""
+    endpoint = f"/api/stock/{ticker}/flow-recent"
+    
+    params = {
+        "min_premium": min_premium,  # Default 0 = get everything
+        "side": side  # ALL, ASK, BID, or MID
+    }
+    
+    return self._make_request(endpoint, params)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
