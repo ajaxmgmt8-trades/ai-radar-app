@@ -4447,7 +4447,8 @@ with tabs[0]:
                     
                     # UW Options Metrics (fast, auto-loading)
                     if uw_client:
-                        flow_alerts_data = uw_client.get_flow_recent(flow_ticker, min_premium=5000)
+                        # FIXED: Use 'ticker' consistently (not flow_ticker)
+                        flow_alerts_data = uw_client.get_flow_recent(ticker, min_premium=5000)
                         flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
                         
                         if flow_alerts_analysis and not flow_alerts_analysis.get("error"):
@@ -4455,7 +4456,9 @@ with tabs[0]:
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             
                             summary = flow_alerts_analysis.get('summary', {}) if flow_alerts_analysis else {}
-                            total_flows = summary.get('total_flows', 0) if isinstance(summary, dict) else 0
+                            
+                            # FIXED: Changed 'total_flows' to 'total_alerts'
+                            total_flows = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
                             flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
                             options_volume_data = uw_client.get_options_volume(ticker)
@@ -4467,7 +4470,7 @@ with tabs[0]:
                             
                             opt_col1.metric("Flow Alerts", total_flows)
                             opt_col2.metric("Flow Sentiment", flow_sentiment)
-                            opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
+                            opt_col3.metric("P/C Ratio", f"{pc_ratio:.2f}")
                             
                             options_data = {
                                 'flow_alerts': total_flows,
