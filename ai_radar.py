@@ -215,15 +215,15 @@ class UnusualWhalesClient:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
     def get_flow_recent(self, ticker: str, min_premium: int = 0, side: str = "ALL") -> Dict:
-    """Get recent flow for ticker - SIMPLER ENDPOINT"""
-    endpoint = f"/api/stock/{ticker}/flow-recent"
-    
-    params = {
-        "min_premium": min_premium,  # Default 0 = get everything
-        "side": side  # ALL, ASK, BID, or MID
-    }
-    
-    return self._make_request(endpoint, params)
+        """Get recent flow for ticker - SIMPLER ENDPOINT"""
+        endpoint = f"/api/stock/{ticker}/flow-recent"
+        
+        params = {
+            "min_premium": min_premium,  # Default 0 = get everything
+            "side": side  # ALL, ASK, BID, or MID
+        }
+        
+        return self._make_request(endpoint, params)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
