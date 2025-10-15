@@ -614,166 +614,134 @@ def debug_atm_chains(ticker: str):
 # ENHANCED FLOW ANALYSIS FUNCTIONS
 # =================================================================
 
-def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
-    """Analyze flow alerts data from UW - CORRECT API RESPONSE HANDLING"""
+def analyze_flow_recent(flow_data: Dict, ticker: str) -> Dict:
+    """Analyze recent flow data from UW - SIMPLER VERSION"""
     
-    # 1. Check for errors FIRST
-    if flow_alerts_data.get("error"):
-        return {"error": flow_alerts_data["error"]}
+    # 1. Check for errors
+    if flow_data.get("error"):
+        return {"error": flow_data["error"]}
     
     try:
-        # 2. Extract data - API returns {"data": [...]}
-        raw_data = flow_alerts_data.get("data", [])
+        # 2. Extract data - handle double nesting
+        raw_data = flow_data.get("data", [])
         
-        # Handle if data is nested (sometimes UW returns {"data": {"data": [...]}})
         if isinstance(raw_data, dict) and "data" in raw_data:
-            alerts = raw_data["data"]
+            flows = raw_data["data"]
         elif isinstance(raw_data, list):
-            alerts = raw_data
+            flows = raw_data
         else:
-            alerts = []
+            flows = []
         
-        # 3. Return early if no alerts
-        if not alerts:
+        # 3. Return early if no flows
+        if not flows:
             return {
                 "summary": {
-                    "total_alerts": 0,
-                    "call_alerts": 0,
-                    "put_alerts": 0,
+                    "total_flows": 0,
+                    "call_flows": 0,
+                    "put_flows": 0,
                     "total_premium": 0,
                     "bullish_flow": 0,
                     "bearish_flow": 0,
                     "flow_sentiment": "Neutral"
                 },
-                "alerts": [],
-                "call_alerts": [],
-                "put_alerts": [],
+                "flows": [],
+                "call_flows": [],
+                "put_flows": [],
                 "error": None
             }
         
-        # 4. Process alerts using EXACT field names from API response
-        processed_alerts = []
-        call_alerts = []
-        put_alerts = []
+        # 4. Process flows
+        processed_flows = []
+        call_flows = []
+        put_flows = []
         
         total_premium = 0
         bullish_flow = 0
         bearish_flow = 0
         
-        for alert in alerts:
-            if not isinstance(alert, dict):
+        for flow in flows:
+            if not isinstance(flow, dict):
                 continue
             
-            # Use EXACT field names from API documentation
-            alert_type = alert.get("type", "").lower()  # "call" or "put"
+            flow_type = flow.get("type", "").lower()
             
-            # Extract premium - API returns as STRING
             try:
-                premium = float(alert.get("total_premium", "0"))
+                premium = float(flow.get("premium", "0"))
             except (ValueError, TypeError):
                 premium = 0
             
-            # Extract volume - API returns as INTEGER
             try:
-                volume = int(alert.get("volume", 0))
+                volume = int(flow.get("volume", 0))
             except (ValueError, TypeError):
                 volume = 0
             
-            # Extract strike - API returns as STRING "375"
-            try:
-                strike = float(alert.get("strike", "0"))
-            except (ValueError, TypeError):
-                strike = 0
-            
-            # Extract underlying price - API returns as STRING
-            try:
-                underlying_price = float(alert.get("underlying_price", "0"))
-            except (ValueError, TypeError):
-                underlying_price = 0
-            
-            # Extract price - API returns as STRING
-            try:
-                price = float(alert.get("price", "0"))
-            except (ValueError, TypeError):
-                price = 0
-            
-            processed_alert = {
-                "type": alert_type,
-                "strike": strike,
+            processed_flow = {
+                "type": flow_type,
+                "strike": float(flow.get("strike", "0")),
                 "premium": premium,
                 "volume": volume,
-                "ticker": alert.get("ticker", ticker),
-                "expiry": alert.get("expiry", ""),
-                "price": price,
-                "underlying_price": underlying_price,
-                "created_at": alert.get("created_at", ""),
-                "option_chain": alert.get("option_chain", ""),
-                "alert_rule": alert.get("alert_rule", ""),
-                "open_interest": int(alert.get("open_interest", 0)),
-                "has_sweep": alert.get("has_sweep", False),
-                "has_floor": alert.get("has_floor", False),
-                "all_opening_trades": alert.get("all_opening_trades", False),
-                "total_ask_side_prem": float(alert.get("total_ask_side_prem", "0")),
-                "total_bid_side_prem": float(alert.get("total_bid_side_prem", "0")),
-                "trade_count": int(alert.get("trade_count", 0))
+                "ticker": flow.get("ticker", ticker),
+                "expiry": flow.get("expiry", ""),
+                "price": float(flow.get("price", "0")),
+                "underlying_price": float(flow.get("underlying_price", "0")),
+                "time": flow.get("time", ""),
+                "side": flow.get("side", ""),
+                "date": flow.get("date", ""),
+                "open_interest": int(flow.get("open_interest", 0))
             }
             
-            processed_alerts.append(processed_alert)
+            processed_flows.append(processed_flow)
             total_premium += premium
             
-            # Categorize by type
-            if alert_type == "call":
-                call_alerts.append(processed_alert)
+            if flow_type == "call":
+                call_flows.append(processed_flow)
                 bullish_flow += premium
-            elif alert_type == "put":
-                put_alerts.append(processed_alert)
+            elif flow_type == "put":
+                put_flows.append(processed_flow)
                 bearish_flow += premium
         
-        # 5. Calculate summary metrics
-        total_alerts = len(processed_alerts)
-        call_count = len(call_alerts)
-        put_count = len(put_alerts)
+        # 5. Calculate summary
+        total_flows = len(processed_flows)
+        call_count = len(call_flows)
+        put_count = len(put_flows)
         
-        # Determine sentiment
         flow_sentiment = "Neutral"
         if bullish_flow > bearish_flow * 1.2:
             flow_sentiment = "Bullish"
         elif bearish_flow > bullish_flow * 1.2:
             flow_sentiment = "Bearish"
         
-        # 6. Return properly structured dictionary
         return {
             "summary": {
-                "total_alerts": total_alerts,
-                "call_alerts": call_count,
-                "put_alerts": put_count,
+                "total_flows": total_flows,
+                "call_flows": call_count,
+                "put_flows": put_count,
                 "total_premium": total_premium,
                 "bullish_flow": bullish_flow,
                 "bearish_flow": bearish_flow,
                 "flow_sentiment": flow_sentiment
             },
-            "alerts": processed_alerts,
-            "call_alerts": call_alerts,
-            "put_alerts": put_alerts,
+            "flows": processed_flows,
+            "call_flows": call_flows,
+            "put_flows": put_flows,
             "error": None
         }
         
     except Exception as e:
-        # Always return a dict with error key
         return {
-            "error": f"Error analyzing flow alerts: {str(e)}",
+            "error": f"Error analyzing flows: {str(e)}",
             "summary": {
-                "total_alerts": 0,
-                "call_alerts": 0,
-                "put_alerts": 0,
+                "total_flows": 0,
+                "call_flows": 0,
+                "put_flows": 0,
                 "total_premium": 0,
                 "bullish_flow": 0,
                 "bearish_flow": 0,
                 "flow_sentiment": "Neutral"
             },
-            "alerts": [],
-            "call_alerts": [],
-            "put_alerts": []
+            "flows": [],
+            "call_flows": [],
+            "put_flows": []
         }
 
 def analyze_options_volume(options_volume_data: Dict, ticker: str) -> Dict:
@@ -861,9 +829,9 @@ def generate_flow_analysis_prompt(ticker: str, flow_data: Dict, volume_data: Dic
     if not flow_data.get("error"):
         summary = flow_data.get("summary", {})
         prompt += f"""
-        - Total Flow Alerts: {summary.get('total_alerts', 0)}
-        - Call Alerts: {summary.get('call_alerts', 0)}
-        - Put Alerts: {summary.get('put_alerts', 0)}
+        - Total Flow Alerts: {summary.get('total_flows', 0)}
+        - Call Alerts: {summary.get('call_flows', 0)}
+        - Put Alerts: {summary.get('put_flows', 0)}
         - Total Premium: ${summary.get('total_premium', 0):,.2f}
         - Bullish Flow: ${summary.get('bullish_flow', 0):,.2f}
         - Bearish Flow: ${summary.get('bearish_flow', 0):,.2f}
@@ -1606,11 +1574,11 @@ def analyze_uw_options_data(uw_data: Dict) -> Dict:
             metrics["total_flow_alerts"] = len(alerts) if isinstance(alerts, list) else 0
             
             if isinstance(alerts, list) and len(alerts) > 0:
-                call_alerts = [a for a in alerts if a.get("type", "").lower() == "call"]
-                put_alerts = [a for a in alerts if a.get("type", "").lower() == "put"]
-                metrics["call_flow_alerts"] = len(call_alerts)
-                metrics["put_flow_alerts"] = len(put_alerts)
-                metrics["flow_sentiment"] = "Bullish" if len(call_alerts) > len(put_alerts) else "Bearish" if len(put_alerts) > len(call_alerts) else "Neutral"
+                call_flows = [a for a in alerts if a.get("type", "").lower() == "call"]
+                put_flows = [a for a in alerts if a.get("type", "").lower() == "put"]
+                metrics["call_flow_alerts"] = len(call_flows)
+                metrics["put_flow_alerts"] = len(put_flows)
+                metrics["flow_sentiment"] = "Bullish" if len(call_flows) > len(put_flows) else "Bearish" if len(put_flows) > len(call_flows) else "Neutral"
         
         # Options volume analysis
         options_volume = uw_data.get("options_volume", {})
@@ -4479,7 +4447,7 @@ with tabs[0]:
                     
                     # UW Options Metrics (fast, auto-loading)
                     if uw_client:
-                        flow_alerts_data = uw_client.get_flow_alerts(ticker)
+                        flow_alerts_data = uw_client.get_flow_recent(flow_ticker, min_premium=5000)
                         flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
                         
                         if flow_alerts_analysis and not flow_alerts_analysis.get("error"):
@@ -4487,7 +4455,7 @@ with tabs[0]:
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             
                             summary = flow_alerts_analysis.get('summary', {}) if flow_alerts_analysis else {}
-                            total_alerts = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
+                            total_flows = summary.get('total_flows', 0) if isinstance(summary, dict) else 0
                             flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
                             options_volume_data = uw_client.get_options_volume(ticker)
@@ -4497,12 +4465,12 @@ with tabs[0]:
                                 vol_summary = options_volume_analysis.get('summary', {}) if options_volume_analysis else {}
                                 pc_ratio = vol_summary.get('put_call_ratio', 0.0) if isinstance(vol_summary, dict) else 0.0
                             
-                            opt_col1.metric("Flow Alerts", total_alerts)
+                            opt_col1.metric("Flow Alerts", total_flows)
                             opt_col2.metric("Flow Sentiment", flow_sentiment)
                             opt_col3.metric("ATM P/C Ratio", f"{pc_ratio:.2f}")
                             
                             options_data = {
-                                'flow_alerts': total_alerts,
+                                'flow_alerts': total_flows,
                                 'flow_sentiment': flow_sentiment,
                                 'put_call_ratio': pc_ratio,
                                 'data_source': 'Unusual Whales'
@@ -5470,9 +5438,9 @@ with tabs[6]:
                 if isinstance(summary, dict):
                     st.write("**Summary metrics:**")
                     col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    col3.metric("Put Alerts", summary.get("put_alerts", 0))
+                    col1.metric("Total Alerts", summary.get("total_flows", 0))
+                    col2.metric("Call Alerts", summary.get("call_flows", 0))
+                    col3.metric("Put Alerts", summary.get("put_flows", 0))
                     
                     st.write("**Full summary:**")
                     st.json(summary)
@@ -5574,12 +5542,12 @@ with tabs[6]:
                     st.write("🔍 DEBUG summary type:", type(summary))
                     st.write("🔍 DEBUG summary value:", summary)
                     st.write("🔍 DEBUG summary keys:", list(summary.keys()) if isinstance(summary, dict) else "Not a dict")
-                    st.write("🔍 DEBUG call_alerts exists?", "call_alerts" in summary if isinstance(summary, dict) else False)
+                    st.write("🔍 DEBUG call_flows exists?", "call_flows" in summary if isinstance(summary, dict) else False)
     
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
-                    alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    alert_col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    alert_col3.metric("Put Alerts", summary.get("put_alerts", 0))
+                    alert_col1.metric("Total Alerts", summary.get("total_flows", 0))
+                    alert_col2.metric("Call Alerts", summary.get("call_flows", 0))
+                    alert_col3.metric("Put Alerts", summary.get("put_flows", 0))
                     alert_col4.metric("Flow Sentiment", summary.get("flow_sentiment", "Neutral"))
                     
                     # Premium metrics
@@ -5755,7 +5723,7 @@ with tabs[6]:
                     flow_summary = flow_analysis.get("summary", {})
                     
                     flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
-                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_flows", 0))
                     flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
@@ -5931,7 +5899,7 @@ with tabs[6]:
                     flow_summary = flow_analysis.get("summary", {})
                     
                     flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
-                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_flows", 0))
                     flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
@@ -6093,7 +6061,7 @@ with tabs[6]:
                     flow_summary = flow_analysis.get("summary", {})
                     
                     flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
-                    flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+                    flow_col1.metric("Flow Alerts", flow_summary.get("total_flows", 0))
                     flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
                     flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
                     flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
@@ -6600,7 +6568,7 @@ with tabs[8]:
             flow_summary = flow_analysis.get("summary", {})
             
             flow_col1, flow_col2, flow_col3, flow_col4 = st.columns(4)
-            flow_col1.metric("Flow Alerts", flow_summary.get("total_alerts", 0))
+            flow_col1.metric("Flow Alerts", flow_summary.get("total_flows", 0))
             flow_col2.metric("Flow Sentiment", flow_summary.get("flow_sentiment", "Neutral"))
             flow_col3.metric("Bullish Flow", f"${flow_summary.get('bullish_flow', 0):,.0f}")
             flow_col4.metric("Bearish Flow", f"${flow_summary.get('bearish_flow', 0):,.0f}")
@@ -6646,7 +6614,7 @@ with tabs[8]:
                     lotto_summary += f"""
                     
                     🔥 UNUSUAL WHALES FLOW INTELLIGENCE:
-                    - Flow Alerts: {flow_summary.get('total_alerts', 0)}
+                    - Flow Alerts: {flow_summary.get('total_flows', 0)}
                     - Flow Sentiment: {flow_summary.get('flow_sentiment', 'Neutral')}
                     - Bullish Flow: ${flow_summary.get('bullish_flow', 0):,.0f}
                     - Bearish Flow: ${flow_summary.get('bearish_flow', 0):,.0f}
