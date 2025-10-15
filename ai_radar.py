@@ -4447,22 +4447,19 @@ with tabs[0]:
                     
                     # UW Options Metrics (fast, auto-loading)
                     if uw_client:
-                        # FIXED: Use 'ticker' consistently (not flow_ticker)
-                        flow_alerts_data = uw_client.get_flow_recent(ticker, min_premium=5000)
-                        flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, ticker)
+                        flow_alerts_data = uw_client.get_flow_recent(flow_ticker, min_premium=5000)
+                        flow_alerts_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)  # FIXED: ticker → flow_ticker
                         
                         if flow_alerts_analysis and not flow_alerts_analysis.get("error"):
                             st.write("***🔥 Unusual Whales Options Metrics:***")
                             opt_col1, opt_col2, opt_col3 = st.columns(3)
                             
                             summary = flow_alerts_analysis.get('summary', {}) if flow_alerts_analysis else {}
-                            
-                            # FIXED: Changed 'total_flows' to 'total_alerts'
                             total_flows = summary.get('total_alerts', 0) if isinstance(summary, dict) else 0
                             flow_sentiment = summary.get('flow_sentiment', 'Neutral') if isinstance(summary, dict) else 'Neutral'
                             
-                            options_volume_data = uw_client.get_options_volume(ticker)
-                            options_volume_analysis = analyze_options_volume(options_volume_data, ticker)
+                            options_volume_data = uw_client.get_options_volume(flow_ticker)  # FIXED: ticker → flow_ticker
+                            options_volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)  # FIXED: ticker → flow_ticker
                             pc_ratio = 0.0
                             if options_volume_analysis and not options_volume_analysis.get("error"):
                                 vol_summary = options_volume_analysis.get('summary', {}) if options_volume_analysis else {}
@@ -4482,7 +4479,7 @@ with tabs[0]:
                             st.info("UW data unavailable (API limit)")
                             options_data = {}
                     else:
-                        options_data = get_options_data(ticker) or {}
+                        options_data = get_options_data(flow_ticker) or {}  # FIXED: ticker → flow_ticker
                     
                     # AI Analysis Button (opt-in)
                     st.markdown("### 🎯 AI Playbook")
