@@ -3788,7 +3788,7 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
                     "type": option_type,
                     "volume": volume,
                     "premium": premium,
-                    "expiry": chain.get("last_fill", ""),
+                    "expiry": chain.get("expiration_date", chain.get("expiry", "")),
                     "underlying_price": float(chain.get("stock_price", 0)),
                     "price": float(chain.get("avg_price", 0)),
                     "iv": float(chain.get("vega", 0))  # Using vega as proxy since no direct IV
