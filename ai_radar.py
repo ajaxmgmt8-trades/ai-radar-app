@@ -5417,78 +5417,6 @@ with tabs[6]:
 
     # Get base data
     quote = get_live_quote(flow_ticker, st.session_state.selected_tz)
-
-    # ============ ADD DEBUG CODE HERE ============
-    if uw_client:
-        st.markdown("---")
-        st.markdown("### 🔬 DEBUG: Testing UW Flow Alerts API")
-        
-        with st.expander("🧪 Click to view API test results", expanded=True):
-            st.write(f"**Testing flow alerts for: {flow_ticker}**")
-            
-            # Test raw API call
-            st.write("**Step 1: Raw API Response**")
-            test_result = uw_client.get_flow_alerts(flow_ticker)
-            
-            if test_result.get("error"):
-                st.error(f"❌ API Error: {test_result['error']}")
-            else:
-                st.success("✅ API call successful")
-                st.write(f"Response keys: {list(test_result.keys())}")
-                
-                # Check data structure
-                if "data" in test_result:
-                    data = test_result["data"]
-                    st.write(f"Data type: {type(data)}")
-                    
-                    if isinstance(data, list):
-                        st.write(f"Number of alerts: {len(data)}")
-                        if len(data) > 0:
-                            st.write("**First alert sample:**")
-                            st.json(data[0])
-                    elif isinstance(data, dict):
-                        st.write(f"Data is dict with keys: {list(data.keys())}")
-                        if "data" in data:
-                            nested = data["data"]
-                            st.write(f"Nested data type: {type(nested)}")
-                            if isinstance(nested, list):
-                                st.write(f"Number of nested alerts: {len(nested)}")
-                                if len(nested) > 0:
-                                    st.write("**First nested alert sample:**")
-                                    st.json(nested[0])
-            
-            # Test analysis function
-            st.write("**Step 2: Analysis Function**")
-            test_analysis = analyze_flow_alerts(test_result, flow_ticker)
-            
-            if test_analysis.get("error"):
-                st.error(f"❌ Analysis Error: {test_analysis['error']}")
-            else:
-                st.success("✅ Analysis successful")
-                summary = test_analysis.get("summary", {})
-                st.write(f"Summary type: {type(summary)}")
-                st.write(f"Is dict? {isinstance(summary, dict)}")
-                
-                if isinstance(summary, dict):
-                    st.write("**Summary metrics:**")
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Total Alerts", summary.get("total_alerts", 0))
-                    col2.metric("Call Alerts", summary.get("call_alerts", 0))
-                    col3.metric("Put Alerts", summary.get("put_alerts", 0))
-                    
-                    st.write("**Full summary:**")
-                    st.json(summary)
-                else:
-                    st.error(f"⚠️ Summary is not a dict! Type: {type(summary)}")
-                    st.write(f"Summary value: {summary}")
-            
-            st.write("**Step 3: Full Analysis Structure**")
-            st.json(test_analysis)
-        
-        st.markdown("---")
-    else:
-        st.error("UW client not available for debugging")
-    # ============ END DEBUG CODE ============
     
     if not quote.get("error"):
         # Basic quote info
@@ -5505,49 +5433,11 @@ with tabs[6]:
             with st.spinner(f"Fetching comprehensive flow data from Unusual Whales for {flow_ticker}..."):
                 
                 flow_alerts_data = uw_client.get_flow_alerts(flow_ticker)
-                # Add RIGHT AFTER:
-                st.write("🔍 DEBUG: Raw API Response")
-                st.write("Keys:", list(flow_alerts_data.keys()) if isinstance(flow_alerts_data, dict) else "Not a dict")
-                st.write("Has 'data' key?", "data" in flow_alerts_data if isinstance(flow_alerts_data, dict) else False)
-                
-                if "data" in flow_alerts_data:
-                    data_field = flow_alerts_data["data"]
-                    st.write("Type of 'data' field:", type(data_field))
-                    st.write("Is it a list?", isinstance(data_field, list))
-                    st.write("Is it a dict?", isinstance(data_field, dict))
-                    
-                    if isinstance(data_field, list):
-                        st.write("Length of data array:", len(data_field))
-                        if len(data_field) > 0:
-                            st.write("First alert:")
-                            st.json(data_field[0])
-                    elif isinstance(data_field, dict):
-                        st.write("Data is a dict with keys:", list(data_field.keys()))
-                        if "data" in data_field:
-                            st.write("DOUBLE NESTED! data.data exists")
-                            nested = data_field["data"]
-                            st.write("Length of nested data:", len(nested) if isinstance(nested, list) else "Not a list")
-                st.write(f"**Flow alerts:** Error={flow_alerts_data.get('error')}, Has data={bool(flow_alerts_data.get('data'))}")
-                if flow_alerts_data.get('data'):
-                    st.write(f"Flow alerts count: {len(flow_alerts_data['data']) if isinstance(flow_alerts_data['data'], list) else 'Not a list'}")
-                    st.write(f"First alert sample: {flow_alerts_data['data'][0] if isinstance(flow_alerts_data['data'], list) and len(flow_alerts_data['data']) > 0 else 'No data'}")
                 
                 options_volume_data = uw_client.get_options_volume(flow_ticker)
-                st.write(f"**Options volume:** Error={options_volume_data.get('error')}, Has data={bool(options_volume_data.get('data'))}")
+        
                 
                 hottest_chains_data = uw_client.get_hottest_chains()
-                st.write(f"**Hottest chains:** Error={hottest_chains_data.get('error')}, Has data={bool(hottest_chains_data.get('data'))}")
-                
-
-                # Add this first to see what raw data looks like:
-                st.write(f"DEBUG: Raw hottest chains keys: {list(hottest_chains_data.keys()) if isinstance(hottest_chains_data, dict) else 'Not a dict'}")
-                
-                # Then try the analysis:
-                try:
-                    hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
-                    st.write(f"DEBUG: Analysis successful: {hottest_chains_analysis}")
-                except Exception as e:
-                    st.write(f"DEBUG: Analysis failed with error: {str(e)}")
                 
                 # Test individual UW calls
                 st.write("**Testing individual UW endpoints:**")
@@ -5556,13 +5446,6 @@ with tabs[6]:
                     st.write(f"Stock state: {bool(test_stock_state.get('data'))} | Error: {test_stock_state.get('error')}")
                 except Exception as e:
                     st.write(f"Stock state error: {str(e)}")
-                
-                # Raw data inspection
-                with st.expander("🔬 Raw API Responses"):
-                    st.write("**Flow Alerts Raw:**")
-                    st.json(flow_alerts_data)
-                    st.write("**Options Volume Raw:**") 
-                    st.json(options_volume_data)
                         
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
@@ -5572,11 +5455,6 @@ with tabs[6]:
                 st.markdown("#### 🔥 Flow Alerts")
                 if not flow_analysis.get("error"):
                     summary = flow_analysis.get("summary", {})
-                    # DEBUG: Show what's actually in summary
-                    st.write("🔍 DEBUG summary type:", type(summary))
-                    st.write("🔍 DEBUG summary value:", summary)
-                    st.write("🔍 DEBUG summary keys:", list(summary.keys()) if isinstance(summary, dict) else "Not a dict")
-                    st.write("🔍 DEBUG call_alerts exists?", "call_alerts" in summary if isinstance(summary, dict) else False)
     
                     alert_col1, alert_col2, alert_col3, alert_col4 = st.columns(4)
                     alert_col1.metric("Total Alerts", summary.get("total_alerts", 0))
