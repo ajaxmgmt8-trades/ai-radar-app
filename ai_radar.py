@@ -3767,9 +3767,11 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
                 option_symbol = chain.get("option_symbol", "")
                 ticker_symbol = chain.get("ticker_symbol", "")
                 
-                # Extract strike from option_symbol (UW format: TICKER+YYMMDD+C/P+STRIKE*1000)
-                strike = 0
+                # Extract strike, type, and expiration from option_symbol (UW format: TICKER+YYMMDD+C/P+STRIKE*1000)
+                strike_price = 0
                 option_type = "unknown"
+                expiration_date = ""
+                
                 if option_symbol:
                     try:
                         # UW option symbol format
@@ -3777,18 +3779,39 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
                         pattern = r'^(?P<symbol>[\w]*)(?P<expiry>(\d{2})(\d{2})(\d{2}))(?P<type>[CP])(?P<strike>\d{8})$'
                         match = re.match(pattern, option_symbol)
                         if match:
-                            strike = int(match.group('strike')) / 1000.0
+                            # Extract strike and divide by 1000
+                            strike_raw = int(match.group('strike'))
+                            strike_price = strike_raw / 1000.0
                             option_type = 'call' if match.group('type') == 'C' else 'put'
+                            
+                            # Parse expiration date from YYMMDD
+                            expiry_raw = match.group('expiry')  # Gets "230908"
+                            year = int("20" + expiry_raw[0:2])  # "23" -> 2023
+                            month = int(expiry_raw[2:4])        # "09"
+                            day = int(expiry_raw[4:6])          # "08"
+                            expiration_date = f"{year}-{month:02d}-{day:02d}"  # "2023-09-08"
                     except:
                         pass
                 
+                # Format last_fill timestamp
+                last_fill_raw = chain.get("last_fill", "")
+                if last_fill_raw:
+                    try:
+                        # Convert "2023-09-08T17:45:32Z" to "2023-09-08 17:45:32"
+                        last_fill_formatted = last_fill_raw.replace("T", " ").replace("Z", "")
+                    except:
+                        last_fill_formatted = last_fill_raw
+                else:
+                    last_fill_formatted = ""
+                
                 processed_chain = {
                     "ticker": ticker_symbol,
-                    "strike": strike,
+                    "strike": strike_price,
                     "type": option_type,
                     "volume": volume,
                     "premium": premium,
-                    "expiry": chain.get("expiration_date", chain.get("expiry", "")),
+                    "expiry": expiration_date,
+                    "last_fill": last_fill_formatted,
                     "underlying_price": float(chain.get("stock_price", 0)),
                     "price": float(chain.get("avg_price", 0)),
                     "iv": float(chain.get("vega", 0))  # Using vega as proxy since no direct IV
