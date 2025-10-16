@@ -5450,6 +5450,7 @@ with tabs[6]:
                 # Analyze the data
                 flow_analysis = analyze_flow_alerts(flow_alerts_data, flow_ticker)
                 volume_analysis = analyze_options_volume(options_volume_data, flow_ticker)
+                hottest_chains_analysis = analyze_hottest_chains(hottest_chains_data)
                 
                 # Display UW Flow Alerts
                 st.markdown("#### 🔥 Flow Alerts")
