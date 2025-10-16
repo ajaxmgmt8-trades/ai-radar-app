@@ -3441,13 +3441,13 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     
     calls = option_data.get("calls", pd.DataFrame())
     puts = option_data.get("puts", pd.DataFrame())
-    days_to_exp = option_data.get("days_to_expiration", 0)
     current_price = option_data.get("current_price", 0)
     
     # Calculate key metrics
     total_call_volume = calls['volume'].sum() if not calls.empty else 0
     total_put_volume = puts['volume'].sum() if not puts.empty else 0
-    # Safe IV calculation with string-to-numeric conversion
+    
+    # Safe IV calculation
     avg_iv = 0
     try:
         if not calls.empty and 'impliedVolatility' in calls.columns:
@@ -3473,57 +3473,108 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
         else:
             avg_iv = 0
             
-    except Exception as e:
+    except Exception:
         avg_iv = 0
     
-    # Generate enhanced flow analysis prompt
-    hottest_chains_analysis = analyze_hottest_chains(hottest_chains)
-    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains_analysis)
+    # Get current timestamp for data freshness
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # Create timeframe-specific prompt with flow integration
+    # Generate enhanced flow analysis prompt with TIMING focus
+    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains)
+    
+    # Create comprehensive timeframe-specific prompt with ENTRY TIMING
     prompt = f"""
-    ENHANCED {timeframe} OPTIONS FLOW ANALYSIS FOR {ticker}:
+    REAL-TIME {timeframe} OPTIONS FLOW ANALYSIS FOR {ticker}:
     
-    === BASIC OPTIONS DATA ===
+    **DATA FRESHNESS:** This analysis uses LIVE data fetched at {current_time}
+    
+    === CURRENT MARKET STATE ===
     Current Price: ${current_price:.2f}
-    Days to Expiration: {days_to_exp}
     Timeframe Category: {timeframe}
     
-    Options Metrics:
+    === FRESH OPTIONS METRICS (JUST FETCHED) ===
     - Total Call Volume: {total_call_volume:,}
     - Total Put Volume: {total_put_volume:,}
     - Put/Call Volume Ratio: {total_put_volume/max(total_call_volume, 1):.2f}
     - Average IV: {avg_iv:.1f}%
     
-    Top 5 Call Strikes by Volume:
+    Top 5 Call Strikes by Volume (LIVE DATA):
     {calls.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not calls.empty else 'No call data'}
     
-    Top 5 Put Strikes by Volume:
+    Top 5 Put Strikes by Volume (LIVE DATA):
     {puts.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not puts.empty else 'No put data'}
     
     {flow_prompt}
     
-    === ANALYSIS REQUEST ===
+    === CRITICAL ANALYSIS REQUIREMENTS ===
+    
+    **YOU MUST ANALYZE THE REAL-TIME DATA ABOVE - THIS IS FRESH FLOW FROM RIGHT NOW**
+    
     Provide comprehensive {timeframe}-specific analysis covering:
     
-    1. **Flow-Based Strategy**: How the unusual flow data impacts {timeframe} positioning
-    2. **Optimal Entry Timing**: When to enter {timeframe} positions based on flow patterns
-    3. **Key Strike Selection**: Which strikes show the most institutional interest
-    4. **Time Decay Considerations**: How flow patterns affect theta decay for {timeframe}
-    5. **Volume vs Open Interest**: What the flow tells us about new vs existing positions
-    6. **IV and Volatility Outlook**: How flow impacts implied volatility expectations
-    7. **Risk Management**: Position sizing and stops based on flow sentiment
-    8. **Catalyst Timing**: How to time {timeframe} trades around expected catalysts
+    1. **REAL-TIME FLOW ANALYSIS** (Based on data fetched at {current_time}):
+       - What is the CURRENT flow sentiment showing RIGHT NOW?
+       - Are institutions actively buying calls or puts at THIS MOMENT?
+       - How does current volume compare to typical patterns?
+       - What strikes are seeing the MOST activity RIGHT NOW?
     
-    Tailor advice specifically for {timeframe} characteristics with flow-based insights.
-    Keep analysis under 400 words but be actionable and flow-focused.
+    2. **OPTIMAL ENTRY TIMING FOR {timeframe}**:
+       - **BEST TIME OF DAY**: When should trader enter this play?
+         * For 0DTE: Specific hour recommendations (e.g., "Enter between 10:30-11:30 AM after initial volatility settles")
+         * For Swing: Best day of week and time (e.g., "Enter on pullback Monday-Tuesday mornings")
+         * For LEAPS: Best time of month (e.g., "Enter after monthly options expiration week")
+       - **ENTRY TRIGGERS**: Specific conditions to wait for before entering
+         * Price levels to watch
+         * Volume confirmation needed
+         * Flow pattern changes to confirm
+       - **AVOID ENTERING WHEN**: Times/conditions to avoid entry
+    
+    3. **CURRENT MARKET CONDITIONS**:
+       - What is the market session right now? (Premarket/Market Hours/After Hours)
+       - How does current flow compare to earlier today?
+       - Are we in a high-volume or low-volume period?
+    
+    4. **FLOW-BASED ENTRY STRATEGY**:
+       - **If entering NOW**: Specific strikes and why based on CURRENT flow
+       - **If waiting**: What flow changes to watch for before entering
+       - **Position sizing**: Based on current flow conviction level
+    
+    5. **INTRADAY FLOW PATTERNS FOR {timeframe}**:
+       - Early morning (9:30-10:30): What typically happens?
+       - Mid-morning (10:30-12:00): Best entry window?
+       - Lunch period (12:00-14:00): Should you wait?
+       - Power hour (15:00-16:00): Final entry opportunity?
+       - For swing/LEAPS: Best days of the week for entry
+    
+    6. **TIME DECAY CONSIDERATIONS**:
+       - How does time of day affect this {timeframe} play?
+       - When does theta decay accelerate most?
+       - Best time to enter to minimize decay impact
+    
+    7. **RISK MANAGEMENT WITH TIMING**:
+       - Stop loss timing: When to cut losses today vs. hold overnight
+       - Profit taking timing: Best time of day to exit winners
+       - Key levels and timing considerations
+    
+    8. **SPECIFIC ACTION ITEMS** (Based on CURRENT {current_time} data):
+       - ✅ ENTER NOW if [specific conditions met]
+       - ⏰ WAIT AND ENTER if [specific conditions pending]
+       - ❌ AVOID ENTRY if [specific red flags present]
+    
+    **CRITICAL**: Your analysis MUST reference the specific flow data from {current_time} above.
+    Do NOT give generic analysis - use the ACTUAL numbers and strikes from the current flow data.
+    
+    Keep analysis under 500 words but be EXTREMELY specific about timing and entry points.
+    Focus on ACTIONABLE timing recommendations based on CURRENT flow patterns.
     """
     
     # Use selected AI model for enhanced analysis
     if st.session_state.ai_model == "Multi-AI":
         analyses = multi_ai.multi_ai_consensus_enhanced(prompt)
         if analyses:
-            result = f"## 🤖 Enhanced Multi-AI {timeframe} Flow Analysis\n\n"
+            result = f"## 🤖 Enhanced Multi-AI {timeframe} Flow Analysis\n"
+            result += f"**Data Freshness:** Analysis based on live data fetched at {current_time}\n\n"
             for model, analysis in analyses.items():
                 result += f"### {model}:\n{analysis}\n\n---\n\n"
             return result
