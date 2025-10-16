@@ -214,32 +214,13 @@ class UnusualWhalesClient:
         except Exception as e:
             return {"error": f"Error parsing stock state data: {str(e)}"}
     
-    def get_flow_alerts(self, ticker: str = None) -> Dict:
-        """Get options flow alerts - MARKET WIDE FOR TESTING"""
-        endpoint = "/api/option-trades/flow-alerts"
+    def get_flow_alerts(self, ticker: str) -> Dict:
+        """Get recent options flow for stock - uses flow-recent endpoint"""
+        endpoint = f"/api/stock/{ticker}/flow-recent"
         
-        params = {
-            # Basic filters - all True
-            "all_opening": True,
-            "is_ask_side": True,
-            "is_bid_side": True,
-            "is_call": True,
-            "is_put": True,
-            "is_sweep": True,
-            "is_floor": True,
-            
-            # Get MORE results
-            "limit": 200,  # Maximum allowed
-            
-            # NO ticker filter - get market-wide alerts
-            # NO time filters - get latest available
-        }
-        
-        # DON'T filter by ticker for now - just get ANY alerts
-        # if ticker:
-        #     params["ticker_symbol"] = ticker
-        
-        return self._make_request(endpoint, params)
+        # This endpoint doesn't need any parameters
+        # It returns aggregated flow data by expiration
+        return self._make_request(endpoint)
         
     def get_options_volume(self, ticker: str, limit: int = 1) -> Dict:
         """Get options volume data for ticker"""
@@ -4248,6 +4229,28 @@ if debug_mode:
                 
                 if st.checkbox("Show UW Raw Data"):
                     st.json({"quote": uw_quote, "flow": uw_flow, "greeks": uw_greeks, "atm": uw_atm})
+            else:
+                st.error("UW Client not initialized")
+    if st.sidebar.button("🧪 Test Flow-Recent Endpoint"):
+        with st.sidebar:
+            st.write("**Testing flow-recent endpoint:**")
+            
+            if uw_client:
+                test_ticker = debug_ticker  # Use the selected debug ticker
+                flow_result = uw_client.get_flow_alerts(test_ticker)
+                
+                st.write(f"Flow for {test_ticker}:")
+                st.write(f"Error: {flow_result.get('error')}")
+                st.write(f"Has data key: {'data' in flow_result}")
+                
+                if flow_result.get('data'):
+                    st.write(f"Number of expiries: {len(flow_result['data'])}")
+                    st.write(f"Date: {flow_result.get('date', 'N/A')}")
+                    
+                    # Show first expiry data
+                    if len(flow_result['data']) > 0:
+                        st.write("**First expiry sample:**")
+                        st.json(flow_result['data'][0])
             else:
                 st.error("UW Client not initialized")
             
