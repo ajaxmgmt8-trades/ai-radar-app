@@ -612,7 +612,7 @@ def debug_atm_chains(ticker: str):
 # =================================================================
 
 def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
-    """Analyze flow alerts data from UW - CORRECT API RESPONSE HANDLING"""
+    """Analyze flow alerts data from UW flow-recent endpoint"""
     
     # 1. Check for errors FIRST
     if flow_alerts_data.get("error"):
@@ -622,16 +622,11 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         # 2. Extract data - API returns {"data": [...]}
         raw_data = flow_alerts_data.get("data", [])
         
-        # Handle if data is nested (sometimes UW returns {"data": {"data": [...]}})
-        if isinstance(raw_data, dict) and "data" in raw_data:
-            alerts = raw_data["data"]
-        elif isinstance(raw_data, list):
-            alerts = raw_data
-        else:
-            alerts = []
+        if not isinstance(raw_data, list):
+            return {"error": "Invalid data format - expected list"}
         
         # 3. Return early if no alerts
-        if not alerts:
+        if not raw_data:
             return {
                 "summary": {
                     "total_alerts": 0,
@@ -648,7 +643,7 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
                 "error": None
             }
         
-        # 4. Process alerts using EXACT field names from API response
+        # 4. Process individual alerts
         processed_alerts = []
         call_alerts = []
         put_alerts = []
@@ -657,74 +652,63 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         bullish_flow = 0
         bearish_flow = 0
         
-        for alert in alerts:
+        for alert in raw_data:
             if not isinstance(alert, dict):
                 continue
             
-            # Use EXACT field names from API documentation
-            alert_type = alert.get("type", "").lower()  # "call" or "put"
+            # Extract fields from individual alert
+            option_type = alert.get("option_type", "").lower()
             
-            # Extract premium - API returns as STRING
             try:
-                premium = float(alert.get("total_premium", "0"))
-            except (ValueError, TypeError):
-                premium = 0
-            
-            # Extract volume - API returns as INTEGER
-            try:
+                premium = float(alert.get("premium", "0"))
                 volume = int(alert.get("volume", 0))
-            except (ValueError, TypeError):
-                volume = 0
-            
-            # Extract strike - API returns as STRING "375"
-            try:
                 strike = float(alert.get("strike", "0"))
-            except (ValueError, TypeError):
-                strike = 0
-            
-            # Extract underlying price - API returns as STRING
-            try:
+                price = float(alert.get("price", "0"))
                 underlying_price = float(alert.get("underlying_price", "0"))
             except (ValueError, TypeError):
-                underlying_price = 0
+                continue
             
-            # Extract price - API returns as STRING
-            try:
-                price = float(alert.get("price", "0"))
-            except (ValueError, TypeError):
-                price = 0
+            # Determine flow direction from tags
+            tags = alert.get("tags", [])
+            is_bid_side = "bid_side" in tags
+            is_ask_side = "ask_side" in tags
             
             processed_alert = {
-                "type": alert_type,
+                "type": option_type,
                 "strike": strike,
                 "premium": premium,
                 "volume": volume,
-                "ticker": alert.get("ticker", ticker),
+                "ticker": alert.get("underlying_symbol", ticker),
                 "expiry": alert.get("expiry", ""),
                 "price": price,
                 "underlying_price": underlying_price,
-                "created_at": alert.get("created_at", ""),
-                "option_chain": alert.get("option_chain", ""),
-                "alert_rule": alert.get("alert_rule", ""),
-                "open_interest": int(alert.get("open_interest", 0)),
-                "has_sweep": alert.get("has_sweep", False),
-                "has_floor": alert.get("has_floor", False),
-                "all_opening_trades": alert.get("all_opening_trades", False),
-                "total_ask_side_prem": float(alert.get("total_ask_side_prem", "0")),
-                "total_bid_side_prem": float(alert.get("total_bid_side_prem", "0")),
-                "trade_count": int(alert.get("trade_count", 0))
+                "tags": tags,
+                "is_bid_side": is_bid_side,
+                "is_ask_side": is_ask_side,
+                "executed_at": alert.get("executed_at", ""),
+                "open_interest": int(alert.get("open_interest", 0))
             }
             
             processed_alerts.append(processed_alert)
             total_premium += premium
             
-            # Categorize by type
-            if alert_type == "call":
+            # Calculate flow sentiment based on option type and side
+            if option_type == "call":
                 call_alerts.append(processed_alert)
-                bullish_flow += premium
-            elif alert_type == "put":
+                # Ask-side calls = bullish (buying calls)
+                # Bid-side calls = bearish (selling calls)
+                if is_ask_side:
+                    bullish_flow += premium
+                elif is_bid_side:
+                    bearish_flow += premium
+            elif option_type == "put":
                 put_alerts.append(processed_alert)
-                bearish_flow += premium
+                # Ask-side puts = bearish (buying puts)
+                # Bid-side puts = bullish (selling puts)
+                if is_ask_side:
+                    bearish_flow += premium
+                elif is_bid_side:
+                    bullish_flow += premium
         
         # 5. Calculate summary metrics
         total_alerts = len(processed_alerts)
@@ -756,7 +740,6 @@ def analyze_flow_alerts(flow_alerts_data: Dict, ticker: str) -> Dict:
         }
         
     except Exception as e:
-        # Always return a dict with error key
         return {
             "error": f"Error analyzing flow alerts: {str(e)}",
             "summary": {
