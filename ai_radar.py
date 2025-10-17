@@ -3434,7 +3434,7 @@ def get_options_by_timeframe(ticker: str, timeframe: str, tz: str = "ET") -> Dic
     except Exception as e:
         return {"error": f"Error fetching UW {timeframe} options: {str(e)}"}
 def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_data: Dict, volume_data: Dict, hottest_chains: Dict, timeframe: str) -> str:
-    """Generate timeframe-specific AI analysis with enhanced flow data"""
+    """Generate dynamic timeframe-specific AI analysis that adapts to changing flow patterns"""
     
     if option_data.get("error"):
         return f"Unable to analyze {timeframe} options: {option_data['error']}"
@@ -3443,138 +3443,181 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     puts = option_data.get("puts", pd.DataFrame())
     current_price = option_data.get("current_price", 0)
     
-    # Calculate key metrics
+    # Get technical analysis for context
+    technical_analysis = get_comprehensive_technical_analysis(ticker)
+    
+    # Calculate flow metrics
     total_call_volume = calls['volume'].sum() if not calls.empty else 0
     total_put_volume = puts['volume'].sum() if not puts.empty else 0
     
+    # Get flow sentiment and premium flows
+    flow_summary = flow_data.get("summary", {}) if not flow_data.get("error") else {}
+    bullish_flow = flow_summary.get("bullish_flow", 0)
+    bearish_flow = flow_summary.get("bearish_flow", 0)
+    flow_sentiment = flow_summary.get("flow_sentiment", "Neutral")
+    total_alerts = flow_summary.get("total_alerts", 0)
+    
+    # Volume analysis
+    volume_summary = volume_data.get("summary", {}) if not volume_data.get("error") else {}
+    put_call_ratio = volume_summary.get("put_call_ratio", 0)
+    
     # Safe IV calculation
-    avg_iv = 0
+    avg_call_iv = 0
+    avg_put_iv = 0
     try:
         if not calls.empty and 'impliedVolatility' in calls.columns:
             call_iv_numeric = pd.to_numeric(calls['impliedVolatility'], errors='coerce')
-            call_iv_mean = call_iv_numeric.mean() if not call_iv_numeric.isna().all() else 0
-            call_iv_mean = 0 if pd.isna(call_iv_mean) else call_iv_mean
-        else:
-            call_iv_mean = 0
+            avg_call_iv = call_iv_numeric.mean() if not call_iv_numeric.isna().all() else 0
+            avg_call_iv = 0 if pd.isna(avg_call_iv) else avg_call_iv
         
         if not puts.empty and 'impliedVolatility' in puts.columns:
             put_iv_numeric = pd.to_numeric(puts['impliedVolatility'], errors='coerce')
-            put_iv_mean = put_iv_numeric.mean() if not put_iv_numeric.isna().all() else 0
-            put_iv_mean = 0 if pd.isna(put_iv_mean) else put_iv_mean
-        else:
-            put_iv_mean = 0
-        
-        if call_iv_mean > 0 and put_iv_mean > 0:
-            avg_iv = (call_iv_mean + put_iv_mean) / 2
-        elif call_iv_mean > 0:
-            avg_iv = call_iv_mean
-        elif put_iv_mean > 0:
-            avg_iv = put_iv_mean
-        else:
-            avg_iv = 0
-            
+            avg_put_iv = put_iv_numeric.mean() if not put_iv_numeric.isna().all() else 0
+            avg_put_iv = 0 if pd.isna(avg_put_iv) else avg_put_iv
     except Exception:
-        avg_iv = 0
+        pass
     
-    # Get current timestamp for data freshness
+    # Get current market session
     from datetime import datetime
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    import pytz
+    now = datetime.now(pytz.timezone('US/Eastern'))
+    current_time = now.strftime("%Y-%m-%d %H:%M:%S ET")
+    current_hour = now.hour
     
-    # Generate enhanced flow analysis prompt with TIMING focus
-    flow_prompt = generate_flow_analysis_prompt(ticker, flow_data, volume_data, hottest_chains)
+    if current_hour < 9 or (current_hour == 9 and now.minute < 30):
+        market_session = "PREMARKET"
+    elif 9 <= current_hour < 16:
+        market_session = "MARKET HOURS"
+    else:
+        market_session = "AFTER HOURS"
     
-    # Create comprehensive timeframe-specific prompt with ENTRY TIMING
+    # Technical levels for context
+    tech_support = 0
+    tech_resistance = 0
+    tech_trend = "Unknown"
+    rsi_level = 0
+    
+    if not technical_analysis.get("error"):
+        if "support_resistance" in technical_analysis:
+            tech_support = technical_analysis["support_resistance"].get("support", 0)
+            tech_resistance = technical_analysis["support_resistance"].get("resistance", 0)
+        elif "support" in technical_analysis:
+            tech_support = technical_analysis.get("support", 0)
+            tech_resistance = technical_analysis.get("resistance", 0)
+        
+        tech_trend = technical_analysis.get("trend_analysis", "Unknown")
+        
+        if "short_term" in technical_analysis:
+            rsi_level = technical_analysis["short_term"].get("rsi", 0)
+        elif "rsi" in technical_analysis:
+            rsi_level = technical_analysis.get("rsi", 0)
+    
+    # Find best option contracts based on flow and volume
+    best_calls = []
+    best_puts = []
+    
+    if not calls.empty:
+        # Sort by volume and filter for liquid options
+        liquid_calls = calls[(calls['volume'] >= 10) & (calls['lastPrice'] >= 0.05)]
+        if not liquid_calls.empty:
+            best_calls = liquid_calls.nlargest(3, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_dict('records')
+    
+    if not puts.empty:
+        liquid_puts = puts[(puts['volume'] >= 10) & (puts['lastPrice'] >= 0.05)]
+        if not liquid_puts.empty:
+            best_puts = liquid_puts.nlargest(3, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_dict('records')
+    
+    # Create comprehensive dynamic prompt
     prompt = f"""
-    REAL-TIME {timeframe} OPTIONS FLOW ANALYSIS FOR {ticker}:
+    🔄 DYNAMIC {timeframe} FLOW ANALYSIS FOR {ticker}
+    ⏰ ANALYSIS TIME: {current_time} | SESSION: {market_session}
     
-    **DATA FRESHNESS:** This analysis uses LIVE data fetched at {current_time}
+    ⚠️ CRITICAL: This analysis MUST adapt to current conditions and provide SPECIFIC contract recommendations that change based on real-time flow patterns.
     
-    === CURRENT MARKET STATE ===
+    === REAL-TIME MARKET STATE ===
     Current Price: ${current_price:.2f}
-    Timeframe Category: {timeframe}
+    Technical Trend: {tech_trend}
+    Support Level: ${tech_support:.2f}
+    Resistance Level: ${tech_resistance:.2f}
+    RSI: {rsi_level:.1f}
     
-    === FRESH OPTIONS METRICS (JUST FETCHED) ===
-    - Total Call Volume: {total_call_volume:,}
-    - Total Put Volume: {total_put_volume:,}
-    - Put/Call Volume Ratio: {total_put_volume/max(total_call_volume, 1):.2f}
-    - Average IV: {avg_iv:.1f}%
+    === CURRENT FLOW INTELLIGENCE ({current_time}) ===
+    🔥 Flow Alerts: {total_alerts} total
+    💰 Bullish Flow: ${bullish_flow:,.0f}
+    📉 Bearish Flow: ${bearish_flow:,.0f}
+    🎯 Flow Sentiment: {flow_sentiment}
+    📊 Put/Call Ratio: {put_call_ratio:.2f}
     
-    Top 5 Call Strikes by Volume (LIVE DATA):
-    {calls.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not calls.empty else 'No call data'}
+    === OPTIONS ACTIVITY RIGHT NOW ===
+    📞 Call Volume: {total_call_volume:,} | Avg IV: {avg_call_iv:.1f}%
+    📉 Put Volume: {total_put_volume:,} | Avg IV: {avg_put_iv:.1f}%
     
-    Top 5 Put Strikes by Volume (LIVE DATA):
-    {puts.nlargest(5, 'volume')[['strike', 'lastPrice', 'volume', 'impliedVolatility', 'moneyness']].to_string(index=False) if not puts.empty else 'No put data'}
+    === TOP 3 CALL OPTIONS BY VOLUME ===
+    {chr(10).join([f"Strike ${opt['strike']}: ${opt['lastPrice']:.2f}, Vol: {opt['volume']}, IV: {opt['impliedVolatility']:.1f}%, {opt['moneyness']}" for opt in best_calls]) if best_calls else "No significant call activity"}
     
-    {flow_prompt}
+    === TOP 3 PUT OPTIONS BY VOLUME ===
+    {chr(10).join([f"Strike ${opt['strike']}: ${opt['lastPrice']:.2f}, Vol: {opt['volume']}, IV: {opt['impliedVolatility']:.1f}%, {opt['moneyness']}" for opt in best_puts]) if best_puts else "No significant put activity"}
     
-    === CRITICAL ANALYSIS REQUIREMENTS ===
+    🎯 REQUIRED DYNAMIC ANALYSIS:
     
-    **YOU MUST ANALYZE THE REAL-TIME DATA ABOVE - THIS IS FRESH FLOW FROM RIGHT NOW**
+    1. **FLOW DIRECTION ANALYSIS**:
+       - Is current flow bullish, bearish, or neutral RIGHT NOW?
+       - Has flow direction CHANGED from earlier patterns today?
+       - What is driving the current flow sentiment?
+       - Are institutions buying or selling aggressively?
     
-    Provide comprehensive {timeframe}-specific analysis covering:
+    2. **BEST OPTION CONTRACT RECOMMENDATION**:
+       - **PRIMARY PLAY**: Choose ONE specific contract from the active options above
+       - Format: "BUY {ticker} {date} ${strike}C/P at ${price} or better"
+       - WHY this specific contract: Volume, flow alignment, technical setup
+       - **ALTERNATIVE PLAY**: Secondary contract if primary fails
     
-    1. **REAL-TIME FLOW ANALYSIS** (Based on data fetched at {current_time}):
-       - What is the CURRENT flow sentiment showing RIGHT NOW?
-       - Are institutions actively buying calls or puts at THIS MOMENT?
-       - How does current volume compare to typical patterns?
-       - What strikes are seeing the MOST activity RIGHT NOW?
+    3. **DYNAMIC ENTRY TIMING** (Based on {market_session} session):
+       - **ENTER NOW IF**: Specific conditions met right now
+       - **WAIT FOR**: Specific triggers to watch for next 1-2 hours
+       - **ABANDON IF**: Conditions that invalidate the setup
+       - **SESSION-SPECIFIC**: Best entry window for current session
     
-    2. **OPTIMAL ENTRY TIMING FOR {timeframe}**:
-       - **BEST TIME OF DAY**: When should trader enter this play?
-         * For 0DTE: Specific hour recommendations (e.g., "Enter between 10:30-11:30 AM after initial volatility settles")
-         * For Swing: Best day of week and time (e.g., "Enter on pullback Monday-Tuesday mornings")
-         * For LEAPS: Best time of month (e.g., "Enter after monthly options expiration week")
-       - **ENTRY TRIGGERS**: Specific conditions to wait for before entering
-         * Price levels to watch
-         * Volume confirmation needed
-         * Flow pattern changes to confirm
-       - **AVOID ENTERING WHEN**: Times/conditions to avoid entry
+    4. **FLOW VS TECHNICAL ALIGNMENT**:
+       - Does current flow align with technical levels?
+       - Support/Resistance impact on option selection
+       - RSI confirmation of flow direction
+       - Trend vs flow agreement/disagreement
     
-    3. **CURRENT MARKET CONDITIONS**:
-       - What is the market session right now? (Premarket/Market Hours/After Hours)
-       - How does current flow compare to earlier today?
-       - Are we in a high-volume or low-volume period?
+    5. **RISK MANAGEMENT FOR THIS SETUP**:
+       - Position size based on flow conviction
+       - Stop loss level and timing
+       - Profit target based on technical levels
+       - Time decay risk for {timeframe}
     
-    4. **FLOW-BASED ENTRY STRATEGY**:
-       - **If entering NOW**: Specific strikes and why based on CURRENT flow
-       - **If waiting**: What flow changes to watch for before entering
-       - **Position sizing**: Based on current flow conviction level
+    6. **CHANGE DETECTION**:
+       - What flow changes would flip this analysis?
+       - Key volume thresholds to watch
+       - Price levels that change the setup
+       - Time-based exit criteria
     
-    5. **INTRADAY FLOW PATTERNS FOR {timeframe}**:
-       - Early morning (9:30-10:30): What typically happens?
-       - Mid-morning (10:30-12:00): Best entry window?
-       - Lunch period (12:00-14:00): Should you wait?
-       - Power hour (15:00-16:00): Final entry opportunity?
-       - For swing/LEAPS: Best days of the week for entry
+    7. **SPECIFIC ACTION ITEMS** (Next 2 hours):
+       ✅ **IMMEDIATE ACTION**: If entering now
+       ⏰ **WAIT FOR**: If conditions not met
+       ❌ **AVOID**: If setup is poor
+       🔄 **REASSESS**: When to re-analyze
     
-    6. **TIME DECAY CONSIDERATIONS**:
-       - How does time of day affect this {timeframe} play?
-       - When does theta decay accelerate most?
-       - Best time to enter to minimize decay impact
+    🚨 CRITICAL REQUIREMENTS:
+    - Reference the SPECIFIC strikes and volumes from current data
+    - Choose ONE primary contract to trade
+    - Explain how analysis would change if flow reverses
+    - Give precise entry/exit timing for {market_session}
+    - Account for {timeframe} characteristics
     
-    7. **RISK MANAGEMENT WITH TIMING**:
-       - Stop loss timing: When to cut losses today vs. hold overnight
-       - Profit taking timing: Best time of day to exit winners
-       - Key levels and timing considerations
-    
-    8. **SPECIFIC ACTION ITEMS** (Based on CURRENT {current_time} data):
-       - ✅ ENTER NOW if [specific conditions met]
-       - ⏰ WAIT AND ENTER if [specific conditions pending]
-       - ❌ AVOID ENTRY if [specific red flags present]
-    
-    **CRITICAL**: Your analysis MUST reference the specific flow data from {current_time} above.
-    Do NOT give generic analysis - use the ACTUAL numbers and strikes from the current flow data.
-    
-    Keep analysis under 500 words but be EXTREMELY specific about timing and entry points.
-    Focus on ACTIONABLE timing recommendations based on CURRENT flow patterns.
+    Keep under 400 words but be EXTREMELY specific about the exact contract and timing.
     """
     
-    # Use selected AI model for enhanced analysis
+    # Use selected AI model
     if st.session_state.ai_model == "Multi-AI":
         analyses = multi_ai.multi_ai_consensus_enhanced(prompt)
         if analyses:
-            result = f"## 🤖 Enhanced Multi-AI {timeframe} Flow Analysis\n"
-            result += f"**Data Freshness:** Analysis based on live data fetched at {current_time}\n\n"
+            result = f"## 🔄 Dynamic Multi-AI {timeframe} Analysis\n"
+            result += f"**Live Data:** {current_time} | Session: {market_session}\n\n"
             for model, analysis in analyses.items():
                 result += f"### {model}:\n{analysis}\n\n---\n\n"
             return result
