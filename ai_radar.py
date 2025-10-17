@@ -3477,14 +3477,22 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     except Exception:
         pass
     
-    # Get current market session
+    # Get current market session with 12-hour time format
     from datetime import datetime
     import pytz
-    now = datetime.now(pytz.timezone('US/Eastern'))
-    current_time = now.strftime("%Y-%m-%d %H:%M:%S ET")
-    current_hour = now.hour
     
-    if current_hour < 9 or (current_hour == 9 and now.minute < 30):
+    # Use user's selected timezone
+    tz_name = 'US/Eastern' if st.session_state.selected_tz == "ET" else 'US/Central'
+    tz_label = st.session_state.selected_tz
+    
+    now = datetime.now(pytz.timezone(tz_name))
+    current_time_12hr = now.strftime("%I:%M:%S %p")  # 12-hour format with AM/PM
+    current_date = now.strftime("%B %d, %Y")  # Full date
+    current_hour = now.hour
+    current_minute = now.minute
+    
+    # Determine market session
+    if current_hour < 9 or (current_hour == 9 and current_minute < 30):
         market_session = "PREMARKET"
     elif 9 <= current_hour < 16:
         market_session = "MARKET HOURS"
@@ -3530,9 +3538,17 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     # Create comprehensive dynamic prompt
     prompt = f"""
     🔄 DYNAMIC {timeframe} FLOW ANALYSIS FOR {ticker}
-    ⏰ ANALYSIS TIME: {current_time} | SESSION: {market_session}
     
-    ⚠️ CRITICAL: This analysis MUST adapt to current conditions and provide SPECIFIC contract recommendations that change based on real-time flow patterns.
+    ⏰ CURRENT ANALYSIS TIME: {current_date} at {current_time_12hr} {tz_label}
+    📊 MARKET SESSION: {market_session}
+    
+    ⚠️ CRITICAL INSTRUCTIONS FOR TIMING RECOMMENDATIONS:
+    - The CURRENT time is {current_time_12hr} {tz_label} on {current_date}
+    - You MUST use THIS EXACT current time as your reference point
+    - When recommending entry times, calculate from THIS current time
+    - Use 12-hour format with AM/PM (NOT military time)
+    - Give SPECIFIC times like "enter now" or "wait until 2:45 PM" or "enter between 3:00-3:30 PM"
+    - DO NOT use generic examples - use ACTUAL clock times based on {current_time_12hr}
     
     === REAL-TIME MARKET STATE ===
     Current Price: ${current_price:.2f}
@@ -3541,7 +3557,7 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     Resistance Level: ${tech_resistance:.2f}
     RSI: {rsi_level:.1f}
     
-    === CURRENT FLOW INTELLIGENCE ({current_time}) ===
+    === CURRENT FLOW INTELLIGENCE (RIGHT NOW at {current_time_12hr}) ===
     🔥 Flow Alerts: {total_alerts} total
     💰 Bullish Flow: ${bullish_flow:,.0f}
     📉 Bearish Flow: ${bearish_flow:,.0f}
@@ -3568,15 +3584,28 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
     
     2. **BEST OPTION CONTRACT RECOMMENDATION**:
        - **PRIMARY PLAY**: Choose ONE specific contract from the active options above
-       - Format: "BUY {ticker} {date} ${strike}C/P at ${price} or better"
+       - Format example: "BUY AAPL Jan 26 $185 Call at $2.50 or better"
        - WHY this specific contract: Volume, flow alignment, technical setup
        - **ALTERNATIVE PLAY**: Secondary contract if primary fails
     
-    3. **DYNAMIC ENTRY TIMING** (Based on {market_session} session):
-       - **ENTER NOW IF**: Specific conditions met right now
-       - **WAIT FOR**: Specific triggers to watch for next 1-2 hours
+    3. **DYNAMIC ENTRY TIMING** (Based on {market_session} session at {current_time_12hr}):
+       ⏰ CRITICAL: Use the ACTUAL current time ({current_time_12hr} {tz_label}) for your recommendations!
+       
+       - **ENTER NOW IF**: Tell me if I should enter RIGHT NOW at {current_time_12hr}
+       - **WAIT UNTIL**: Give me SPECIFIC time to enter (e.g., "wait until 2:30 PM" or "enter between 3:00-3:15 PM")
+       - **HOLD UNTIL**: Give SPECIFIC exit time based on {timeframe} characteristics
        - **ABANDON IF**: Conditions that invalidate the setup
-       - **SESSION-SPECIFIC**: Best entry window for current session
+       
+       Examples of GOOD timing guidance:
+       ✅ "Enter NOW at {current_time_12hr}"
+       ✅ "Wait 30 minutes until [calculate time 30 min from {current_time_12hr}]"
+       ✅ "Enter between [time 15 min from now] and [time 45 min from now]"
+       ✅ "Exit by [specific time based on session]"
+       
+       Examples of BAD timing guidance:
+       ❌ "Enter in the morning" (too vague)
+       ❌ "Wait for market open" (not using current time)
+       ❌ "Enter at 14:00" (military time)
     
     4. **FLOW VS TECHNICAL ALIGNMENT**:
        - Does current flow align with technical levels?
@@ -3594,22 +3623,24 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
        - What flow changes would flip this analysis?
        - Key volume thresholds to watch
        - Price levels that change the setup
-       - Time-based exit criteria
+       - SPECIFIC time to reassess (use 12-hour format from {current_time_12hr})
     
-    7. **SPECIFIC ACTION ITEMS** (Next 2 hours):
-       ✅ **IMMEDIATE ACTION**: If entering now
-       ⏰ **WAIT FOR**: If conditions not met
-       ❌ **AVOID**: If setup is poor
-       🔄 **REASSESS**: When to re-analyze
+    7. **SPECIFIC ACTION ITEMS** (Starting from {current_time_12hr} {tz_label}):
+       ✅ **IMMEDIATE ACTION**: If entering at current time {current_time_12hr}
+       ⏰ **WAIT FOR**: If conditions not met, give EXACT time to check back
+       ❌ **AVOID**: If setup is poor right now
+       🔄 **REASSESS AT**: Give SPECIFIC time in 12-hour format to re-analyze
     
     🚨 CRITICAL REQUIREMENTS:
-    - Reference the SPECIFIC strikes and volumes from current data
+    - Reference the SPECIFIC strikes and volumes from current data above
     - Choose ONE primary contract to trade
     - Explain how analysis would change if flow reverses
-    - Give precise entry/exit timing for {market_session}
+    - Give precise entry/exit timing starting from {current_time_12hr} {tz_label}
     - Account for {timeframe} characteristics
+    - ALL times MUST be in 12-hour format with AM/PM
+    - Calculate all times relative to the CURRENT time: {current_time_12hr}
     
-    Keep under 400 words but be EXTREMELY specific about the exact contract and timing.
+    Keep under 400 words but be EXTREMELY specific about the exact contract, timing, and use REAL clock times.
     """
     
     # Use selected AI model
@@ -3617,7 +3648,7 @@ def analyze_timeframe_options_with_flow(ticker: str, option_data: Dict, flow_dat
         analyses = multi_ai.multi_ai_consensus_enhanced(prompt)
         if analyses:
             result = f"## 🔄 Dynamic Multi-AI {timeframe} Analysis\n"
-            result += f"**Live Data:** {current_time} | Session: {market_session}\n\n"
+            result += f"**Live Data:** {current_date} at {current_time_12hr} {tz_label} | Session: {market_session}\n\n"
             for model, analysis in analyses.items():
                 result += f"### {model}:\n{analysis}\n\n---\n\n"
             return result
