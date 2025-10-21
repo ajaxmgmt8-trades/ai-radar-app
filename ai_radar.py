@@ -4012,59 +4012,75 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
+def analyze_darkpool_trades(darkpool_data, ticker=None):
+    """
+    Analyze darkpool trades from Unusual Whales
+    Handles both ticker-specific and market-wide darkpool data
+    """
+    if not darkpool_data or darkpool_data.get("error"):
+        return {"error": darkpool_data.get("error", "No darkpool data available")}
+    
+    # Get the data array
+    data = darkpool_data.get("data", [])
+    
+    if not data:
+        return {"error": "No darkpool trades found"}
+    
+    # Process each trade
+    trades = []
+    for trade in data:
+        # Calculate premium (price * size)
+        price = float(trade.get('price', 0))
+        size = int(trade.get('size', 0))
+        premium = price * size
         
-def get_darkpool_trades(self, ticker: str, date: str = None, limit: int = 100, 
-                       max_premium: int = None, min_premium: int = None,
-                       max_size: int = None, min_size: int = None,
-                       max_volume: int = None, min_volume: int = None) -> Dict:
-        """Get darkpool trades for a specific ticker"""
-        endpoint = f"/api/darkpool/{ticker}"
-        
-        params = {"limit": min(limit, 200)}
-        
-        if date:
-            params["date"] = date
-        if max_premium:
-            params["max_premium"] = max_premium
-        if min_premium:
-            params["min_premium"] = min_premium
-        if max_size:
-            params["max_size"] = max_size
-        if min_size:
-            params["min_size"] = min_size
-        if max_volume:
-            params["max_volume"] = max_volume
-        if min_volume:
-            params["min_volume"] = min_volume
-        
-        return self._make_request(endpoint, params)
-
-    def get_recent_darkpool_trades(self, date: str = None, limit: int = 100,
-                               max_premium: int = None, min_premium: int = None,
-                               max_size: int = None, min_size: int = None,
-                               max_volume: int = None, min_volume: int = None) -> Dict:
-        """Get recent darkpool trades across all tickers (market-wide)"""
-        endpoint = "/api/darkpool/recent"
-        
-        params = {"limit": min(limit, 200)}
-        
-        if date:
-            params["date"] = date
-        if max_premium:
-            params["max_premium"] = max_premium
-        if min_premium:
-            params["min_premium"] = min_premium
-        if max_size:
-            params["max_size"] = max_size
-        if min_size:
-            params["min_size"] = min_size
-        if max_volume:
-            params["max_volume"] = max_volume
-        if min_volume:
-            params["min_volume"] = min_volume
-        
-        return self._make_request(endpoint, params) 
-                                   
+        processed_trade = {
+            'ticker': trade.get('ticker', ticker or 'N/A'),
+            'price': price,
+            'size': size,
+            'premium': premium,
+            'time_display': trade.get('time', 'N/A'),
+            'date_display': trade.get('date', 'N/A'),
+            'market_center': trade.get('market_center', 'N/A'),
+            'volume': int(trade.get('volume', 0)),
+            'nbbo_bid': float(trade.get('nbbo_bid', 0)),
+            'nbbo_ask': float(trade.get('nbbo_ask', 0)),
+            'spread': float(trade.get('nbbo_ask', 0)) - float(trade.get('nbbo_bid', 0)),
+            'trade_settlement': trade.get('trade_settlement', 'N/A'),
+            'ext_hour': trade.get('ext_hour', ''),
+            'canceled': trade.get('canceled', False)
+        }
+        trades.append(processed_trade)
+    
+    # Sort by premium (highest first)
+    trades.sort(key=lambda x: x['premium'], reverse=True)
+    
+    # Calculate summary statistics
+    total_trades = len(trades)
+    total_premium = sum(t['premium'] for t in trades)
+    total_size = sum(t['size'] for t in trades)
+    avg_price = sum(t['price'] for t in trades) / total_trades if total_trades > 0 else 0
+    
+    # Count unique tickers (for market-wide analysis)
+    unique_tickers = len(set(t['ticker'] for t in trades))
+    
+    # Get top trade premium
+    top_trade_premium = trades[0]['premium'] if trades else 0
+    
+    summary = {
+        'total_trades': total_trades,
+        'total_premium': total_premium,
+        'total_size': total_size,
+        'avg_price': avg_price,
+        'unique_tickers': unique_tickers,
+        'top_trade_premium': top_trade_premium
+    }
+    
+    return {
+        'summary': summary,
+        'trades': trades,
+        'top_trades': trades[:10]  # Top 10 by premium
+    }
 def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
     """Unified function to fetch both options chain and flow data together"""
     cache_key = f"{ticker}_{timeframe}"
