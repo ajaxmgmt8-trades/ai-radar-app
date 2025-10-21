@@ -2662,7 +2662,12 @@ def analyze_earnings(earnings_data, earnings_type="calendar"):
     if not earnings_data or earnings_data.get("error"):
         return {"error": earnings_data.get("error", "No earnings data available")}
     
-    data = earnings_data.get("data", [])
+    # Handle nested data structure - API returns {"data": {"data": [...]}}
+    outer_data = earnings_data.get("data", {})
+    if isinstance(outer_data, dict):
+        data = outer_data.get("data", [])
+    else:
+        data = outer_data
     
     if not data:
         return {"error": "No earnings found"}
@@ -2674,29 +2679,59 @@ def analyze_earnings(earnings_data, earnings_type="calendar"):
             continue
         
         try:
-            # Common fields
+            # Common fields - handle NULL values
+            actual_eps = earning.get('actual_eps')
+            if actual_eps is None or actual_eps == "NULL":
+                actual_eps = "N/A"
+            
+            street_mean_est = earning.get('street_mean_est')
+            if street_mean_est is None or street_mean_est == "NULL":
+                street_mean_est = "N/A"
+            
             processed = {
                 'symbol': earning.get('symbol', 'N/A'),
                 'report_date': earning.get('report_date', 'N/A'),
                 'report_time': earning.get('report_time', 'N/A'),
-                'actual_eps': earning.get('actual_eps', 'N/A'),
-                'street_mean_est': earning.get('street_mean_est', 'N/A'),
+                'actual_eps': actual_eps,
+                'street_mean_est': street_mean_est,
             }
             
             # Calendar-specific fields (afterhours/premarket)
             if earnings_type == "calendar":
+                # Handle NULL values for calendar fields
+                reaction = earning.get('reaction')
+                if reaction is None or reaction == "NULL":
+                    reaction = 0
+                else:
+                    reaction = float(reaction) * 100
+                
+                pre_close = earning.get('pre_earnings_close')
+                if pre_close is None or pre_close == "NULL":
+                    pre_close = 0
+                else:
+                    pre_close = float(pre_close)
+                
+                post_close = earning.get('post_earnings_close')
+                if post_close is None or post_close == "NULL":
+                    post_close = 0
+                else:
+                    post_close = float(post_close)
+                
                 processed.update({
                     'full_name': earning.get('full_name', 'N/A'),
                     'sector': earning.get('sector', 'N/A'),
                     'marketcap': float(earning.get('marketcap', 0)),
                     'expected_move': float(earning.get('expected_move', 0)),
-                    'expected_move_perc': float(earning.get('expected_move_perc', 0)) * 100,  # Convert to percentage
-                    'reaction': float(earning.get('reaction', 0)) * 100,  # Convert to percentage
-                    'pre_earnings_close': float(earning.get('pre_earnings_close', 0)),
-                    'post_earnings_close': float(earning.get('post_earnings_close', 0)),
+                    'expected_move_perc': float(earning.get('expected_move_perc', 0)) * 100,
+                    'reaction': reaction,
+                    'pre_earnings_close': pre_close,
+                    'post_earnings_close': post_close,
+                    'pre_earnings_date': earning.get('pre_earnings_date', 'N/A'),
+                    'post_earnings_date': earning.get('post_earnings_date', 'N/A'),
                     'has_options': earning.get('has_options', False),
                     'is_s_p_500': earning.get('is_s_p_500', False),
-                    'country_name': earning.get('country_name', 'N/A')
+                    'country_name': earning.get('country_name', 'N/A'),
+                    'ending_fiscal_quarter': earning.get('ending_fiscal_quarter', 'N/A')
                 })
             
             # Historical ticker-specific fields
@@ -2751,16 +2786,6 @@ def analyze_earnings(earnings_data, earnings_type="calendar"):
         'summary': summary,
         'earnings': earnings
     }
-    
-    # Fallback to placeholder data
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    
-    return [
-        {"ticker": "MSFT", "date": today, "time": "After Hours", "estimate": "$2.50", "source": "Simulated"},
-        {"ticker": "NVDA", "date": today, "time": "Before Market", "estimate": "$1.20", "source": "Simulated"},
-        {"ticker": "TSLA", "date": today, "time": "After Hours", "estimate": "$0.75", "source": "Simulated"},
-    ]
-
 # Enhanced AI analysis functions
 def ai_playbook(ticker: str, change: float, catalyst: str = "", options_data: Optional[Dict] = None) -> str:
     """Enhanced AI playbook using comprehensive technical, fundamental, and options analysis"""
@@ -7277,8 +7302,6 @@ with tabs[9]:
             
             with st.spinner("Loading premarket earnings..."):
                 premarket_data = uw_client.get_earnings_premarket(date=pm_date_str, limit=pm_limit)
-                st.write("**DEBUG: Raw API Response**")
-                st.json(premarket_data)
                 premarket_analysis = analyze_earnings(premarket_data, earnings_type="calendar")
             
             if premarket_analysis.get("error"):
