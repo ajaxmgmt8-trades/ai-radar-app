@@ -4013,6 +4013,58 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
         
+def get_darkpool_trades(self, ticker: str, date: str = None, limit: int = 100, 
+                       max_premium: int = None, min_premium: int = None,
+                       max_size: int = None, min_size: int = None,
+                       max_volume: int = None, min_volume: int = None) -> Dict:
+        """Get darkpool trades for a specific ticker"""
+        endpoint = f"/api/darkpool/{ticker}"
+        
+        params = {"limit": min(limit, 200)}
+        
+        if date:
+            params["date"] = date
+        if max_premium:
+            params["max_premium"] = max_premium
+        if min_premium:
+            params["min_premium"] = min_premium
+        if max_size:
+            params["max_size"] = max_size
+        if min_size:
+            params["min_size"] = min_size
+        if max_volume:
+            params["max_volume"] = max_volume
+        if min_volume:
+            params["min_volume"] = min_volume
+        
+        return self._make_request(endpoint, params)
+
+    def get_recent_darkpool_trades(self, date: str = None, limit: int = 100,
+                               max_premium: int = None, min_premium: int = None,
+                               max_size: int = None, min_size: int = None,
+                               max_volume: int = None, min_volume: int = None) -> Dict:
+        """Get recent darkpool trades across all tickers (market-wide)"""
+        endpoint = "/api/darkpool/recent"
+        
+        params = {"limit": min(limit, 200)}
+        
+        if date:
+            params["date"] = date
+        if max_premium:
+            params["max_premium"] = max_premium
+        if min_premium:
+            params["min_premium"] = min_premium
+        if max_size:
+            params["max_size"] = max_size
+        if min_size:
+            params["min_size"] = min_size
+        if max_volume:
+            params["max_volume"] = max_volume
+        if min_volume:
+            params["min_volume"] = min_volume
+        
+        return self._make_request(endpoint, params) 
+                                   
 def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
     """Unified function to fetch both options chain and flow data together"""
     cache_key = f"{ticker}_{timeframe}"
