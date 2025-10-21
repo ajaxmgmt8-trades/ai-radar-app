@@ -7277,6 +7277,8 @@ with tabs[9]:
             
             with st.spinner("Loading premarket earnings..."):
                 premarket_data = uw_client.get_earnings_premarket(date=pm_date_str, limit=pm_limit)
+                st.write("**DEBUG: Raw API Response**")
+                st.json(premarket_data)
                 premarket_analysis = analyze_earnings(premarket_data, earnings_type="calendar")
             
             if premarket_analysis.get("error"):
