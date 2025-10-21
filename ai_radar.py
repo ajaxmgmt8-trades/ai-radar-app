@@ -6589,8 +6589,8 @@ with tabs[6]:
         - Use as confirmation, not sole signal
         """)
 
-            else:
-                st.error("Unable to get quote for ticker")    
+        else:
+            st.error("Unable to get quote for ticker")    
 # TAB 8: Institutional Flow
 with tabs[7]:
     st.subheader("🏦 Institutional Trading Activity")
