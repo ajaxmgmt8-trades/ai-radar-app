@@ -6368,10 +6368,10 @@ with tabs[6]:
         st.info("🔄 Auto-refresh triggered for LEAPS (data was stale)")
         get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
         st.rerun()  
-                # ============================================================
+        # ============================================================
         # DARKPOOL ACTIVITY SECTION
         # ============================================================
-        
+    if uw_client:    
         st.divider()
         st.markdown("---")
         st.markdown("## 🕳️ Darkpool Trading Activity")
