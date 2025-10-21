@@ -6368,6 +6368,233 @@ with tabs[6]:
         st.info("🔄 Auto-refresh triggered for LEAPS (data was stale)")
         get_unified_flow_data(flow_ticker, "LEAPS", force_refresh=True)
         st.rerun()  
+    # ============================================================
+    # DARKPOOL ACTIVITY SECTION - INSTITUTIONAL BLOCK TRADES
+    # ============================================================
+    
+    st.divider()
+    st.markdown("---")
+    st.markdown("## 🕳️ Darkpool Trading Activity")
+    st.caption("Track institutional block trades and off-exchange activity")
+    
+    # Create sub-tabs for ticker-specific vs market-wide
+    darkpool_tabs = st.tabs(["📊 Ticker Darkpool", "🌍 Market-Wide Darkpool"])
+    
+    # TAB 1: Ticker-Specific Darkpool
+    with darkpool_tabs[0]:
+        st.markdown(f"### 🕳️ Darkpool Trades for {flow_ticker}")
+        
+        # Filters
+        dp_col1, dp_col2, dp_col3, dp_col4 = st.columns(4)
+        with dp_col1:
+            dp_limit = st.number_input("Max Trades", min_value=10, max_value=200, value=50, step=10, key="dp_limit")
+        with dp_col2:
+            dp_min_premium = st.number_input("Min Premium ($)", min_value=0, value=10000, step=5000, key="dp_min_prem")
+        with dp_col3:
+            dp_min_size = st.number_input("Min Size", min_value=0, value=1000, step=500, key="dp_min_size")
+        with dp_col4:
+            if st.button("🔄 Refresh Darkpool", key="refresh_ticker_dp"):
+                st.cache_data.clear()
+                st.rerun()
+        
+        # Fetch ticker-specific darkpool data
+        with st.spinner(f"Loading darkpool trades for {flow_ticker}..."):
+            ticker_darkpool = uw_client.get_darkpool_trades(
+                flow_ticker, 
+                limit=dp_limit,
+                min_premium=dp_min_premium if dp_min_premium > 0 else None,
+                min_size=dp_min_size if dp_min_size > 0 else None
+            )
+            ticker_dp_analysis = analyze_darkpool_trades(ticker_darkpool, flow_ticker)
+        
+        if ticker_dp_analysis.get("error"):
+            st.error(ticker_dp_analysis["error"])
+        else:
+            # Summary metrics
+            dp_summary = ticker_dp_analysis.get("summary", {})
+            
+            dp_sum_col1, dp_sum_col2, dp_sum_col3, dp_sum_col4 = st.columns(4)
+            dp_sum_col1.metric("Total Trades", f"{dp_summary.get('total_trades', 0):,}")
+            dp_sum_col2.metric("Total Premium", f"${dp_summary.get('total_premium', 0):,.0f}")
+            dp_sum_col3.metric("Total Size", f"{dp_summary.get('total_size', 0):,} shares")
+            dp_sum_col4.metric("Avg Price", f"${dp_summary.get('avg_price', 0):.2f}")
+            
+            # Top darkpool trades
+            top_dp_trades = ticker_dp_analysis.get("top_trades", [])
+            
+            if top_dp_trades:
+                st.markdown(f"#### 🔥 Top 10 Darkpool Trades for {flow_ticker}")
+                
+                for i, trade in enumerate(top_dp_trades):
+                    with st.expander(f"#{i+1}: ${trade['premium']:,.0f} | {trade['size']:,} shares @ ${trade['price']:.2f} | {trade['time_display']}"):
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.write(f"**Time:** {trade['time_display']}")
+                            st.write(f"**Date:** {trade['date_display']}")
+                            st.write(f"**Price:** ${trade['price']:.2f}")
+                            st.write(f"**Size:** {trade['size']:,} shares")
+                        
+                        with col2:
+                            st.write(f"**Premium:** ${trade['premium']:,.2f}")
+                            st.write(f"**Market Center:** {trade['market_center']}")
+                            st.write(f"**NBBO:** ${trade['nbbo_bid']:.2f} / ${trade['nbbo_ask']:.2f}")
+                            st.write(f"**Spread:** ${trade['spread']:.2f}")
+                        
+                        with col3:
+                            st.write(f"**Volume:** {trade['volume']:,}")
+                            st.write(f"**Settlement:** {trade['trade_settlement']}")
+                            if trade['ext_hour']:
+                                st.caption(f"🌙 {trade['ext_hour']}")
+                            if trade['canceled']:
+                                st.warning("⚠️ CANCELED")
+                
+                # All trades table
+                with st.expander(f"📊 All {len(ticker_dp_analysis.get('trades', []))} Darkpool Trades"):
+                    all_dp_trades = ticker_dp_analysis.get("trades", [])
+                    if all_dp_trades:
+                        dp_df = pd.DataFrame(all_dp_trades)
+                        # Format for display
+                        display_df = dp_df[['time_display', 'price', 'size', 'premium', 'market_center', 'nbbo_bid', 'nbbo_ask']].copy()
+                        display_df.columns = ['Time', 'Price', 'Size', 'Premium', 'Center', 'Bid', 'Ask']
+                        display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}")
+                        display_df['Size'] = display_df['Size'].apply(lambda x: f"{x:,}")
+                        display_df['Premium'] = display_df['Premium'].apply(lambda x: f"${x:,.0f}")
+                        display_df['Bid'] = display_df['Bid'].apply(lambda x: f"${x:.2f}")
+                        display_df['Ask'] = display_df['Ask'].apply(lambda x: f"${x:.2f}")
+                        
+                        st.dataframe(display_df, use_container_width=True)
+            else:
+                st.info(f"No darkpool trades found for {flow_ticker} with current filters")
+    
+    # TAB 2: Market-Wide Recent Darkpool
+    with darkpool_tabs[1]:
+        st.markdown("### 🌍 Recent Market-Wide Darkpool Activity")
+        st.caption("Latest large block trades across all tickers")
+        
+        # Filters for market-wide
+        mw_col1, mw_col2, mw_col3, mw_col4 = st.columns(4)
+        with mw_col1:
+            mw_limit = st.number_input("Max Trades", min_value=10, max_value=200, value=100, step=10, key="mw_dp_limit")
+        with mw_col2:
+            mw_min_premium = st.number_input("Min Premium ($)", min_value=0, value=50000, step=10000, key="mw_min_prem")
+        with mw_col3:
+            mw_min_size = st.number_input("Min Size", min_value=0, value=5000, step=1000, key="mw_min_size")
+        with mw_col4:
+            if st.button("🔄 Refresh Market", key="refresh_market_dp"):
+                st.cache_data.clear()
+                st.rerun()
+        
+        # Fetch market-wide darkpool data
+        with st.spinner("Loading recent market-wide darkpool trades..."):
+            market_darkpool = uw_client.get_recent_darkpool_trades(
+                limit=mw_limit,
+                min_premium=mw_min_premium if mw_min_premium > 0 else None,
+                min_size=mw_min_size if mw_min_size > 0 else None
+            )
+            market_dp_analysis = analyze_darkpool_trades(market_darkpool)
+        
+        if market_dp_analysis.get("error"):
+            st.error(market_dp_analysis["error"])
+        else:
+            # Summary metrics
+            mw_summary = market_dp_analysis.get("summary", {})
+            
+            mw_sum_col1, mw_sum_col2, mw_sum_col3, mw_sum_col4, mw_sum_col5 = st.columns(5)
+            mw_sum_col1.metric("Total Trades", f"{mw_summary.get('total_trades', 0):,}")
+            mw_sum_col2.metric("Unique Tickers", f"{mw_summary.get('unique_tickers', 0)}")
+            mw_sum_col3.metric("Total Premium", f"${mw_summary.get('total_premium', 0):,.0f}")
+            mw_sum_col4.metric("Total Size", f"{mw_summary.get('total_size', 0):,}")
+            mw_sum_col5.metric("Largest Trade", f"${mw_summary.get('top_trade_premium', 0):,.0f}")
+            
+            # Top market-wide darkpool trades
+            top_mw_trades = market_dp_analysis.get("top_trades", [])
+            
+            if top_mw_trades:
+                st.markdown("#### 🔥 Top 20 Recent Darkpool Trades (All Tickers)")
+                
+                for i, trade in enumerate(top_mw_trades[:20]):
+                    with st.expander(f"#{i+1}: **{trade['ticker']}** | ${trade['premium']:,.0f} | {trade['size']:,} shares @ ${trade['price']:.2f} | {trade['time_display']}"):
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.write(f"**Ticker:** {trade['ticker']}")
+                            st.write(f"**Time:** {trade['time_display']}")
+                            st.write(f"**Date:** {trade['date_display']}")
+                            st.write(f"**Price:** ${trade['price']:.2f}")
+                        
+                        with col2:
+                            st.write(f"**Size:** {trade['size']:,} shares")
+                            st.write(f"**Premium:** ${trade['premium']:,.2f}")
+                            st.write(f"**Market Center:** {trade['market_center']}")
+                            st.write(f"**Spread:** ${trade['spread']:.2f}")
+                        
+                        with col3:
+                            st.write(f"**NBBO:** ${trade['nbbo_bid']:.2f} / ${trade['nbbo_ask']:.2f}")
+                            st.write(f"**Volume:** {trade['volume']:,}")
+                            st.write(f"**Settlement:** {trade['trade_settlement']}")
+                            if trade['ext_hour']:
+                                st.caption(f"🌙 {trade['ext_hour']}")
+                        
+                        # Quick add to watchlist
+                        if st.button(f"Add {trade['ticker']} to Watchlist", key=f"mw_add_{i}_{trade['ticker']}"):
+                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                            if trade['ticker'] not in current_list:
+                                current_list.append(trade['ticker'])
+                                st.success(f"Added {trade['ticker']}!")
+                                st.rerun()
+                
+                # All market-wide trades table
+                with st.expander(f"📊 All {len(market_dp_analysis.get('trades', []))} Market Darkpool Trades"):
+                    all_mw_trades = market_dp_analysis.get("trades", [])
+                    if all_mw_trades:
+                        mw_df = pd.DataFrame(all_mw_trades)
+                        # Format for display
+                        display_mw_df = mw_df[['ticker', 'time_display', 'price', 'size', 'premium', 'market_center']].copy()
+                        display_mw_df.columns = ['Ticker', 'Time', 'Price', 'Size', 'Premium', 'Center']
+                        display_mw_df['Price'] = display_mw_df['Price'].apply(lambda x: f"${x:.2f}")
+                        display_mw_df['Size'] = display_mw_df['Size'].apply(lambda x: f"{x:,}")
+                        display_mw_df['Premium'] = display_mw_df['Premium'].apply(lambda x: f"${x:,.0f}")
+                        
+                        st.dataframe(display_mw_df, use_container_width=True)
+            else:
+                st.info("No recent market-wide darkpool trades found with current filters")
+    
+    # Educational content
+    with st.expander("💡 Understanding Darkpool Trading"):
+        st.markdown("""
+        **What is Darkpool Trading?**
+        
+        Darkpool trades are large block trades executed off public exchanges:
+        
+        ✅ **Key Characteristics:**
+        - Large institutional trades (10,000+ shares typical)
+        - Executed privately to minimize market impact
+        - Reported after execution (delayed)
+        - Shows "smart money" positioning
+        
+        📊 **Why It Matters:**
+        - Institutional accumulation/distribution signals
+        - Can predict major price movements
+        - Combines with options flow for complete picture
+        - High-conviction institutional positions
+        
+        🎯 **How to Use This Data:**
+        1. **Ticker Darkpool**: See if institutions are loading up on your ticker
+        2. **Market-Wide**: Find new opportunities from institutional activity
+        3. **Compare with Options Flow**: Institutions often use both
+        4. **Premium Size**: Larger premium = higher conviction
+        5. **Time of Day**: Extended hours = urgent positioning
+        
+        ⚠️ **Important:**
+        - Data is delayed (not real-time)
+        - Large trades don't guarantee direction
+        - Combine with options flow and technicals
+        - Use as confirmation, not sole signal
+        """)
+
+else:
+    st.error("Unable to get quote for ticker")
 # TAB 8: Institutional Flow
 with tabs[7]:
     st.subheader("🏦 Institutional Trading Activity")
