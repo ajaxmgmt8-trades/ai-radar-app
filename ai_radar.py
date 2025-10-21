@@ -4020,8 +4020,12 @@ def analyze_darkpool_trades(darkpool_data, ticker=None):
     if not darkpool_data or darkpool_data.get("error"):
         return {"error": darkpool_data.get("error", "No darkpool data available")}
     
-    # Get the data array
-    data = darkpool_data.get("data", [])
+    # Handle nested data structure - API returns {"data": {"data": [...]}}
+    outer_data = darkpool_data.get("data", {})
+    if isinstance(outer_data, dict):
+        data = outer_data.get("data", [])
+    else:
+        data = outer_data
     
     if not data:
         return {"error": "No darkpool trades found"}
@@ -4069,7 +4073,6 @@ def analyze_darkpool_trades(darkpool_data, ticker=None):
             }
             trades.append(processed_trade)
         except (ValueError, TypeError, AttributeError) as e:
-            # Skip trades that can't be processed
             continue
     
     if not trades:
@@ -4102,7 +4105,7 @@ def analyze_darkpool_trades(darkpool_data, ticker=None):
     return {
         'summary': summary,
         'trades': trades,
-        'top_trades': trades[:10]  # Top 10 by premium
+        'top_trades': trades[:10]
     }
 def get_unified_flow_data(ticker: str, timeframe: str, force_refresh: bool = False):
     """Unified function to fetch both options chain and flow data together"""
