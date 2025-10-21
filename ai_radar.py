@@ -6492,8 +6492,7 @@ with tabs[6]:
                 st.json(ticker_darkpool)
                 st.write(f"**Has error?** {ticker_darkpool.get('error')}")
                 st.write(f"**Data length:** {len(ticker_darkpool.get('data', []))}")
-    
-    ticker_dp_analysis = analyze_darkpool_trades(ticker_darkpool, flow_ticker)
+
                 ticker_dp_analysis = analyze_darkpool_trades(ticker_darkpool, flow_ticker)
             
             if ticker_dp_analysis.get("error"):
