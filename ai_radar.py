@@ -6454,6 +6454,7 @@ with tabs[6]:
                     all_dp_trades = ticker_dp_analysis.get("trades", [])
                     if all_dp_trades:
                         dp_df = pd.DataFrame(all_dp_trades)
+                        # Format for display
                         display_df = dp_df[['time_display', 'price', 'size', 'premium', 'market_center', 'nbbo_bid', 'nbbo_ask']].copy()
                         display_df.columns = ['Time', 'Price', 'Size', 'Premium', 'Center', 'Bid', 'Ask']
                         display_df['Price'] = display_df['Price'].apply(lambda x: f"${x:.2f}")
@@ -6548,6 +6549,7 @@ with tabs[6]:
                     all_mw_trades = market_dp_analysis.get("trades", [])
                     if all_mw_trades:
                         mw_df = pd.DataFrame(all_mw_trades)
+                        # Format for display
                         display_mw_df = mw_df[['ticker', 'time_display', 'price', 'size', 'premium', 'market_center']].copy()
                         display_mw_df.columns = ['Ticker', 'Time', 'Price', 'Size', 'Premium', 'Center']
                         display_mw_df['Price'] = display_mw_df['Price'].apply(lambda x: f"${x:.2f}")
@@ -6590,8 +6592,8 @@ with tabs[6]:
         - Combine with options flow and technicals
         - Use as confirmation, not sole signal
         """)
-    
-    else:
+
+else:
     st.error("Unable to get quote for ticker")
 # TAB 8: Institutional Flow
 with tabs[7]:
