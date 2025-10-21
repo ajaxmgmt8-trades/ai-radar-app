@@ -4029,30 +4029,42 @@ def analyze_darkpool_trades(darkpool_data, ticker=None):
     # Process each trade
     trades = []
     for trade in data:
-        # Skip if trade is None or not a dict
         if not trade or not isinstance(trade, dict):
             continue
             
-        # Calculate premium (price * size)
         try:
+            # Parse timestamp
+            executed_at = trade.get('executed_at', '')
+            if executed_at:
+                from datetime import datetime
+                dt = datetime.fromisoformat(executed_at.replace('Z', '+00:00'))
+                time_display = dt.strftime('%I:%M:%S %p')
+                date_display = dt.strftime('%Y-%m-%d')
+            else:
+                time_display = 'N/A'
+                date_display = 'N/A'
+            
+            # Convert string numbers to floats
             price = float(trade.get('price', 0))
             size = int(trade.get('size', 0))
-            premium = price * size
+            premium = float(trade.get('premium', 0))
+            nbbo_bid = float(trade.get('nbbo_bid', 0))
+            nbbo_ask = float(trade.get('nbbo_ask', 0))
             
             processed_trade = {
                 'ticker': trade.get('ticker', ticker or 'N/A'),
                 'price': price,
                 'size': size,
                 'premium': premium,
-                'time_display': trade.get('time', 'N/A'),
-                'date_display': trade.get('date', 'N/A'),
+                'time_display': time_display,
+                'date_display': date_display,
                 'market_center': trade.get('market_center', 'N/A'),
                 'volume': int(trade.get('volume', 0)),
-                'nbbo_bid': float(trade.get('nbbo_bid', 0)),
-                'nbbo_ask': float(trade.get('nbbo_ask', 0)),
-                'spread': float(trade.get('nbbo_ask', 0)) - float(trade.get('nbbo_bid', 0)),
+                'nbbo_bid': nbbo_bid,
+                'nbbo_ask': nbbo_ask,
+                'spread': nbbo_ask - nbbo_bid,
                 'trade_settlement': trade.get('trade_settlement', 'N/A'),
-                'ext_hour': trade.get('ext_hour', ''),
+                'ext_hour': trade.get('ext_hour_sold_codes', ''),
                 'canceled': trade.get('canceled', False)
             }
             trades.append(processed_trade)
