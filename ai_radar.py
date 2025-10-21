@@ -6490,12 +6490,6 @@ with tabs[6]:
             
             with st.spinner(f"Loading darkpool trades for {flow_ticker}..."):
                 ticker_darkpool = uw_client.get_darkpool_trades(flow_ticker, limit=dp_limit, min_premium=dp_min_premium if dp_min_premium > 0 else None, min_size=dp_min_size if dp_min_size > 0 else None)
-                # DEBUG
-                st.write("**DEBUG: Raw Response**")
-                st.json(ticker_darkpool)
-                st.write(f"**Has error?** {ticker_darkpool.get('error')}")
-                st.write(f"**Data length:** {len(ticker_darkpool.get('data', []))}")
-
                 ticker_dp_analysis = analyze_darkpool_trades(ticker_darkpool, flow_ticker)
             
             if ticker_dp_analysis.get("error"):
