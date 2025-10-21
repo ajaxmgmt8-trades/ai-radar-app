@@ -644,7 +644,7 @@ class UnusualWhalesClient:
         Get afterhours earnings for a given date
         Endpoint: /api/earnings/afterhours
         """
-        endpoint = "/earnings/afterhours"
+        endpoint = "/api/earnings/afterhours"
         params = {"limit": min(limit, 100), "page": page}
         if date:
             params["date"] = date
@@ -655,7 +655,7 @@ class UnusualWhalesClient:
         Get premarket earnings for a given date
         Endpoint: /api/earnings/premarket
         """
-        endpoint = "/earnings/premarket"
+        endpoint = "/api/earnings/premarket"
         params = {"limit": min(limit, 100), "page": page}
         if date:
             params["date"] = date
@@ -666,7 +666,7 @@ class UnusualWhalesClient:
         Get historical earnings for a specific ticker
         Endpoint: /api/earnings/{ticker}
         """
-        endpoint = f"/earnings/{ticker}"
+        endpoint = f"/api/earnings/{ticker}"
         return self._make_request(endpoint)                               
 
 # Initialize UW client
