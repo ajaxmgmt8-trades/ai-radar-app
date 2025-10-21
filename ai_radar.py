@@ -7266,7 +7266,7 @@ with tabs[9]:
             
             pm_col1, pm_col2, pm_col3 = st.columns([2, 1, 1])
             with pm_col1:
-                pm_date = st.date_input("Select Date", datetime.date.today(), key="pm_date")
+                pm_date = st.date_input("Select Date", date.today(), key="pm_date")
                 pm_date_str = pm_date.strftime("%Y-%m-%d")
             with pm_col2:
                 pm_limit = st.number_input("Limit", min_value=10, max_value=100, value=50, key="pm_limit")
@@ -7342,7 +7342,7 @@ with tabs[9]:
             
             ah_col1, ah_col2, ah_col3 = st.columns([2, 1, 1])
             with ah_col1:
-                ah_date = st.date_input("Select Date", datetime.date.today(), key="ah_date")
+                ah_date = st.date_input("Select Date", date.today(), key="ah_date")
                 ah_date_str = ah_date.strftime("%Y-%m-%d")
             with ah_col2:
                 ah_limit = st.number_input("Limit", min_value=10, max_value=100, value=50, key="ah_limit")
