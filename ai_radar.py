@@ -4029,28 +4029,39 @@ def analyze_darkpool_trades(darkpool_data, ticker=None):
     # Process each trade
     trades = []
     for trade in data:
+        # Skip if trade is None or not a dict
+        if not trade or not isinstance(trade, dict):
+            continue
+            
         # Calculate premium (price * size)
-        price = float(trade.get('price', 0))
-        size = int(trade.get('size', 0))
-        premium = price * size
-        
-        processed_trade = {
-            'ticker': trade.get('ticker', ticker or 'N/A'),
-            'price': price,
-            'size': size,
-            'premium': premium,
-            'time_display': trade.get('time', 'N/A'),
-            'date_display': trade.get('date', 'N/A'),
-            'market_center': trade.get('market_center', 'N/A'),
-            'volume': int(trade.get('volume', 0)),
-            'nbbo_bid': float(trade.get('nbbo_bid', 0)),
-            'nbbo_ask': float(trade.get('nbbo_ask', 0)),
-            'spread': float(trade.get('nbbo_ask', 0)) - float(trade.get('nbbo_bid', 0)),
-            'trade_settlement': trade.get('trade_settlement', 'N/A'),
-            'ext_hour': trade.get('ext_hour', ''),
-            'canceled': trade.get('canceled', False)
-        }
-        trades.append(processed_trade)
+        try:
+            price = float(trade.get('price', 0))
+            size = int(trade.get('size', 0))
+            premium = price * size
+            
+            processed_trade = {
+                'ticker': trade.get('ticker', ticker or 'N/A'),
+                'price': price,
+                'size': size,
+                'premium': premium,
+                'time_display': trade.get('time', 'N/A'),
+                'date_display': trade.get('date', 'N/A'),
+                'market_center': trade.get('market_center', 'N/A'),
+                'volume': int(trade.get('volume', 0)),
+                'nbbo_bid': float(trade.get('nbbo_bid', 0)),
+                'nbbo_ask': float(trade.get('nbbo_ask', 0)),
+                'spread': float(trade.get('nbbo_ask', 0)) - float(trade.get('nbbo_bid', 0)),
+                'trade_settlement': trade.get('trade_settlement', 'N/A'),
+                'ext_hour': trade.get('ext_hour', ''),
+                'canceled': trade.get('canceled', False)
+            }
+            trades.append(processed_trade)
+        except (ValueError, TypeError, AttributeError) as e:
+            # Skip trades that can't be processed
+            continue
+    
+    if not trades:
+        return {"error": "No valid darkpool trades could be processed"}
     
     # Sort by premium (highest first)
     trades.sort(key=lambda x: x['premium'], reverse=True)
