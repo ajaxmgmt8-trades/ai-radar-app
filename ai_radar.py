@@ -638,7 +638,36 @@ class UnusualWhalesClient:
         if min_volume:
             params["min_volume"] = min_volume
         
-        return self._make_request(endpoint, params)    
+        return self._make_request(endpoint, params) 
+    def get_earnings_afterhours(self, date: str = None, limit: int = 50, page: int = 0) -> Dict:
+        """
+        Get afterhours earnings for a given date
+        Endpoint: /api/earnings/afterhours
+        """
+        endpoint = "/earnings/afterhours"
+        params = {"limit": min(limit, 100), "page": page}
+        if date:
+            params["date"] = date
+        return self._make_request(endpoint, params)
+    
+    def get_earnings_premarket(self, date: str = None, limit: int = 50, page: int = 0) -> Dict:
+        """
+        Get premarket earnings for a given date
+        Endpoint: /api/earnings/premarket
+        """
+        endpoint = "/earnings/premarket"
+        params = {"limit": min(limit, 100), "page": page}
+        if date:
+            params["date"] = date
+        return self._make_request(endpoint, params)
+    
+    def get_ticker_earnings_history(self, ticker: str) -> Dict:
+        """
+        Get historical earnings for a specific ticker
+        Endpoint: /api/earnings/{ticker}
+        """
+        endpoint = f"/earnings/{ticker}"
+        return self._make_request(endpoint)                               
 
 # Initialize UW client
 uw_client = UnusualWhalesClient(UNUSUAL_WHALES_KEY) if UNUSUAL_WHALES_KEY else None
@@ -2625,31 +2654,103 @@ def get_options_data(ticker: str) -> Optional[Dict]:
         "total_puts": puts['volume'].sum() if not puts.empty else 0
     }
 
-def get_earnings_calendar() -> List[Dict]:
-    """Enhanced earnings calendar using UW data"""
-    if uw_client:
+def analyze_earnings(earnings_data, earnings_type="calendar"):
+    """
+    Analyze earnings data from Unusual Whales
+    Handles afterhours, premarket, and historical ticker earnings
+    """
+    if not earnings_data or earnings_data.get("error"):
+        return {"error": earnings_data.get("error", "No earnings data available")}
+    
+    data = earnings_data.get("data", [])
+    
+    if not data:
+        return {"error": "No earnings found"}
+    
+    # Process earnings
+    earnings = []
+    for earning in data:
+        if not earning or not isinstance(earning, dict):
+            continue
+        
         try:
-            # Try to get economic calendar from UW (may include earnings)
-            calendar_result = uw_client.get_economic_calendar()
-            if not calendar_result.get("error") and calendar_result.get("data"):
-                calendar_data = calendar_result["data"]
-                earnings_events = []
-                
-                # Filter for earnings-related events
-                for event in calendar_data:
-                    if "earnings" in event.get("title", "").lower() or "eps" in event.get("title", "").lower():
-                        earnings_events.append({
-                            "ticker": event.get("symbol", ""),
-                            "date": event.get("date", ""),
-                            "time": event.get("time", ""),
-                            "estimate": event.get("estimate", ""),
-                            "source": "Unusual Whales"
-                        })
-                
-                if earnings_events:
-                    return earnings_events
-        except Exception as e:
-            print(f"UW earnings calendar error: {e}")
+            # Common fields
+            processed = {
+                'symbol': earning.get('symbol', 'N/A'),
+                'report_date': earning.get('report_date', 'N/A'),
+                'report_time': earning.get('report_time', 'N/A'),
+                'actual_eps': earning.get('actual_eps', 'N/A'),
+                'street_mean_est': earning.get('street_mean_est', 'N/A'),
+            }
+            
+            # Calendar-specific fields (afterhours/premarket)
+            if earnings_type == "calendar":
+                processed.update({
+                    'full_name': earning.get('full_name', 'N/A'),
+                    'sector': earning.get('sector', 'N/A'),
+                    'marketcap': float(earning.get('marketcap', 0)),
+                    'expected_move': float(earning.get('expected_move', 0)),
+                    'expected_move_perc': float(earning.get('expected_move_perc', 0)) * 100,  # Convert to percentage
+                    'reaction': float(earning.get('reaction', 0)) * 100,  # Convert to percentage
+                    'pre_earnings_close': float(earning.get('pre_earnings_close', 0)),
+                    'post_earnings_close': float(earning.get('post_earnings_close', 0)),
+                    'has_options': earning.get('has_options', False),
+                    'is_s_p_500': earning.get('is_s_p_500', False),
+                    'country_name': earning.get('country_name', 'N/A')
+                })
+            
+            # Historical ticker-specific fields
+            elif earnings_type == "historical":
+                processed.update({
+                    'ending_fiscal_quarter': earning.get('ending_fiscal_quarter', 'N/A'),
+                    'expected_move': float(earning.get('expected_move', 0)),
+                    'expected_move_perc': float(earning.get('expected_move_perc', 0)) * 100,
+                    'post_earnings_move_1d': float(earning.get('post_earnings_move_1d', 0)) * 100,
+                    'post_earnings_move_1w': float(earning.get('post_earnings_move_1w', 0)) * 100,
+                    'post_earnings_move_2w': float(earning.get('post_earnings_move_2w', 0)) * 100,
+                    'pre_earnings_move_1d': float(earning.get('pre_earnings_move_1d', 0)) * 100,
+                    'pre_earnings_move_1w': float(earning.get('pre_earnings_move_1w', 0)) * 100,
+                    'long_straddle_1d': float(earning.get('long_straddle_1d', 0)) * 100,
+                    'long_straddle_1w': float(earning.get('long_straddle_1w', 0)) * 100,
+                    'short_straddle_1d': float(earning.get('short_straddle_1d', 0)) * 100,
+                    'short_straddle_1w': float(earning.get('short_straddle_1w', 0)) * 100,
+                })
+            
+            earnings.append(processed)
+        except (ValueError, TypeError, KeyError) as e:
+            continue
+    
+    if not earnings:
+        return {"error": "No valid earnings could be processed"}
+    
+    # Calculate summary
+    total_earnings = len(earnings)
+    
+    summary = {'total_earnings': total_earnings}
+    
+    if earnings_type == "calendar":
+        avg_reaction = sum(e.get('reaction', 0) for e in earnings) / total_earnings if total_earnings > 0 else 0
+        positive_reactions = len([e for e in earnings if e.get('reaction', 0) > 0])
+        negative_reactions = len([e for e in earnings if e.get('reaction', 0) < 0])
+        sp500_count = len([e for e in earnings if e.get('is_s_p_500', False)])
+        
+        summary.update({
+            'avg_reaction': avg_reaction,
+            'positive_reactions': positive_reactions,
+            'negative_reactions': negative_reactions,
+            'sp500_count': sp500_count
+        })
+    
+    elif earnings_type == "historical":
+        avg_move_1d = sum(e.get('post_earnings_move_1d', 0) for e in earnings) / total_earnings if total_earnings > 0 else 0
+        summary.update({
+            'avg_move_1d': avg_move_1d
+        })
+    
+    return {
+        'summary': summary,
+        'earnings': earnings
+    }
     
     # Fallback to placeholder data
     today = datetime.date.today().strftime("%Y-%m-%d")
@@ -7147,95 +7248,251 @@ with tabs[8]:
             - Medium-term lottos (31-90 DTE): More time for thesis, lower theta decay
             - Long-dated lottos (90+ DTE): Less "lotto" behavior, more like regular options
             """)
-# TAB 10: Earnings Plays
+# TAB 10: Earnings Plays with UW Integration
 with tabs[9]:
-    st.subheader("🗓️ Earnings Plays with UW Integration")
+    st.subheader("🗓️ Earnings Calendar with Unusual Whales")
+    st.markdown("**Track upcoming earnings reports with institutional-grade data and AI analysis**")
     
-    st.write("Track upcoming earnings reports and get AI analysis for potential earnings plays using Unusual Whales and other data sources.")
-    
-    # Try to get UW economic calendar first
-    if uw_client:
-        st.info("🔥 Using Unusual Whales economic calendar for enhanced earnings detection")
+    if not uw_client:
+        st.error("🔥 Unusual Whales API required for earnings calendar")
+        st.info("Configure your Unusual Whales API key to access earnings data")
     else:
-        st.info("Using simulated earnings data. For live earnings calendar with UW integration, configure your Unusual Whales API key.")
-    
-    if st.button("📊 Get Enhanced Earnings Plays", type="primary"):
-        with st.spinner("AI analyzing earnings reports with enhanced data..."):
+        # Create sub-tabs for different earnings views
+        earnings_tabs = st.tabs(["📅 Premarket Earnings", "🌙 Afterhours Earnings", "📊 Ticker History"])
+        
+        # TAB 1: Premarket Earnings
+        with earnings_tabs[0]:
+            st.markdown("### 📅 Premarket Earnings Calendar")
             
-            earnings_today = get_earnings_calendar()
+            pm_col1, pm_col2, pm_col3 = st.columns([2, 1, 1])
+            with pm_col1:
+                pm_date = st.date_input("Select Date", datetime.date.today(), key="pm_date")
+                pm_date_str = pm_date.strftime("%Y-%m-%d")
+            with pm_col2:
+                pm_limit = st.number_input("Limit", min_value=10, max_value=100, value=50, key="pm_limit")
+            with pm_col3:
+                if st.button("🔄 Refresh Premarket", key="refresh_pm"):
+                    st.cache_data.clear()
+                    st.rerun()
             
-            if not earnings_today:
-                st.info("No earnings reports found for today.")
+            with st.spinner("Loading premarket earnings..."):
+                premarket_data = uw_client.get_earnings_premarket(date=pm_date_str, limit=pm_limit)
+                premarket_analysis = analyze_earnings(premarket_data, earnings_type="calendar")
+            
+            if premarket_analysis.get("error"):
+                st.error(premarket_analysis["error"])
             else:
-                st.markdown("### Today's Earnings Reports")
-                for report in earnings_today:
-                    ticker = report["ticker"]
-                    time_str = report["time"]
-                    source = report.get("source", "Unknown")
+                summary = premarket_analysis.get("summary", {})
+                
+                # Summary metrics
+                pm_sum_col1, pm_sum_col2, pm_sum_col3, pm_sum_col4 = st.columns(4)
+                pm_sum_col1.metric("Total Earnings", summary.get("total_earnings", 0))
+                pm_sum_col2.metric("S&P 500 Count", summary.get("sp500_count", 0))
+                pm_sum_col3.metric("Positive Reactions", summary.get("positive_reactions", 0))
+                pm_sum_col4.metric("Negative Reactions", summary.get("negative_reactions", 0))
+                
+                earnings_list = premarket_analysis.get("earnings", [])
+                
+                if earnings_list:
+                    st.markdown(f"#### 📊 {len(earnings_list)} Premarket Earnings Reports for {pm_date_str}")
                     
-                    st.markdown(f"**{ticker}** - Earnings **{time_str}** | Source: {source}")
-                    
-                    # Get live quote and enhanced options data for earnings analysis
-                    quote = get_live_quote(ticker)
-                    
-                    # Use UW options analysis if available
-                    if uw_client:
-                        options_analysis = get_enhanced_options_analysis(ticker)
-                        options_source = "Unusual Whales"
-                    else:
-                        options_analysis = get_advanced_options_analysis_yf(ticker)
-                        options_source = "Yahoo Finance"
-                    
-                    if not quote.get("error"):
-                        col1, col2, col3, col4 = st.columns(4)
-                        col1.metric("Current Price", f"${quote['last']:.2f}", f"{quote['change_percent']:+.2f}%")
-                        col2.metric("Volume", f"{quote['volume']:,}")
-                        col3.metric("Data Source", quote.get('data_source', 'Unknown'))
-                        col4.metric("Options Source", options_source)
-                        
-                        if not options_analysis.get("error"):
-                            st.write(f"**Enhanced Options Metrics from {options_source}:**")
+                    for i, earning in enumerate(earnings_list):
+                        ticker = earning['symbol']
+                        with st.expander(f"**{ticker}** - {earning['full_name']} | {earning['sector']} | EPS: ${earning['actual_eps']} (Est: ${earning['street_mean_est']})"):
                             
-                            if options_analysis.get("data_source") == "Unusual Whales":
-                                # UW enhanced options metrics
-                                enhanced = options_analysis.get('enhanced_metrics', {})
-                                opt_col1, opt_col2, opt_col3, opt_col4 = st.columns(4)
-                                opt_col1.metric("Flow Alerts", enhanced.get('total_flow_alerts', 'N/A'))
-                                opt_col2.metric("Flow Sentiment", enhanced.get('flow_sentiment', 'Neutral'))
-                                opt_col3.metric("ATM P/C Ratio", f"{enhanced.get('atm_put_call_ratio', 0):.2f}")
-                                opt_col4.metric("Greeks", f"Δ:{enhanced.get('total_delta', 'N/A')} Γ:{enhanced.get('total_gamma', 'N/A')}")
-                                st.success("🔥 Using premium Unusual Whales options flow data for earnings analysis")
-                            else:
-                                # Standard options metrics
-                                basic = options_analysis.get('basic_metrics', {})
-                                opt_col1, opt_col2, opt_col3 = st.columns(3)
-                                opt_col1.metric("IV", f"{basic.get('avg_call_iv', 0):.1f}%")
-                                opt_col2.metric("Put/Call", f"{basic.get('put_call_volume_ratio', 0):.2f}")
-                                opt_col3.metric("Total OI", f"{basic.get('total_call_oi', 0) + basic.get('total_put_oi', 0):,}")
+                            earn_col1, earn_col2, earn_col3 = st.columns(3)
+                            
+                            with earn_col1:
+                                st.write(f"**Report Date:** {earning['report_date']}")
+                                st.write(f"**Report Time:** {earning['report_time']}")
+                                st.write(f"**Actual EPS:** ${earning['actual_eps']}")
+                                st.write(f"**Est EPS:** ${earning['street_mean_est']}")
+                                st.write(f"**Market Cap:** ${earning['marketcap']:,.0f}")
+                            
+                            with earn_col2:
+                                st.write(f"**Expected Move:** ${earning['expected_move']:.2f}")
+                                st.write(f"**Expected Move %:** {earning['expected_move_perc']:.2f}%")
+                                st.write(f"**Reaction:** {earning['reaction']:.2f}%")
+                                st.write(f"**Pre Close:** ${earning['pre_earnings_close']:.2f}")
+                                st.write(f"**Post Close:** ${earning['post_earnings_close']:.2f}")
+                            
+                            with earn_col3:
+                                st.write(f"**Sector:** {earning['sector']}")
+                                st.write(f"**Country:** {earning['country_name']}")
+                                if earning['is_s_p_500']:
+                                    st.success("✅ S&P 500")
+                                if earning['has_options']:
+                                    st.info("📊 Has Options")
+                            
+                            # AI Analysis button for this ticker
+                            if st.button(f"🤖 AI Analysis for {ticker}", key=f"ai_pm_{i}_{ticker}"):
+                                with st.spinner(f"Generating AI analysis for {ticker}..."):
+                                    quote = get_live_quote(ticker, st.session_state.selected_tz)
+                                    if not quote.get("error"):
+                                        options_data = get_enhanced_options_analysis(ticker)
+                                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), 
+                                                                 f"Premarket Earnings Analysis", options_data)
+                                        st.markdown(ai_analysis)
+                else:
+                    st.info(f"No premarket earnings found for {pm_date_str}")
+        
+        # TAB 2: Afterhours Earnings
+        with earnings_tabs[1]:
+            st.markdown("### 🌙 Afterhours Earnings Calendar")
+            
+            ah_col1, ah_col2, ah_col3 = st.columns([2, 1, 1])
+            with ah_col1:
+                ah_date = st.date_input("Select Date", datetime.date.today(), key="ah_date")
+                ah_date_str = ah_date.strftime("%Y-%m-%d")
+            with ah_col2:
+                ah_limit = st.number_input("Limit", min_value=10, max_value=100, value=50, key="ah_limit")
+            with ah_col3:
+                if st.button("🔄 Refresh Afterhours", key="refresh_ah"):
+                    st.cache_data.clear()
+                    st.rerun()
+            
+            with st.spinner("Loading afterhours earnings..."):
+                afterhours_data = uw_client.get_earnings_afterhours(date=ah_date_str, limit=ah_limit)
+                afterhours_analysis = analyze_earnings(afterhours_data, earnings_type="calendar")
+            
+            if afterhours_analysis.get("error"):
+                st.error(afterhours_analysis["error"])
+            else:
+                summary = afterhours_analysis.get("summary", {})
+                
+                # Summary metrics
+                ah_sum_col1, ah_sum_col2, ah_sum_col3, ah_sum_col4 = st.columns(4)
+                ah_sum_col1.metric("Total Earnings", summary.get("total_earnings", 0))
+                ah_sum_col2.metric("S&P 500 Count", summary.get("sp500_count", 0))
+                ah_sum_col3.metric("Positive Reactions", summary.get("positive_reactions", 0))
+                ah_sum_col4.metric("Negative Reactions", summary.get("negative_reactions", 0))
+                
+                earnings_list = afterhours_analysis.get("earnings", [])
+                
+                if earnings_list:
+                    st.markdown(f"#### 📊 {len(earnings_list)} Afterhours Earnings Reports for {ah_date_str}")
                     
-                    # Enhanced AI earnings analysis
-                    if not options_analysis.get("error"):
-                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), f"Earnings {time_str} - Enhanced Analysis", options_analysis)
-                    else:
-                        ai_analysis = f"""
-                        **Enhanced AI Analysis for {ticker} Earnings:**
-                        - **Date:** {report["date"]}
-                        - **Time:** {time_str}
-                        - **Current Price:** ${quote.get('last', 0):.2f}
-                        - **Daily Change:** {quote.get('change_percent', 0):+.2f}%
-                        - **Volume:** {quote.get('volume', 0):,}
-                        - **Data Source:** {quote.get('data_source', 'Unknown')}
-                        - **Options Source:** {options_source}
-                        
-                        **Enhanced Analysis Notes:**
-                        Monitor for post-earnings volatility and unusual options activity.
-                        {"Enhanced UW flow data provides superior institutional insight." if options_source == "Unusual Whales" else "Consider upgrading to UW for premium options flow insights."}
-                        """
-                    
-                    with st.expander(f"🔮 Enhanced AI Analysis for {ticker}"):
-                        st.markdown(ai_analysis)
-                    st.divider()
-
+                    for i, earning in enumerate(earnings_list):
+                        ticker = earning['symbol']
+                        with st.expander(f"**{ticker}** - {earning['full_name']} | {earning['sector']} | EPS: ${earning['actual_eps']} (Est: ${earning['street_mean_est']})"):
+                            
+                            earn_col1, earn_col2, earn_col3 = st.columns(3)
+                            
+                            with earn_col1:
+                                st.write(f"**Report Date:** {earning['report_date']}")
+                                st.write(f"**Report Time:** {earning['report_time']}")
+                                st.write(f"**Actual EPS:** ${earning['actual_eps']}")
+                                st.write(f"**Est EPS:** ${earning['street_mean_est']}")
+                                st.write(f"**Market Cap:** ${earning['marketcap']:,.0f}")
+                            
+                            with earn_col2:
+                                st.write(f"**Expected Move:** ${earning['expected_move']:.2f}")
+                                st.write(f"**Expected Move %:** {earning['expected_move_perc']:.2f}%")
+                                st.write(f"**Reaction:** {earning['reaction']:.2f}%")
+                                st.write(f"**Pre Close:** ${earning['pre_earnings_close']:.2f}")
+                                st.write(f"**Post Close:** ${earning['post_earnings_close']:.2f}")
+                            
+                            with earn_col3:
+                                st.write(f"**Sector:** {earning['sector']}")
+                                st.write(f"**Country:** {earning['country_name']}")
+                                if earning['is_s_p_500']:
+                                    st.success("✅ S&P 500")
+                                if earning['has_options']:
+                                    st.info("📊 Has Options")
+                            
+                            # AI Analysis button for this ticker
+                            if st.button(f"🤖 AI Analysis for {ticker}", key=f"ai_ah_{i}_{ticker}"):
+                                with st.spinner(f"Generating AI analysis for {ticker}..."):
+                                    quote = get_live_quote(ticker, st.session_state.selected_tz)
+                                    if not quote.get("error"):
+                                        options_data = get_enhanced_options_analysis(ticker)
+                                        ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), 
+                                                                 f"Afterhours Earnings Analysis", options_data)
+                                        st.markdown(ai_analysis)
+                else:
+                    st.info(f"No afterhours earnings found for {ah_date_str}")
+        
+        # TAB 3: Historical Ticker Earnings
+        with earnings_tabs[2]:
+            st.markdown("### 📊 Historical Ticker Earnings")
+            
+            hist_col1, hist_col2 = st.columns([3, 1])
+            with hist_col1:
+                hist_ticker = st.text_input("Enter Ticker for Earnings History", value="AAPL", key="hist_ticker").upper()
+            with hist_col2:
+                if st.button("🔄 Get History", key="refresh_hist"):
+                    st.rerun()
+            
+            with st.spinner(f"Loading earnings history for {hist_ticker}..."):
+                history_data = uw_client.get_ticker_earnings_history(hist_ticker)
+                history_analysis = analyze_earnings(history_data, earnings_type="historical")
+            
+            if history_analysis.get("error"):
+                st.error(history_analysis["error"])
+            else:
+                summary = history_analysis.get("summary", {})
+                earnings_list = history_analysis.get("earnings", [])
+                
+                st.markdown(f"#### 📈 {summary.get('total_earnings', 0)} Historical Earnings for {hist_ticker}")
+                st.caption(f"Average 1-Day Move: {summary.get('avg_move_1d', 0):.2f}%")
+                
+                if earnings_list:
+                    for i, earning in enumerate(earnings_list):
+                        with st.expander(f"**{earning['report_date']}** | Q: {earning['ending_fiscal_quarter']} | EPS: ${earning['actual_eps']} (Est: ${earning['street_mean_est']})"):
+                            
+                            hist_col1, hist_col2, hist_col3 = st.columns(3)
+                            
+                            with hist_col1:
+                                st.write(f"**Report Date:** {earning['report_date']}")
+                                st.write(f"**Report Time:** {earning['report_time']}")
+                                st.write(f"**Quarter:** {earning['ending_fiscal_quarter']}")
+                                st.write(f"**Actual EPS:** ${earning['actual_eps']}")
+                                st.write(f"**Est EPS:** ${earning['street_mean_est']}")
+                            
+                            with hist_col2:
+                                st.write("**Post-Earnings Moves:**")
+                                st.write(f"1-Day: {earning['post_earnings_move_1d']:.2f}%")
+                                st.write(f"1-Week: {earning['post_earnings_move_1w']:.2f}%")
+                                st.write(f"2-Week: {earning['post_earnings_move_2w']:.2f}%")
+                                st.write(f"Expected Move: ${earning['expected_move']:.2f}")
+                            
+                            with hist_col3:
+                                st.write("**Straddle Performance:**")
+                                st.write(f"Long 1-Day: {earning['long_straddle_1d']:.2f}%")
+                                st.write(f"Long 1-Week: {earning['long_straddle_1w']:.2f}%")
+                                st.write(f"Short 1-Day: {earning['short_straddle_1d']:.2f}%")
+                                st.write(f"Short 1-Week: {earning['short_straddle_1w']:.2f}%")
+                else:
+                    st.info(f"No earnings history found for {hist_ticker}")
+        
+        # Educational section
+        with st.expander("💡 Understanding Earnings Data"):
+            st.markdown("""
+            **Earnings Calendar Features:**
+            
+            ✅ **Premarket Earnings:**
+            - Reports released before market open
+            - Can impact opening price significantly
+            - Watch for gaps and momentum
+            
+            🌙 **Afterhours Earnings:**
+            - Reports released after market close
+            - Price action happens in extended hours
+            - Monitor for next-day follow-through
+            
+            📊 **Historical Earnings:**
+            - Track past earnings performance
+            - Identify patterns in price moves
+            - Analyze straddle profitability
+            - **Long Straddle:** Buy call + put (profit from big moves)
+            - **Short Straddle:** Sell call + put (profit from small moves)
+            
+            🎯 **Key Metrics:**
+            - **Expected Move:** Predicted price swing based on options
+            - **Reaction:** Actual post-earnings price change
+            - **Market Cap:** Company size/liquidity indicator
+            - **S&P 500:** Large-cap index member
+            """)
 # TAB 11: Important News & Economic Calendar
 with tabs[10]:
     st.subheader("📰 Important News & Economic Calendar")
