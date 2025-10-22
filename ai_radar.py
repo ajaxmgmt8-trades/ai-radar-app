@@ -456,14 +456,71 @@ class UnusualWhalesClient:
         return self._make_request(endpoint)
     
     def get_economic_calendar(self) -> Dict:
-        """Get economic calendar"""
+        """
+        Get economic calendar from Unusual Whales
+        Endpoint: /api/market/economic-calendar
+        """
         endpoint = "/api/market/economic-calendar"
         return self._make_request(endpoint)
-    
-    def get_fda_calendar(self, ticker: str = None) -> Dict:
-        """Get FDA calendar"""
+
+    def get_fda_calendar(self, announced_date_min: str = None, announced_date_max: str = None, 
+                         drug: str = None, ticker: str = None, limit: int = 100) -> Dict:
+        """
+        Get FDA calendar with filtering options
+        Endpoint: /api/market/fda-calendar
+        
+        Parameters:
+        - announced_date_min: Minimum announced date (YYYY-MM-DD)
+        - announced_date_max: Maximum announced date (YYYY-MM-DD)
+        - drug: Filter by drug name (partial match)
+        - ticker: Filter by ticker symbol
+        - limit: Maximum number of results (default 100)
+        """
         endpoint = "/api/market/fda-calendar"
-        params = {"ticker": ticker} if ticker else {}
+        
+        params = {
+            "limit": limit
+        }
+        
+        if announced_date_min:
+            params["announced_date_min"] = announced_date_min
+        if announced_date_max:
+            params["announced_date_max"] = announced_date_max
+        if drug:
+            params["drug"] = drug
+        if ticker:
+            params["ticker"] = ticker
+        
+        return self._make_request(endpoint, params)
+    
+    def get_news_headlines(self, limit: int = 50, major_only: bool = False, 
+                          search_term: str = None, sources: str = None, 
+                          page: int = 0) -> Dict:
+        """
+        Get news headlines from Unusual Whales
+        Endpoint: /api/news/headlines
+        
+        Parameters:
+        - limit: How many items to return (default 50, max 100)
+        - major_only: When set to true, only returns major/significant news
+        - search_term: A search term to filter news headlines by content
+        - sources: A comma-separated list of news sources to filter by
+        - page: Page number (use with limit)
+        """
+        endpoint = "/api/news/headlines"
+        
+        params = {
+            "limit": min(limit, 100),
+            "page": page
+        }
+        
+        if major_only:
+            params["major_only"] = True
+        if search_term:
+            params["search_term"] = search_term
+        if sources:
+            params["sources"] = sources
+        
         return self._make_request(endpoint, params)
         
     def get_market_screener(self, params: Dict = None) -> Dict:
@@ -2653,7 +2710,139 @@ def get_options_data(ticker: str) -> Optional[Dict]:
         "total_calls": calls['volume'].sum() if not calls.empty else 0,
         "total_puts": puts['volume'].sum() if not puts.empty else 0
     }
+def get_economic_events(days_ahead=7):
+    """
+    Get upcoming economic events from UW Economic Calendar
+    """
+    if not uw_client:
+        return []
+    
+    try:
+        calendar_data = uw_client.get_economic_calendar()
+        
+        if calendar_data.get("error") or not calendar_data.get("data"):
+            return []
+        
+        # Process economic events
+        events = []
+        today = datetime.now()
+        cutoff = today + timedelta(days=days_ahead)
+        
+        for item in calendar_data["data"]:
+            event_time = item.get("time", "")
+            if event_time:
+                try:
+                    event_date = datetime.fromisoformat(event_time.replace('Z', '+00:00'))
+                    
+                    # Only include events within the next X days
+                    if today <= event_date <= cutoff:
+                        events.append({
+                            'event': item.get('event', 'Unknown Event'),
+                            'date': event_date.strftime('%Y-%m-%d'),
+                            'time': event_date.strftime('%H:%M UTC'),
+                            'forecast': item.get('forecast', 'N/A'),
+                            'previous': item.get('prev', 'N/A'),
+                            'period': item.get('reported_period', 'N/A'),
+                            'type': item.get('type', 'report'),
+                            'datetime': event_date
+                        })
+                except:
+                    continue
+        
+        # Sort by datetime
+        events.sort(key=lambda x: x['datetime'])
+        return events
+        
+    except Exception as e:
+        print(f"Error getting economic events: {e}")
+        return []
 
+def get_fda_events(days_ahead=30, ticker=None):
+    """
+    Get upcoming FDA events from UW FDA Calendar
+    """
+    if not uw_client:
+        return []
+    
+    try:
+        # Set date range
+        today = date.today()
+        date_min = today.strftime('%Y-%m-%d')
+        date_max = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
+        
+        # Get FDA calendar
+        fda_data = uw_client.get_fda_calendar(
+            announced_date_min=date_min,
+            announced_date_max=date_max,
+            ticker=ticker,
+            limit=100
+        )
+        
+        if fda_data.get("error") or not fda_data.get("data"):
+            return []
+        
+        # Process FDA events
+        events = []
+        for item in fda_data["data"]:
+            events.append({
+                'ticker': item.get('ticker', 'N/A'),
+                'drug': item.get('drug', 'Unknown Drug'),
+                'catalyst': item.get('catalyst', 'FDA Event'),
+                'indication': item.get('indication', 'N/A'),
+                'start_date': item.get('start_date', 'N/A'),
+                'end_date': item.get('end_date', 'N/A'),
+                'status': item.get('status', 'N/A'),
+                'description': item.get('description', ''),
+                'marketcap': item.get('marketcap', 0),
+                'has_options': item.get('has_options', False),
+                'outcome': item.get('outcome', None),
+                'source_link': item.get('source_link', '')
+            })
+        
+        # Sort by start date
+        events.sort(key=lambda x: x['start_date'])
+        return events
+        
+    except Exception as e:
+        print(f"Error getting FDA events: {e}")
+        return []
+
+def get_market_news(limit=20, major_only=True, search_term=None):
+    """
+    Get market news headlines from UW
+    """
+    if not uw_client:
+        return []
+    
+    try:
+        news_data = uw_client.get_news_headlines(
+            limit=limit,
+            major_only=major_only,
+            search_term=search_term
+        )
+        
+        if news_data.get("error") or not news_data.get("data"):
+            return []
+        
+        # Process news
+        news_list = []
+        for item in news_data["data"]:
+            news_list.append({
+                'headline': item.get('headline', 'No title'),
+                'source': item.get('source', 'Unknown'),
+                'created_at': item.get('created_at', ''),
+                'sentiment': item.get('sentiment', 'neutral'),
+                'is_major': item.get('is_major', False),
+                'tags': item.get('tags', []),
+                'tickers': item.get('tickers', []),
+                'meta': item.get('meta', {})
+            })
+        
+        return news_list
+        
+    except Exception as e:
+        print(f"Error getting market news: {e}")
+        return []
 def analyze_earnings(earnings_data, earnings_type="calendar"):
     """
     Analyze earnings data from Unusual Whales
@@ -7661,36 +7850,259 @@ with tabs[9]:
             """)
 # TAB 11: Important News & Economic Calendar
 with tabs[10]:
-    st.subheader("📰 Important News & Economic Calendar")
-
-    if st.button("📊 Get This Week's Events", type="primary"):
-        with st.spinner("Fetching important events from UW and AI sources..."):
-            important_events = get_important_events()
-
-            if not important_events:
-                st.info("No major economic events scheduled for this week.")
-            else:
-                st.markdown("### Major Market-Moving Events")
+    # Header with refresh
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.subheader("📰 Important News & Economic Calendar")
+    with col2:
+        if st.button("🔄 Refresh", key="refresh_news_tab"):
+            st.cache_data.clear()
+            st.rerun()
+    
+    st.markdown("**Track market-moving news, economic events, and FDA catalysts from Unusual Whales**")
+    
+    if not uw_client:
+        st.error("🔥 Unusual Whales API required for news and economic calendar")
+        st.info("Configure your Unusual Whales API key to access institutional-grade market intelligence")
+    else:
+        st.success("✅ Unusual Whales connected for market news & events")
+        
+        # =================================================================
+        # EXPANDER 1: Economic Calendar
+        # =================================================================
+        with st.expander("📊 **Economic Calendar** - Major macro events", expanded=False):
+            st.caption("Track important economic reports, Fed meetings, and market-moving announcements")
+            
+            econ_col1, econ_col2 = st.columns([3, 1])
+            with econ_col1:
+                days_ahead = st.slider("Days ahead", min_value=1, max_value=30, value=7, key="econ_days")
+            with econ_col2:
+                load_econ = st.button("📊 Load Events", key="load_econ", type="primary")
+            
+            if load_econ or 'economic_events' not in st.session_state:
+                with st.spinner("Loading economic calendar..."):
+                    economic_events = get_economic_events(days_ahead=days_ahead)
+                    st.session_state.economic_events = economic_events
+            
+            if 'economic_events' in st.session_state and st.session_state.economic_events:
+                events = st.session_state.economic_events
+                st.success(f"📅 {len(events)} upcoming economic events")
                 
-                # Check if events came from UW
-                if uw_client:
-                    try:
-                        calendar_result = uw_client.get_economic_calendar()
-                        if not calendar_result.get("error"):
-                            st.success("🔥 Events sourced from Unusual Whales economic calendar")
-                        else:
-                            st.info("Events generated by AI (UW calendar unavailable)")
-                    except:
-                        st.info("Events generated by AI")
-                else:
-                    st.info("Events generated by AI (UW not configured)")
-
-                for event in sorted(important_events, key=lambda x: x['date']):
-                    st.markdown(f"**{event['event']}**")
-                    st.write(f"**Date:** {event['date']}")
-                    st.write(f"**Time:** {event['time']}")
-                    st.write(f"**Impact:** {event['impact']}")
-                    st.divider()
+                for event in events:
+                    event_title = f"📊 {event['event']} - {event['date']} at {event['time']}"
+                    
+                    with st.expander(event_title):
+                        event_col1, event_col2, event_col3 = st.columns(3)
+                        
+                        with event_col1:
+                            st.write(f"**Event:** {event['event']}")
+                            st.write(f"**Date:** {event['date']}")
+                            st.write(f"**Time:** {event['time']}")
+                        
+                        with event_col2:
+                            st.write(f"**Forecast:** {event['forecast']}")
+                            st.write(f"**Previous:** {event['previous']}")
+                            st.write(f"**Period:** {event['period']}")
+                        
+                        with event_col3:
+                            st.write(f"**Type:** {event['type'].title()}")
+                            
+                            # Determine impact based on event type
+                            important_keywords = ['cpi', 'gdp', 'unemployment', 'fed', 'fomc', 'nonfarm', 'pce']
+                            is_high_impact = any(keyword in event['event'].lower() for keyword in important_keywords)
+                            
+                            if is_high_impact:
+                                st.error("🔴 High Impact Event")
+                            else:
+                                st.info("🟡 Medium Impact")
+            else:
+                st.info("No economic events found for the selected period")
+        
+        # =================================================================
+        # EXPANDER 2: FDA Calendar
+        # =================================================================
+        with st.expander("💊 **FDA Calendar** - Biotech/Pharma catalysts", expanded=False):
+            st.caption("Track PDUFA dates, clinical trial results, and FDA decisions for healthcare stocks")
+            
+            fda_col1, fda_col2, fda_col3 = st.columns([2, 2, 1])
+            with fda_col1:
+                fda_days = st.slider("Days ahead", min_value=7, max_value=90, value=30, key="fda_days")
+            with fda_col2:
+                fda_ticker_filter = st.text_input("Filter by ticker (optional)", placeholder="e.g., MRNA", key="fda_ticker").upper().strip()
+            with fda_col3:
+                load_fda = st.button("💊 Load Events", key="load_fda", type="primary")
+            
+            if load_fda or 'fda_events' not in st.session_state:
+                with st.spinner("Loading FDA calendar..."):
+                    fda_events = get_fda_events(days_ahead=fda_days, ticker=fda_ticker_filter if fda_ticker_filter else None)
+                    st.session_state.fda_events = fda_events
+            
+            if 'fda_events' in st.session_state and st.session_state.fda_events:
+                events = st.session_state.fda_events
+                st.success(f"💊 {len(events)} upcoming FDA events")
+                
+                for event in events:
+                    event_title = f"💊 {event['ticker']} - {event['drug']} | {event['catalyst']} | {event['start_date']}"
+                    
+                    with st.expander(event_title):
+                        fda_detail_col1, fda_detail_col2, fda_detail_col3 = st.columns(3)
+                        
+                        with fda_detail_col1:
+                            st.write(f"**Ticker:** {event['ticker']}")
+                            st.write(f"**Drug:** {event['drug']}")
+                            st.write(f"**Catalyst:** {event['catalyst']}")
+                            st.write(f"**Status:** {event['status']}")
+                        
+                        with fda_detail_col2:
+                            st.write(f"**Start Date:** {event['start_date']}")
+                            st.write(f"**End Date:** {event['end_date']}")
+                            st.write(f"**Indication:** {event['indication']}")
+                            st.write(f"**Market Cap:** ${event['marketcap']:,.0f}")
+                        
+                        with fda_detail_col3:
+                            if event['has_options']:
+                                st.success("✅ Has Options")
+                            else:
+                                st.warning("⚠️ No Options")
+                            
+                            if event['outcome']:
+                                st.info(f"**Outcome:** {event['outcome']}")
+                        
+                        if event['description']:
+                            st.markdown(f"**Description:** {event['description']}")
+                        
+                        if event['source_link']:
+                            st.markdown(f"[📄 Source Link]({event['source_link']})")
+                        
+                        # Add to watchlist button
+                        if st.button(f"Add {event['ticker']} to Watchlist", key=f"fda_add_{event['ticker']}_{event['start_date']}"):
+                            current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                            if event['ticker'] not in current_list:
+                                current_list.append(event['ticker'])
+                                st.success(f"Added {event['ticker']} to watchlist!")
+                                st.rerun()
+            else:
+                st.info("No FDA events found for the selected period")
+        
+        # =================================================================
+        # EXPANDER 3: Market News Headlines
+        # =================================================================
+        with st.expander("📰 **Market News Headlines** - Real-time sentiment", expanded=False):
+            st.caption("Latest market-moving news with sentiment analysis from Unusual Whales")
+            
+            news_col1, news_col2, news_col3 = st.columns([2, 2, 1])
+            with news_col1:
+                news_limit = st.slider("Number of articles", min_value=10, max_value=50, value=20, key="news_limit")
+            with news_col2:
+                news_filter = st.selectbox("Filter", ["All News", "Major Only", "Positive", "Negative", "Neutral"], key="news_filter")
+            with news_col3:
+                load_news = st.button("📰 Load News", key="load_news", type="primary")
+            
+            # Search bar
+            news_search = st.text_input("Search news", placeholder="Enter keywords (e.g., Fed, tech, earnings)", key="news_search")
+            
+            if load_news or 'market_news' not in st.session_state:
+                with st.spinner("Loading market news..."):
+                    major_only = news_filter == "Major Only"
+                    market_news = get_market_news(
+                        limit=news_limit,
+                        major_only=major_only,
+                        search_term=news_search if news_search else None
+                    )
+                    st.session_state.market_news = market_news
+            
+            if 'market_news' in st.session_state and st.session_state.market_news:
+                news_list = st.session_state.market_news
+                
+                # Apply sentiment filter
+                if news_filter in ["Positive", "Negative", "Neutral"]:
+                    news_list = [n for n in news_list if n['sentiment'].lower() == news_filter.lower()]
+                
+                st.success(f"📰 {len(news_list)} news articles")
+                
+                for i, news_item in enumerate(news_list):
+                    # Sentiment emoji
+                    sentiment_emoji = {
+                        'positive': '📈',
+                        'negative': '📉',
+                        'neutral': '➡️'
+                    }.get(news_item['sentiment'].lower(), '📰')
+                    
+                    # Major news badge
+                    major_badge = " 🔥" if news_item['is_major'] else ""
+                    
+                    news_title = f"{sentiment_emoji} {news_item['headline']}{major_badge}"
+                    
+                    with st.expander(news_title):
+                        news_detail_col1, news_detail_col2 = st.columns([2, 1])
+                        
+                        with news_detail_col1:
+                            st.write(f"**Headline:** {news_item['headline']}")
+                            st.write(f"**Source:** {news_item['source']}")
+                            st.write(f"**Published:** {news_item['created_at']}")
+                            
+                            if news_item['tickers']:
+                                st.write(f"**Related Tickers:** {', '.join(news_item['tickers'])}")
+                            
+                            if news_item['tags']:
+                                st.write(f"**Tags:** {', '.join(news_item['tags'])}")
+                        
+                        with news_detail_col2:
+                            # Sentiment display
+                            sentiment = news_item['sentiment'].title()
+                            if sentiment == 'Positive':
+                                st.success(f"📈 {sentiment}")
+                            elif sentiment == 'Negative':
+                                st.error(f"📉 {sentiment}")
+                            else:
+                                st.info(f"➡️ {sentiment}")
+                            
+                            if news_item['is_major']:
+                                st.warning("🔥 Major News")
+                        
+                        # Add related tickers to watchlist
+                        if news_item['tickers']:
+                            add_col = st.columns(len(news_item['tickers'][:3]))  # Max 3 tickers
+                            for idx, ticker in enumerate(news_item['tickers'][:3]):
+                                with add_col[idx]:
+                                    if st.button(f"Add {ticker}", key=f"news_add_{i}_{ticker}"):
+                                        current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                        if ticker not in current_list:
+                                            current_list.append(ticker)
+                                            st.success(f"Added {ticker}!")
+                                            st.rerun()
+            else:
+                st.info("No news articles found")
+        
+        # Educational section
+        with st.expander("💡 **Understanding Market News & Events**"):
+            st.markdown("""
+            **Economic Calendar:**
+            - **High Impact Events:** CPI, GDP, Unemployment, Fed Meetings, NFP
+            - **Watch for:** Actual vs Forecast deviations (bigger surprise = bigger move)
+            - **Trading Strategy:** Position before event or trade the reaction
+            
+            **FDA Calendar:**
+            - **PDUFA Dates:** FDA decision deadline for drug approval
+            - **Advisory Committee:** Expert panel recommendations
+            - **Clinical Trials:** Phase 1/2/3 results announcements
+            - **High Risk/Reward:** Approvals can double stock, rejections can crash it
+            
+            **News Sentiment:**
+            - **Positive (📈):** Bullish news, earnings beats, deals, upgrades
+            - **Negative (📉):** Bearish news, misses, downgrades, scandals
+            - **Neutral (➡️):** Informational, no clear direction
+            - **Major News (🔥):** Significant market-moving announcements
+            
+            **Best Practices:**
+            - Cross-reference multiple sources before trading
+            - Watch for sentiment shifts across news sources
+            - Track how stocks react to similar news historically
+            - Use economic calendar to avoid/trade volatility
+            - FDA events are binary - manage risk accordingly
+            
+            **All data powered exclusively by Unusual Whales 🐋**
+            """)
 
 # TAB 12: Twitter/X Market Sentiment & Rumors
 with tabs[11]:
