@@ -8119,7 +8119,13 @@ with tabs[10]:
                             st.write(f"**Start Date:** {event['start_date']}")
                             st.write(f"**End Date:** {event['end_date']}")
                             st.write(f"**Indication:** {event['indication']}")
-                            st.write(f"**Market Cap:** ${event['marketcap']:,.0f}")
+                            # Handle marketcap safely
+                            marketcap = event.get('marketcap', 0)
+                            try:
+                                marketcap_float = float(marketcap) if marketcap else 0
+                                st.write(f"**Market Cap:** ${marketcap_float:,.0f}")
+                            except (ValueError, TypeError):
+                                st.write(f"**Market Cap:** {marketcap}")
                         
                         with fda_detail_col3:
                             if event['has_options']:
