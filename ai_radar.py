@@ -2743,6 +2743,7 @@ def get_fda_events(days_ahead=30, ticker=None):
     
     try:
         # Set date range
+        from datetime import date, timedelta
         today = date.today()
         date_min = today.strftime('%Y-%m-%d')
         date_max = (today + timedelta(days=days_ahead)).strftime('%Y-%m-%d')
@@ -2755,12 +2756,16 @@ def get_fda_events(days_ahead=30, ticker=None):
             limit=100
         )
         
-        if fda_data.get("error") or not fda_data.get("data"):
+        if fda_data.get("error"):
             return []
+        
+        # Handle nested data structure: data -> data (like economic calendar)
+        raw_data = fda_data.get("data", {})
+        events_list = raw_data.get("data", [])
         
         # Process FDA events
         events = []
-        for item in fda_data["data"]:
+        for item in events_list:
             events.append({
                 'ticker': item.get('ticker', 'N/A'),
                 'drug': item.get('drug', 'Unknown Drug'),
@@ -2783,7 +2788,6 @@ def get_fda_events(days_ahead=30, ticker=None):
     except Exception as e:
         print(f"Error getting FDA events: {e}")
         return []
-
 def get_market_news(major_only=True, search_term=None):
     """
     Get market news headlines from UW (API returns default 50)
