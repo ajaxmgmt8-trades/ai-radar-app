@@ -7868,6 +7868,186 @@ with tabs[10]:
         st.success("✅ Unusual Whales connected for market news & events")
         
         # =================================================================
+        # DEBUG SECTION - REMOVE AFTER TESTING
+        # =================================================================
+        st.warning("🔬 **DEBUG MODE ACTIVE** - Testing all endpoints")
+        
+        debug_tabs = st.tabs(["🔬 Economic Debug", "🔬 FDA Debug", "🔬 News Debug"])
+        
+        # DEBUG TAB 1: Economic Calendar
+        with debug_tabs[0]:
+            st.markdown("### 🔬 Economic Calendar Debug")
+            if st.button("Test Economic Calendar API", key="test_econ_api"):
+                with st.spinner("Testing UW Economic Calendar endpoint..."):
+                    try:
+                        # Raw API call
+                        st.write("**Step 1: Raw API Call**")
+                        raw_response = uw_client.get_economic_calendar()
+                        
+                        st.write("**Raw API Response:**")
+                        st.json(raw_response)
+                        
+                        # Check for errors
+                        if raw_response.get("error"):
+                            st.error(f"❌ API Error: {raw_response['error']}")
+                        else:
+                            st.success("✅ No API error")
+                        
+                        # Check data structure
+                        st.write("**Step 2: Check Data Structure**")
+                        if raw_response.get("data"):
+                            st.success(f"✅ Got {len(raw_response['data'])} items from API")
+                            
+                            # Show first 3 items
+                            if len(raw_response['data']) > 0:
+                                st.write("**First 3 Items:**")
+                                for i, item in enumerate(raw_response['data'][:3]):
+                                    st.write(f"**Item {i+1}:**")
+                                    st.json(item)
+                        else:
+                            st.error("❌ No 'data' key in response")
+                        
+                        # Test the helper function
+                        st.write("**Step 3: Test Helper Function**")
+                        events = get_economic_events(days_ahead=7)
+                        st.write(f"Helper returned {len(events)} events")
+                        if events:
+                            st.success("✅ Helper function working")
+                            st.write("**First processed event:**")
+                            st.json(events[0])
+                        else:
+                            st.error("❌ Helper function returned empty list")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Exception occurred: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+        
+        # DEBUG TAB 2: FDA Calendar
+        with debug_tabs[1]:
+            st.markdown("### 🔬 FDA Calendar Debug")
+            debug_fda_ticker = st.text_input("Test ticker (optional)", key="debug_fda_ticker").upper().strip()
+            
+            if st.button("Test FDA Calendar API", key="test_fda_api"):
+                with st.spinner("Testing UW FDA Calendar endpoint..."):
+                    try:
+                        # Raw API call
+                        st.write("**Step 1: Raw API Call**")
+                        from datetime import date, timedelta
+                        today = date.today()
+                        date_min = today.strftime('%Y-%m-%d')
+                        date_max = (today + timedelta(days=30)).strftime('%Y-%m-%d')
+                        
+                        raw_response = uw_client.get_fda_calendar(
+                            announced_date_min=date_min,
+                            announced_date_max=date_max,
+                            ticker=debug_fda_ticker if debug_fda_ticker else None
+                        )
+                        
+                        st.write("**Raw API Response:**")
+                        st.json(raw_response)
+                        
+                        # Check for errors
+                        if raw_response.get("error"):
+                            st.error(f"❌ API Error: {raw_response['error']}")
+                        else:
+                            st.success("✅ No API error")
+                        
+                        # Check data structure
+                        st.write("**Step 2: Check Data Structure**")
+                        if raw_response.get("data"):
+                            st.success(f"✅ Got {len(raw_response['data'])} items from API")
+                            
+                            # Show first 3 items
+                            if len(raw_response['data']) > 0:
+                                st.write("**First 3 Items:**")
+                                for i, item in enumerate(raw_response['data'][:3]):
+                                    st.write(f"**Item {i+1}:**")
+                                    st.json(item)
+                        else:
+                            st.error("❌ No 'data' key in response")
+                        
+                        # Test the helper function
+                        st.write("**Step 3: Test Helper Function**")
+                        events = get_fda_events(days_ahead=30, ticker=debug_fda_ticker if debug_fda_ticker else None)
+                        st.write(f"Helper returned {len(events)} events")
+                        if events:
+                            st.success("✅ Helper function working")
+                            st.write("**First processed event:**")
+                            st.json(events[0])
+                        else:
+                            st.warning("⚠️ Helper function returned empty list (might be no events in date range)")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Exception occurred: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+        
+        # DEBUG TAB 3: News Headlines
+        with debug_tabs[2]:
+            st.markdown("### 🔬 News Headlines Debug")
+            debug_major_only = st.checkbox("Major only", value=False, key="debug_major")
+            debug_search = st.text_input("Search term (optional)", key="debug_search")
+            
+            if st.button("Test News Headlines API", key="test_news_api"):
+                with st.spinner("Testing UW News Headlines endpoint..."):
+                    try:
+                        # Raw API call
+                        st.write("**Step 1: Raw API Call**")
+                        raw_response = uw_client.get_news_headlines(
+                            limit=20,
+                            major_only=debug_major_only,
+                            search_term=debug_search if debug_search else None
+                        )
+                        
+                        st.write("**Raw API Response:**")
+                        st.json(raw_response)
+                        
+                        # Check for errors
+                        if raw_response.get("error"):
+                            st.error(f"❌ API Error: {raw_response['error']}")
+                        else:
+                            st.success("✅ No API error")
+                        
+                        # Check data structure
+                        st.write("**Step 2: Check Data Structure**")
+                        if raw_response.get("data"):
+                            st.success(f"✅ Got {len(raw_response['data'])} items from API")
+                            
+                            # Show first 3 items
+                            if len(raw_response['data']) > 0:
+                                st.write("**First 3 Items:**")
+                                for i, item in enumerate(raw_response['data'][:3]):
+                                    st.write(f"**Item {i+1}:**")
+                                    st.json(item)
+                        else:
+                            st.error("❌ No 'data' key in response")
+                        
+                        # Test the helper function
+                        st.write("**Step 3: Test Helper Function**")
+                        news = get_market_news(
+                            limit=20,
+                            major_only=debug_major_only,
+                            search_term=debug_search if debug_search else None
+                        )
+                        st.write(f"Helper returned {len(news)} news items")
+                        if news:
+                            st.success("✅ Helper function working")
+                            st.write("**First processed news item:**")
+                            st.json(news[0])
+                        else:
+                            st.error("❌ Helper function returned empty list")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Exception occurred: {str(e)}")
+                        import traceback
+                        st.code(traceback.format_exc())
+        
+        st.markdown("---")
+        st.info("👆 Use debug tabs above to test each endpoint. Once working, we'll remove debug mode.")
+        st.markdown("---")
+        
+        # =================================================================
         # EXPANDER 1: Economic Calendar
         # =================================================================
         with st.expander("📊 **Economic Calendar** - Major macro events", expanded=False):
@@ -8103,7 +8283,6 @@ with tabs[10]:
             
             **All data powered exclusively by Unusual Whales 🐋**
             """)
-
 # TAB 12: Twitter/X Market Sentiment & Rumors
 with tabs[11]:
     st.subheader("🦅 Twitter/X Market Sentiment & Rumors")
