@@ -7275,13 +7275,23 @@ with tabs[8]:
             """)
 # TAB 10: Earnings Plays with UW Integration
 with tabs[9]:
-    st.subheader("🗓️ Earnings Calendar with Unusual Whales")
+    # Header with refresh
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.subheader("🗓️ Earnings Calendar with Unusual Whales")
+    with col2:
+        if st.button("🔄 Refresh", key="refresh_earnings_tab"):
+            st.cache_data.clear()
+            st.rerun()
+    
     st.markdown("**Track upcoming earnings reports with institutional-grade data and AI analysis**")
     
     if not uw_client:
         st.error("🔥 Unusual Whales API required for earnings calendar")
         st.info("Configure your Unusual Whales API key to access earnings data")
     else:
+        st.success("✅ Unusual Whales connected for earnings analysis")
+
         # Create sub-tabs for different earnings views
         earnings_tabs = st.tabs(["📅 Premarket Earnings", "🌙 Afterhours Earnings", "📊 Ticker History"])
         
@@ -7299,6 +7309,68 @@ with tabs[9]:
                 if st.button("🔄 Refresh Premarket", key="refresh_pm"):
                     st.cache_data.clear()
                     st.rerun()
+            
+            # Manual Ticker Search
+            st.markdown("#### 🔍 Manual Ticker Search")
+            st.caption("Search for a specific ticker's earnings if it's not showing in the list below")
+            search_col1, search_col2 = st.columns([3, 1])
+            with search_col1:
+                pm_search_ticker = st.text_input(
+                    "Enter ticker to search earnings",
+                    placeholder="e.g., AAPL, TSLA, NVDA",
+                    key="pm_search_ticker"
+                ).upper().strip()
+            with search_col2:
+                search_pm_btn = st.button("🔍 Search", key="search_pm_btn", type="secondary")
+            
+            # Handle manual search
+            if search_pm_btn and pm_search_ticker:
+                with st.spinner(f"Searching earnings for {pm_search_ticker}..."):
+                    ticker_earnings = uw_client.get_ticker_earnings_history(pm_search_ticker)
+                    ticker_analysis = analyze_earnings(ticker_earnings, earnings_type="historical")
+                    
+                    if not ticker_analysis.get("error"):
+                        earnings_list = ticker_analysis.get("earnings", [])
+                        if earnings_list:
+                            st.success(f"✅ Found {len(earnings_list)} earnings reports for {pm_search_ticker}")
+                            
+                            # Show most recent earnings
+                            recent = earnings_list[0]
+                            with st.expander(f"📊 {pm_search_ticker} Latest Earnings - {recent['report_date']}", expanded=True):
+                                earn_col1, earn_col2, earn_col3 = st.columns(3)
+                                
+                                with earn_col1:
+                                    st.write(f"**Report Date:** {recent['report_date']}")
+                                    st.write(f"**Report Time:** {recent['report_time']}")
+                                    st.write(f"**Actual EPS:** ${recent['actual_eps']}")
+                                    st.write(f"**Est EPS:** ${recent['street_mean_est']}")
+                                
+                                with earn_col2:
+                                    st.write(f"**Quarter:** {recent.get('ending_fiscal_quarter', 'N/A')}")
+                                    st.write(f"**Expected Move:** ${recent.get('expected_move', 0):.2f}")
+                                    st.write(f"**Expected Move %:** {recent.get('expected_move_perc', 0):.2f}%")
+                                    st.write(f"**Post 1D Move:** {recent.get('post_earnings_move_1d', 0):.2f}%")
+                                
+                                with earn_col3:
+                                    st.write(f"**Post 1W Move:** {recent.get('post_earnings_move_1w', 0):.2f}%")
+                                    st.write(f"**Long Straddle 1D:** {recent.get('long_straddle_1d', 0):.2f}%")
+                                    st.write(f"**Long Straddle 1W:** {recent.get('long_straddle_1w', 0):.2f}%")
+                                    st.write(f"**Short Straddle 1D:** {recent.get('short_straddle_1d', 0):.2f}%")
+                                
+                                # Add to watchlist
+                                if st.button(f"Add {pm_search_ticker} to Watchlist", key=f"pm_add_{pm_search_ticker}"):
+                                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                    if pm_search_ticker not in current_list:
+                                        current_list.append(pm_search_ticker)
+                                        st.success(f"Added {pm_search_ticker} to watchlist!")
+                                        st.rerun()
+                        else:
+                            st.info(f"No earnings found for {pm_search_ticker}")
+                    else:
+                        st.error(f"Error: {ticker_analysis.get('error')}")
+            
+            st.divider()
+            st.markdown("#### 📋 All Premarket Earnings")
             
             with st.spinner("Loading premarket earnings..."):
                 premarket_data = uw_client.get_earnings_premarket(date=pm_date_str, limit=pm_limit)
@@ -7344,17 +7416,18 @@ with tabs[9]:
                             with earn_col3:
                                 st.write(f"**Sector:** {earning['sector']}")
                                 st.write(f"**Country:** {earning['country_name']}")
+                                st.write(f"**Quarter:** {earning.get('ending_fiscal_quarter', 'N/A')}")
                                 if earning['is_s_p_500']:
                                     st.success("✅ S&P 500")
                                 if earning['has_options']:
                                     st.info("📊 Has Options")
                             
-                            # AI Analysis button for this ticker
+                            # AI Analysis button
                             if st.button(f"🤖 AI Analysis for {ticker}", key=f"ai_pm_{i}_{ticker}"):
                                 with st.spinner(f"Generating AI analysis for {ticker}..."):
                                     quote = get_live_quote(ticker, st.session_state.selected_tz)
                                     if not quote.get("error"):
-                                        options_data = get_enhanced_options_analysis(ticker)
+                                        options_data = get_enhanced_options_analysis(ticker) if uw_client else get_options_data(ticker)
                                         ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), 
                                                                  f"Premarket Earnings Analysis", options_data)
                                         st.markdown(ai_analysis)
@@ -7375,6 +7448,68 @@ with tabs[9]:
                 if st.button("🔄 Refresh Afterhours", key="refresh_ah"):
                     st.cache_data.clear()
                     st.rerun()
+            
+            # Manual Ticker Search
+            st.markdown("#### 🔍 Manual Ticker Search")
+            st.caption("Search for a specific ticker's earnings if it's not showing in the list below")
+            search_col1, search_col2 = st.columns([3, 1])
+            with search_col1:
+                ah_search_ticker = st.text_input(
+                    "Enter ticker to search earnings",
+                    placeholder="e.g., AAPL, TSLA, NVDA",
+                    key="ah_search_ticker"
+                ).upper().strip()
+            with search_col2:
+                search_ah_btn = st.button("🔍 Search", key="search_ah_btn", type="secondary")
+            
+            # Handle manual search
+            if search_ah_btn and ah_search_ticker:
+                with st.spinner(f"Searching earnings for {ah_search_ticker}..."):
+                    ticker_earnings = uw_client.get_ticker_earnings_history(ah_search_ticker)
+                    ticker_analysis = analyze_earnings(ticker_earnings, earnings_type="historical")
+                    
+                    if not ticker_analysis.get("error"):
+                        earnings_list = ticker_analysis.get("earnings", [])
+                        if earnings_list:
+                            st.success(f"✅ Found {len(earnings_list)} earnings reports for {ah_search_ticker}")
+                            
+                            # Show most recent earnings
+                            recent = earnings_list[0]
+                            with st.expander(f"📊 {ah_search_ticker} Latest Earnings - {recent['report_date']}", expanded=True):
+                                earn_col1, earn_col2, earn_col3 = st.columns(3)
+                                
+                                with earn_col1:
+                                    st.write(f"**Report Date:** {recent['report_date']}")
+                                    st.write(f"**Report Time:** {recent['report_time']}")
+                                    st.write(f"**Actual EPS:** ${recent['actual_eps']}")
+                                    st.write(f"**Est EPS:** ${recent['street_mean_est']}")
+                                
+                                with earn_col2:
+                                    st.write(f"**Quarter:** {recent.get('ending_fiscal_quarter', 'N/A')}")
+                                    st.write(f"**Expected Move:** ${recent.get('expected_move', 0):.2f}")
+                                    st.write(f"**Expected Move %:** {recent.get('expected_move_perc', 0):.2f}%")
+                                    st.write(f"**Post 1D Move:** {recent.get('post_earnings_move_1d', 0):.2f}%")
+                                
+                                with earn_col3:
+                                    st.write(f"**Post 1W Move:** {recent.get('post_earnings_move_1w', 0):.2f}%")
+                                    st.write(f"**Long Straddle 1D:** {recent.get('long_straddle_1d', 0):.2f}%")
+                                    st.write(f"**Long Straddle 1W:** {recent.get('long_straddle_1w', 0):.2f}%")
+                                    st.write(f"**Short Straddle 1D:** {recent.get('short_straddle_1d', 0):.2f}%")
+                                
+                                # Add to watchlist
+                                if st.button(f"Add {ah_search_ticker} to Watchlist", key=f"ah_add_{ah_search_ticker}"):
+                                    current_list = st.session_state.watchlists[st.session_state.active_watchlist]
+                                    if ah_search_ticker not in current_list:
+                                        current_list.append(ah_search_ticker)
+                                        st.success(f"Added {ah_search_ticker} to watchlist!")
+                                        st.rerun()
+                        else:
+                            st.info(f"No earnings found for {ah_search_ticker}")
+                    else:
+                        st.error(f"Error: {ticker_analysis.get('error')}")
+            
+            st.divider()
+            st.markdown("#### 📋 All Afterhours Earnings")
             
             with st.spinner("Loading afterhours earnings..."):
                 afterhours_data = uw_client.get_earnings_afterhours(date=ah_date_str, limit=ah_limit)
@@ -7420,17 +7555,18 @@ with tabs[9]:
                             with earn_col3:
                                 st.write(f"**Sector:** {earning['sector']}")
                                 st.write(f"**Country:** {earning['country_name']}")
+                                st.write(f"**Quarter:** {earning.get('ending_fiscal_quarter', 'N/A')}")
                                 if earning['is_s_p_500']:
                                     st.success("✅ S&P 500")
                                 if earning['has_options']:
                                     st.info("📊 Has Options")
                             
-                            # AI Analysis button for this ticker
+                            # AI Analysis button
                             if st.button(f"🤖 AI Analysis for {ticker}", key=f"ai_ah_{i}_{ticker}"):
                                 with st.spinner(f"Generating AI analysis for {ticker}..."):
                                     quote = get_live_quote(ticker, st.session_state.selected_tz)
                                     if not quote.get("error"):
-                                        options_data = get_enhanced_options_analysis(ticker)
+                                        options_data = get_enhanced_options_analysis(ticker) if uw_client else get_options_data(ticker)
                                         ai_analysis = ai_playbook(ticker, quote.get("change_percent", 0), 
                                                                  f"Afterhours Earnings Analysis", options_data)
                                         st.markdown(ai_analysis)
@@ -7517,6 +7653,11 @@ with tabs[9]:
             - **Reaction:** Actual post-earnings price change
             - **Market Cap:** Company size/liquidity indicator
             - **S&P 500:** Large-cap index member
+            
+            🔍 **Manual Search:**
+            - Use the search bar to find specific tickers
+            - Helpful when a stock isn't showing in the calendar
+            - Shows historical earnings data with straddle performance
             """)
 # TAB 11: Important News & Economic Calendar
 with tabs[10]:
