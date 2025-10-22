@@ -493,7 +493,7 @@ class UnusualWhalesClient:
         
         return self._make_request(endpoint, params)
     
-    def get_news_headlines(self, limit: int = 50, major_only: bool = False, 
+    def get_news_headlines(self, major_only: bool = False, 
                           search_term: str = None, sources: str = None, 
                           page: int = 0) -> Dict:
         """
@@ -501,7 +501,6 @@ class UnusualWhalesClient:
         Endpoint: /api/news/headlines
         
         Parameters:
-        - limit: How many items to return (default 50, max 100)
         - major_only: When set to true, only returns major/significant news
         - search_term: A search term to filter news headlines by content
         - sources: A comma-separated list of news sources to filter by
@@ -510,7 +509,6 @@ class UnusualWhalesClient:
         endpoint = "/api/news/headlines"
         
         params = {
-            "limit": min(limit, 100),
             "page": page
         }
         
@@ -593,15 +591,6 @@ class UnusualWhalesClient:
         if date:
             params["date"] = date
         return self._make_request(endpoint, params)
-    
-    # =================================================================
-    # NEWS AND HEADLINES
-    # =================================================================
-    
-    def get_news_headlines(self) -> Dict:
-        """Get news headlines"""
-        endpoint = "/api/news/headlines"
-        return self._make_request(endpoint)
     
     # =================================================================
     # COMPREHENSIVE STOCK ANALYSIS WITH ENHANCED FLOW DATA
@@ -2723,12 +2712,16 @@ def get_economic_events(days_ahead=7):
         if calendar_data.get("error") or not calendar_data.get("data"):
             return []
         
+        # Handle nested data structure: data -> data
+        raw_data = calendar_data.get("data", {})
+        events_list = raw_data.get("data", [])
+        
         # Process economic events
         events = []
         today = datetime.now()
         cutoff = today + timedelta(days=days_ahead)
         
-        for item in calendar_data["data"]:
+        for item in events_list:
             event_time = item.get("time", "")
             if event_time:
                 try:
@@ -2756,7 +2749,6 @@ def get_economic_events(days_ahead=7):
     except Exception as e:
         print(f"Error getting economic events: {e}")
         return []
-
 def get_fda_events(days_ahead=30, ticker=None):
     """
     Get upcoming FDA events from UW FDA Calendar
@@ -2807,16 +2799,15 @@ def get_fda_events(days_ahead=30, ticker=None):
         print(f"Error getting FDA events: {e}")
         return []
 
-def get_market_news(limit=20, major_only=True, search_term=None):
+def get_market_news(major_only=True, search_term=None):
     """
-    Get market news headlines from UW
+    Get market news headlines from UW (API returns default 50)
     """
     if not uw_client:
         return []
     
     try:
         news_data = uw_client.get_news_headlines(
-            limit=limit,
             major_only=major_only,
             search_term=search_term
         )
@@ -8170,12 +8161,10 @@ with tabs[10]:
         with st.expander("📰 **Market News Headlines** - Real-time sentiment", expanded=False):
             st.caption("Latest market-moving news with sentiment analysis from Unusual Whales")
             
-            news_col1, news_col2, news_col3 = st.columns([2, 2, 1])
+            news_col1, news_col2 = st.columns([3, 1])
             with news_col1:
-                news_limit = st.slider("Number of articles", min_value=10, max_value=50, value=20, key="news_limit")
-            with news_col2:
                 news_filter = st.selectbox("Filter", ["All News", "Major Only", "Positive", "Negative", "Neutral"], key="news_filter")
-            with news_col3:
+            with news_col2:
                 load_news = st.button("📰 Load News", key="load_news", type="primary")
             
             # Search bar
