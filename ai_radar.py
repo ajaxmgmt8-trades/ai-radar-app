@@ -2709,41 +2709,26 @@ def get_economic_events(days_ahead=7):
     try:
         calendar_data = uw_client.get_economic_calendar()
         
-        if calendar_data.get("error") or not calendar_data.get("data"):
+        if calendar_data.get("error"):
             return []
         
         # Handle nested data structure: data -> data
         raw_data = calendar_data.get("data", {})
         events_list = raw_data.get("data", [])
         
-        # Process economic events
+        # Just return the events as-is, formatted for display
         events = []
-        today = datetime.now()
-        cutoff = today + timedelta(days=days_ahead)
-        
         for item in events_list:
-            event_time = item.get("time", "")
-            if event_time:
-                try:
-                    event_date = datetime.fromisoformat(event_time.replace('Z', '+00:00'))
-                    
-                    # Only include events within the next X days
-                    if today <= event_date <= cutoff:
-                        events.append({
-                            'event': item.get('event', 'Unknown Event'),
-                            'date': event_date.strftime('%Y-%m-%d'),
-                            'time': event_date.strftime('%H:%M UTC'),
-                            'forecast': item.get('forecast', 'N/A'),
-                            'previous': item.get('prev', 'N/A'),
-                            'period': item.get('reported_period', 'N/A'),
-                            'type': item.get('type', 'report'),
-                            'datetime': event_date
-                        })
-                except:
-                    continue
+            events.append({
+                'event': item.get('event', 'Unknown Event'),
+                'date': item.get('time', 'N/A'),
+                'time': item.get('time', 'N/A'),
+                'forecast': item.get('forecast', 'N/A'),
+                'previous': item.get('prev', 'N/A'),
+                'period': item.get('reported_period', 'N/A'),
+                'type': item.get('type', 'report')
+            })
         
-        # Sort by datetime
-        events.sort(key=lambda x: x['datetime'])
         return events
         
     except Exception as e:
@@ -2815,9 +2800,13 @@ def get_market_news(major_only=True, search_term=None):
         if news_data.get("error") or not news_data.get("data"):
             return []
         
+        # Handle nested data structure: data -> data
+        raw_data = news_data.get("data", {})
+        news_list_raw = raw_data.get("data", [])
+        
         # Process news
         news_list = []
-        for item in news_data["data"]:
+        for item in news_list_raw:
             news_list.append({
                 'headline': item.get('headline', 'No title'),
                 'source': item.get('source', 'Unknown'),
