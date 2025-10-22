@@ -7983,10 +7983,9 @@ with tabs[10]:
             if st.button("Test News Headlines API", key="test_news_api"):
                 with st.spinner("Testing UW News Headlines endpoint..."):
                     try:
-                        # Raw API call
+                        # Raw API call (WITHOUT limit parameter)
                         st.write("**Step 1: Raw API Call**")
                         raw_response = uw_client.get_news_headlines(
-                            limit=20,
                             major_only=debug_major_only,
                             search_term=debug_search if debug_search else None
                         )
@@ -8017,7 +8016,6 @@ with tabs[10]:
                         # Test the helper function
                         st.write("**Step 3: Test Helper Function**")
                         news = get_market_news(
-                            limit=20,
                             major_only=debug_major_only,
                             search_term=debug_search if debug_search else None
                         )
@@ -8161,6 +8159,7 @@ with tabs[10]:
         with st.expander("📰 **Market News Headlines** - Real-time sentiment", expanded=False):
             st.caption("Latest market-moving news with sentiment analysis from Unusual Whales")
             
+            # NEW CODE
             news_col1, news_col2 = st.columns([3, 1])
             with news_col1:
                 news_filter = st.selectbox("Filter", ["All News", "Major Only", "Positive", "Negative", "Neutral"], key="news_filter")
@@ -8174,7 +8173,6 @@ with tabs[10]:
                 with st.spinner("Loading market news..."):
                     major_only = news_filter == "Major Only"
                     market_news = get_market_news(
-                        limit=news_limit,
                         major_only=major_only,
                         search_term=news_search if news_search else None
                     )
