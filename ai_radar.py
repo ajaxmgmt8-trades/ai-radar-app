@@ -6293,18 +6293,27 @@ with tabs[6]:
                 # ===== DEBUG START =====
                 st.write("### 🐛 DEBUG - GEX API Response")
                 st.write(f"**Response Type:** {type(gex_by_strike)}")
-                st.write(f"**Response Value:**")
-                st.json(gex_by_strike)
                 
                 if isinstance(gex_by_strike, dict):
                     st.write(f"**Has 'error' key:** {gex_by_strike.get('error')}")
                     st.write(f"**Has 'data' key:** {'data' in gex_by_strike}")
+                    
                     if 'data' in gex_by_strike:
-                        st.write(f"**Data type:** {type(gex_by_strike.get('data'))}")
-                        st.write(f"**Data length:** {len(gex_by_strike.get('data', []))}")
-                        if gex_by_strike.get('data'):
-                            st.write(f"**First data point:**")
-                            st.json(gex_by_strike['data'][0])
+                        outer_data = gex_by_strike['data']
+                        st.write(f"**Outer data type:** {type(outer_data)}")
+                        
+                        # Check for nested data structure
+                        if isinstance(outer_data, dict) and 'data' in outer_data:
+                            inner_data = outer_data['data']
+                            st.write(f"**Inner data type:** {type(inner_data)}")
+                            st.write(f"**Number of strikes:** {len(inner_data) if inner_data else 0}")
+                            
+                            if inner_data and len(inner_data) > 0:
+                                st.write(f"**First 3 strikes:**")
+                                st.json(inner_data[:3])  # Show first 3 strikes
+                        else:
+                            st.write(f"**Data length:** {len(outer_data) if outer_data else 0}")
+                # ===== DEBUG END =====
                 # Get GEX time series
                 gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
                 
