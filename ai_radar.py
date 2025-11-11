@@ -6432,7 +6432,7 @@ with tabs[6]:
                     **Net Gamma:** ${net_gamma/1e9:.2f}B  
                     **Call Wall:** ${call_wall:.2f}  
                     **Put Wall:** ${put_wall:.2f}  
-                    **Zero Gamma Strike:** ${zero_gamma:.2f if zero_gamma else 'N/A'}
+                    **Zero Gamma Strike:** {f'${zero_gamma:.2f}' if zero_gamma else 'N/A'}
                     
                     ---
                     
@@ -6478,7 +6478,7 @@ with tabs[6]:
                     - Critical pivot level where gamma flips
                     - {"Above zero gamma = long gamma dynamics" if current_price > zero_gamma else "Below zero gamma = short gamma dynamics"}
                     - Watch for whipsaws near this level
-                    ''' if zero_gamma else ''}
+                    ''' if zero_gamma else '**Zero Gamma Strike: N/A** - No clear gamma flip level detected'}
                     
                     ---
                     
@@ -6502,7 +6502,7 @@ with tabs[6]:
                     - **Stop Loss:** {"Tight stops (gamma pin effect)" if net_gamma > 0 else "Wide stops (expect volatility)"}
                     - **Position Size:** {"Standard sizing" if net_gamma > 0 else "Reduce size (increased risk)"}
                     - **Time Decay:** {"Favorable (sell premium)" if net_gamma > 0 else "Unfavorable (buy premium)"}
-                    - **Gamma Flip Risk:** {f"Watch for price crossing ${zero_gamma:.2f}" if zero_gamma else "No clear gamma flip level"}
+                    - **Gamma Flip Risk:** {f'Watch for price crossing ${zero_gamma:.2f}' if zero_gamma else 'No clear gamma flip level'}
                     """)
             else:
                 st.error(f"Unable to load GEX data: {gex_analysis.get('error')}")
