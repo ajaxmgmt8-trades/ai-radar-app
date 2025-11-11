@@ -6393,26 +6393,55 @@ with tabs[6]:
                         with st.expander("⏰ GEX Throughout the Day"):
                             import pandas as pd
                             import plotly.express as px
+                            from datetime import datetime
+                            import pytz
                             
                             try:
                                 df = pd.DataFrame(timeseries_data)
                                 
                                 if 'time' in df.columns and 'gamma_per_one_percent_move_dir' in df.columns:
+                                    # Convert to datetime and handle timezone
                                     df['time'] = pd.to_datetime(df['time'])
+                                    
+                                    # Convert from UTC to user's selected timezone
+                                    user_tz = st.session_state.selected_tz  # "US/Eastern" or "US/Central"
+                                    
+                                    # If time is UTC, localize then convert
+                                    if df['time'].dt.tz is None:
+                                        df['time'] = df['time'].dt.tz_localize('UTC')
+                                    df['time'] = df['time'].dt.tz_convert(user_tz)
+                                    
+                                    # Format for display (12-hour with AM/PM)
+                                    df['time_display'] = df['time'].dt.strftime('%I:%M %p')
+                                    
+                                    # Net gamma calculation
                                     df['net_gamma'] = df['gamma_per_one_percent_move_dir'].astype(float)
                                     
+                                    # Create chart
                                     fig = px.line(df, x='time', y='net_gamma',
-                                                 title=f"Net Gamma Evolution - {flow_ticker}",
-                                                 labels={'net_gamma': 'Net Gamma', 'time': 'Time'})
+                                                 title=f"Net Gamma Evolution - {flow_ticker} ({user_tz.split('/')[-1]} Time)",
+                                                 labels={'net_gamma': 'Net Gamma', 'time': 'Time'},
+                                                 hover_data={'time': False, 'time_display': True, 'net_gamma': ':.2f'})
                                     
                                     fig.add_hline(y=0, line_dash="dash", line_color="gray",
                                                  annotation_text="Zero Gamma Line")
                                     
-                                    fig.update_layout(height=400)
+                                    # Update x-axis to show 12-hour time
+                                    fig.update_xaxes(
+                                        tickformat='%I:%M %p',  # 12-hour format with AM/PM
+                                        dtick=3600000,  # Tick every hour (in milliseconds)
+                                    )
+                                    
+                                    fig.update_layout(
+                                        height=400,
+                                        hovermode='x unified'
+                                    )
                                     
                                     st.plotly_chart(fig, use_container_width=True)
                                     
-                                    st.caption("💡 **Interpretation:** Crossing zero indicates gamma flip. Rapid changes signal increased volatility risk.")
+                                    # Show timezone info
+                                    tz_name = "Eastern" if "Eastern" in user_tz else "Central"
+                                    st.caption(f"💡 **Interpretation:** Times shown in {tz_name} Time. Crossing zero indicates gamma flip. Rapid changes signal increased volatility risk.")
                                 else:
                                     st.warning("Time series data structure incomplete")
                             except Exception as e:
