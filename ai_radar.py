@@ -6245,20 +6245,17 @@ with tabs[6]:
             st.caption("Real-time gamma levels showing market maker positioning")
             
             with st.spinner(f"Loading GEX data for {flow_ticker}..."):
-                # Get GEX by strike
-                gex_by_strike = uw_client.get_spot_gex_by_strike(flow_ticker)
-                # DEBUG: Check what we got
-                st.write("**DEBUG - GEX by Strike Response:**")
-                st.write(f"Has error: {gex_by_strike.get('error')}")
-                st.write(f"Has data: {bool(gex_by_strike.get('data'))}")
-                if gex_by_strike.get('data'):
-                    st.write(f"Number of strikes: {len(gex_by_strike.get('data', []))}")
-                    if len(gex_by_strike.get('data', [])) > 0:
-                        st.write("Sample strike data:", gex_by_strike['data'][0])
-                gex_analysis = analyze_gex_by_strike(gex_by_strike, quote['last'])
+                # Get GEX by strike - don't pass date, let it default to latest
+                gex_by_strike = uw_client.get_spot_gex_by_strike(
+                    ticker=flow_ticker,
+                    limit=500  # Get more strikes
+                )
                 
-                # Get GEX time series
+                # Get GEX time series - don't pass date
                 gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
+                
+                # Analyze the strike data
+                gex_analysis = analyze_gex_levels(gex_by_strike, quote['last'])
             
             if not gex_analysis.get("error"):
                 # Summary metrics
