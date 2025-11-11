@@ -6247,6 +6247,14 @@ with tabs[6]:
             with st.spinner(f"Loading GEX data for {flow_ticker}..."):
                 # Get GEX by strike
                 gex_by_strike = uw_client.get_spot_gex_by_strike(flow_ticker)
+                # DEBUG: Check what we got
+                st.write("**DEBUG - GEX by Strike Response:**")
+                st.write(f"Has error: {gex_by_strike.get('error')}")
+                st.write(f"Has data: {bool(gex_by_strike.get('data'))}")
+                if gex_by_strike.get('data'):
+                    st.write(f"Number of strikes: {len(gex_by_strike.get('data', []))}")
+                    if len(gex_by_strike.get('data', [])) > 0:
+                        st.write("Sample strike data:", gex_by_strike['data'][0])
                 gex_analysis = analyze_gex_by_strike(gex_by_strike, quote['last'])
                 
                 # Get GEX time series
@@ -6311,27 +6319,39 @@ with tabs[6]:
                 
                 # GEX Throughout the Day
                 if not gex_timeseries.get("error") and gex_timeseries.get("data"):
-                    with st.expander("⏰ GEX Throughout the Day"):
-                        import pandas as pd
-                        import plotly.express as px
-                        
-                        timeseries_data = gex_timeseries["data"]
-                        
-                        if timeseries_data:
-                            df = pd.DataFrame(timeseries_data)
-                            df['time'] = pd.to_datetime(df['time'])
-                            df['net_gamma'] = df['gamma_per_one_percent_move_dir'].astype(float)
+                    timeseries_data = gex_timeseries.get("data", [])
+                    
+                    if timeseries_data and len(timeseries_data) > 0:
+                        with st.expander("⏰ GEX Throughout the Day"):
+                            import pandas as pd
+                            import plotly.express as px
                             
-                            fig = px.line(df, x='time', y='net_gamma',
-                                         title=f"Net Gamma Evolution - {flow_ticker}",
-                                         labels={'net_gamma': 'Net Gamma', 'time': 'Time'})
-                            
-                            fig.add_hline(y=0, line_dash="dash", line_color="gray",
-                                         annotation_text="Zero Gamma")
-                            
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            st.caption("💡 Crossing zero indicates gamma flip. Rapid changes = increased volatility risk.")
+                            try:
+                                df = pd.DataFrame(timeseries_data)
+                                
+                                # Check if required columns exist
+                                if 'time' in df.columns and 'gamma_per_one_percent_move_dir' in df.columns:
+                                    df['time'] = pd.to_datetime(df['time'])
+                                    df['net_gamma'] = df['gamma_per_one_percent_move_dir'].astype(float)
+                                    
+                                    fig = px.line(df, x='time', y='net_gamma',
+                                                 title=f"Net Gamma Evolution - {flow_ticker}",
+                                                 labels={'net_gamma': 'Net Gamma', 'time': 'Time'})
+                                    
+                                    fig.add_hline(y=0, line_dash="dash", line_color="gray",
+                                                 annotation_text="Zero Gamma")
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    st.caption("💡 Crossing zero indicates gamma flip. Rapid changes = increased volatility risk.")
+                                else:
+                                    st.warning("Time series data is incomplete")
+                            except Exception as e:
+                                st.error(f"Error creating time series chart: {str(e)}")
+                    else:
+                        st.info("No intraday GEX time series data available")
+                else:
+                    st.warning("GEX time series data unavailable")
                 
                 # Trading implications
                 with st.expander("💡 GEX Trading Guide"):
