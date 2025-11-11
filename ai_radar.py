@@ -6401,8 +6401,18 @@ with tabs[6]:
                                     # Convert to datetime
                                     df['time'] = pd.to_datetime(df['time'], utc=True)
                                     
-                                    # Get user's selected timezone
-                                    user_tz = st.session_state.get('selected_tz', 'US/Eastern')
+                                    # Get user's selected timezone and convert abbreviation to full name
+                                    user_tz_abbr = st.session_state.get('selected_tz', 'US/Eastern')
+                                    
+                                    # Map abbreviations to full timezone names
+                                    tz_map = {
+                                        'ET': 'US/Eastern',
+                                        'CT': 'US/Central',
+                                        'US/Eastern': 'US/Eastern',
+                                        'US/Central': 'US/Central'
+                                    }
+                                    
+                                    user_tz = tz_map.get(user_tz_abbr, 'US/Eastern')
                                     
                                     # Convert to user timezone
                                     df['time'] = df['time'].dt.tz_convert(user_tz)
@@ -6438,12 +6448,6 @@ with tabs[6]:
                                     st.warning("Time series data missing required columns")
                             except Exception as e:
                                 st.error(f"Error creating time series chart: {str(e)}")
-                                # Debug info
-                                st.write("Debug info:")
-                                st.write(f"- Timezone: {st.session_state.get('selected_tz', 'Not set')}")
-                                st.write(f"- Data points: {len(timeseries_data)}")
-                                if len(timeseries_data) > 0:
-                                    st.write(f"- Sample data point: {timeseries_data[0]}")
                 
                 # Trading Guide with Current GEX Setup
                 with st.expander("💡 GEX Trading Guide", expanded=False):
