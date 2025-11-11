@@ -6393,43 +6393,37 @@ with tabs[6]:
                         with st.expander("⏰ GEX Throughout the Day"):
                             import pandas as pd
                             import plotly.express as px
-                            from datetime import datetime
-                            import pytz
                             
                             try:
                                 df = pd.DataFrame(timeseries_data)
                                 
                                 if 'time' in df.columns and 'gamma_per_one_percent_move_dir' in df.columns:
-                                    # Convert to datetime and handle timezone
-                                    df['time'] = pd.to_datetime(df['time'])
+                                    # Convert to datetime
+                                    df['time'] = pd.to_datetime(df['time'], utc=True)
                                     
-                                    # Convert from UTC to user's selected timezone
-                                    user_tz = st.session_state.selected_tz  # "US/Eastern" or "US/Central"
+                                    # Get user's selected timezone
+                                    user_tz = st.session_state.get('selected_tz', 'US/Eastern')
                                     
-                                    # If time is UTC, localize then convert
-                                    if df['time'].dt.tz is None:
-                                        df['time'] = df['time'].dt.tz_localize('UTC')
+                                    # Convert to user timezone
                                     df['time'] = df['time'].dt.tz_convert(user_tz)
-                                    
-                                    # Format for display (12-hour with AM/PM)
-                                    df['time_display'] = df['time'].dt.strftime('%I:%M %p')
                                     
                                     # Net gamma calculation
                                     df['net_gamma'] = df['gamma_per_one_percent_move_dir'].astype(float)
                                     
+                                    # Get timezone display name
+                                    tz_name = "Eastern" if "Eastern" in user_tz else "Central"
+                                    
                                     # Create chart
                                     fig = px.line(df, x='time', y='net_gamma',
-                                                 title=f"Net Gamma Evolution - {flow_ticker} ({user_tz.split('/')[-1]} Time)",
-                                                 labels={'net_gamma': 'Net Gamma', 'time': 'Time'},
-                                                 hover_data={'time': False, 'time_display': True, 'net_gamma': ':.2f'})
+                                                 title=f"Net Gamma Evolution - {flow_ticker} ({tz_name} Time)",
+                                                 labels={'net_gamma': 'Net Gamma', 'time': 'Time'})
                                     
                                     fig.add_hline(y=0, line_dash="dash", line_color="gray",
                                                  annotation_text="Zero Gamma Line")
                                     
-                                    # Update x-axis to show 12-hour time
+                                    # Update x-axis to show 12-hour time format
                                     fig.update_xaxes(
-                                        tickformat='%I:%M %p',  # 12-hour format with AM/PM
-                                        dtick=3600000,  # Tick every hour (in milliseconds)
+                                        tickformat='%I:%M %p'  # 12-hour with AM/PM
                                     )
                                     
                                     fig.update_layout(
@@ -6439,13 +6433,17 @@ with tabs[6]:
                                     
                                     st.plotly_chart(fig, use_container_width=True)
                                     
-                                    # Show timezone info
-                                    tz_name = "Eastern" if "Eastern" in user_tz else "Central"
                                     st.caption(f"💡 **Interpretation:** Times shown in {tz_name} Time. Crossing zero indicates gamma flip. Rapid changes signal increased volatility risk.")
                                 else:
-                                    st.warning("Time series data structure incomplete")
+                                    st.warning("Time series data missing required columns")
                             except Exception as e:
                                 st.error(f"Error creating time series chart: {str(e)}")
+                                # Debug info
+                                st.write("Debug info:")
+                                st.write(f"- Timezone: {st.session_state.get('selected_tz', 'Not set')}")
+                                st.write(f"- Data points: {len(timeseries_data)}")
+                                if len(timeseries_data) > 0:
+                                    st.write(f"- Sample data point: {timeseries_data[0]}")
                 
                 # Trading Guide with Current GEX Setup
                 with st.expander("💡 GEX Trading Guide", expanded=False):
