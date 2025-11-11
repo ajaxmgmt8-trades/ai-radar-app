@@ -6250,7 +6250,7 @@ with tabs[6]:
                 gex_analysis = analyze_gex_by_strike(gex_by_strike, quote['last'])
                 
                 # Get GEX time series
-                gex_timeseries = uw_client.get_spot_gex(flow_ticker)
+                gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
             
             if not gex_analysis.get("error"):
                 # Summary metrics
