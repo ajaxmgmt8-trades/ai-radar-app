@@ -4341,11 +4341,21 @@ def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
     Based on /api/stock/{ticker}/spot-exposures/strike endpoint
     """
     
-    if gex_data.get("error") or not gex_data.get("data"):
-        return {"error": gex_data.get("error", "No GEX data available")}
+    if gex_data.get("error"):
+        return {"error": gex_data.get("error")}
+    
+    # Handle nested data structure: response["data"]["data"]
+    if not gex_data.get("data"):
+        return {"error": "No data in response"}
     
     try:
-        data = gex_data["data"]
+        # The actual data is nested under data.data
+        data_wrapper = gex_data["data"]
+        if isinstance(data_wrapper, dict) and "data" in data_wrapper:
+            data = data_wrapper["data"]
+        else:
+            data = data_wrapper
+        
         if not data or len(data) == 0:
             return {"error": "No GEX strike data available"}
         
@@ -4426,7 +4436,7 @@ def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
         }
     
     except Exception as e:
-        return {"error": f"Error analyzing GEX: {str(e)}"}        
+        return {"error": f"Error analyzing GEX: {str(e)}"}  
 def analyze_darkpool_trades(darkpool_data, ticker=None):
     """
     Analyze darkpool trades from Unusual Whales
