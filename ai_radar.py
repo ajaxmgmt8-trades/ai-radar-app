@@ -6280,7 +6280,21 @@ with tabs[6]:
                     ticker=flow_ticker,
                     limit=500
                 )
+                # ===== DEBUG START =====
+                st.write("### 🐛 DEBUG - GEX API Response")
+                st.write(f"**Response Type:** {type(gex_by_strike)}")
+                st.write(f"**Response Value:**")
+                st.json(gex_by_strike)
                 
+                if isinstance(gex_by_strike, dict):
+                    st.write(f"**Has 'error' key:** {gex_by_strike.get('error')}")
+                    st.write(f"**Has 'data' key:** {'data' in gex_by_strike}")
+                    if 'data' in gex_by_strike:
+                        st.write(f"**Data type:** {type(gex_by_strike.get('data'))}")
+                        st.write(f"**Data length:** {len(gex_by_strike.get('data', []))}")
+                        if gex_by_strike.get('data'):
+                            st.write(f"**First data point:**")
+                            st.json(gex_by_strike['data'][0])
                 # Get GEX time series
                 gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
                 
