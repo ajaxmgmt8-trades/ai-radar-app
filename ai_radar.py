@@ -4367,14 +4367,14 @@ def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
         put_wall_strike = None
         
         for strike_data in data:
-            # "price" field is the STRIKE PRICE
-            strike = float(strike_data.get("price", 0))
+            # IMPORTANT: Use "strike" field for the strike price, NOT "price"
+            strike = float(strike_data.get("strike", 0))
             
-            # Get gamma values
+            # Get gamma values (note: put_gamma_oi can be negative)
             call_gamma_oi = float(strike_data.get("call_gamma_oi", 0))
-            put_gamma_oi = float(strike_data.get("put_gamma_oi", 0))
+            put_gamma_oi = abs(float(strike_data.get("put_gamma_oi", 0)))  # Take absolute value
             call_gamma_vol = float(strike_data.get("call_gamma_vol", 0))
-            put_gamma_vol = float(strike_data.get("put_gamma_vol", 0))
+            put_gamma_vol = abs(float(strike_data.get("put_gamma_vol", 0)))  # Take absolute value
             
             # Total gamma for this strike
             total_call_gamma = call_gamma_oi + call_gamma_vol
@@ -4400,13 +4400,13 @@ def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
         # Sort by strike
         strikes_analysis.sort(key=lambda x: x["strike"])
         
-        # Find zero gamma strike
+        # Find zero gamma strike (where net gamma crosses zero)
         zero_gamma_strike = None
         for i in range(len(strikes_analysis) - 1):
-            current = strikes_analysis[i]["net_gamma"]
-            next_val = strikes_analysis[i + 1]["net_gamma"]
+            current_gamma = strikes_analysis[i]["net_gamma"]
+            next_gamma = strikes_analysis[i + 1]["net_gamma"]
             
-            if (current > 0 and next_val < 0) or (current < 0 and next_val > 0):
+            if (current_gamma > 0 and next_gamma < 0) or (current_gamma < 0 and next_gamma > 0):
                 zero_gamma_strike = strikes_analysis[i]["strike"]
                 break
         
@@ -4432,11 +4432,11 @@ def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
             "zero_gamma_strike": zero_gamma_strike,
             "mm_position": mm_position,
             "volatility_impact": volatility_impact,
-            "strikes": strikes_analysis[:50]
+            "strikes": strikes_analysis[:50]  # Return top 50 for chart
         }
     
     except Exception as e:
-        return {"error": f"Error analyzing GEX: {str(e)}"}  
+        return {"error": f"Error analyzing GEX: {str(e)}"} 
 def analyze_darkpool_trades(darkpool_data, ticker=None):
     """
     Analyze darkpool trades from Unusual Whales
@@ -6290,30 +6290,6 @@ with tabs[6]:
                     ticker=flow_ticker,
                     limit=500
                 )
-                # ===== DEBUG START =====
-                st.write("### 🐛 DEBUG - GEX API Response")
-                st.write(f"**Response Type:** {type(gex_by_strike)}")
-                
-                if isinstance(gex_by_strike, dict):
-                    st.write(f"**Has 'error' key:** {gex_by_strike.get('error')}")
-                    st.write(f"**Has 'data' key:** {'data' in gex_by_strike}")
-                    
-                    if 'data' in gex_by_strike:
-                        outer_data = gex_by_strike['data']
-                        st.write(f"**Outer data type:** {type(outer_data)}")
-                        
-                        # Check for nested data structure
-                        if isinstance(outer_data, dict) and 'data' in outer_data:
-                            inner_data = outer_data['data']
-                            st.write(f"**Inner data type:** {type(inner_data)}")
-                            st.write(f"**Number of strikes:** {len(inner_data) if inner_data else 0}")
-                            
-                            if inner_data and len(inner_data) > 0:
-                                st.write(f"**First 3 strikes:**")
-                                st.json(inner_data[:3])  # Show first 3 strikes
-                        else:
-                            st.write(f"**Data length:** {len(outer_data) if outer_data else 0}")
-                # ===== DEBUG END =====
                 # Get GEX time series
                 gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
                 
