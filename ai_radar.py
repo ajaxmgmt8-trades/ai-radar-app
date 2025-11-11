@@ -1703,81 +1703,6 @@ def assess_valuation(fundamentals: Dict) -> str:
 # =============================================================================
 # ENHANCED OPTIONS ANALYSIS WITH UW DATA
 # =============================================================================
-def analyze_gex_levels(gex_data: Dict, current_price: float) -> Dict:
-    """Analyze GEX data to find key trading levels"""
-    
-    if gex_data.get("error"):
-        return {"error": gex_data["error"]}
-    
-    try:
-        data = gex_data.get("data", [])
-        if not data:
-            return {"error": "No GEX data available"}
-        
-        # Process each strike
-        strikes = []
-        for strike_data in data:
-            strike_price = float(strike_data.get("price", 0))
-            
-            # Calculate net gamma (call - put, using OI-based gamma)
-            call_gamma = float(strike_data.get("call_gamma_oi", 0))
-            put_gamma = float(strike_data.get("put_gamma_oi", 0))
-            net_gamma = call_gamma - put_gamma  # Positive = long gamma, Negative = short gamma
-            
-            strikes.append({
-                "strike": strike_price,
-                "call_gamma": call_gamma,
-                "put_gamma": put_gamma,
-                "net_gamma": net_gamma,
-                "call_delta_oi": float(strike_data.get("call_delta_oi", 0)),
-                "put_delta_oi": float(strike_data.get("put_delta_oi", 0)),
-                "timestamp": strike_data.get("time", "")
-            })
-        
-        # Sort by strike
-        strikes.sort(key=lambda x: x["strike"])
-        
-        # Find key levels
-        max_call_gamma_strike = max(strikes, key=lambda x: x["call_gamma"])
-        max_put_gamma_strike = max(strikes, key=lambda x: x["put_gamma"])
-        
-        # Find zero gamma strike (where net gamma crosses zero)
-        zero_gamma_strike = None
-        for i in range(len(strikes) - 1):
-            if (strikes[i]["net_gamma"] > 0 and strikes[i+1]["net_gamma"] < 0) or \
-               (strikes[i]["net_gamma"] < 0 and strikes[i+1]["net_gamma"] > 0):
-                zero_gamma_strike = (strikes[i]["strike"] + strikes[i+1]["strike"]) / 2
-                break
-        
-        # Calculate total gamma exposure
-        total_call_gamma = sum(s["call_gamma"] for s in strikes)
-        total_put_gamma = sum(s["put_gamma"] for s in strikes)
-        total_net_gamma = total_call_gamma - total_put_gamma
-        
-        # Determine market maker positioning
-        if total_net_gamma > 0:
-            mm_position = "Long Gamma (Volatility Suppression)"
-            volatility_impact = "Market makers will hedge by SELLING into rallies and BUYING into dips → Price pinning"
-        else:
-            mm_position = "Short Gamma (Volatility Amplification)"
-            volatility_impact = "Market makers will hedge by BUYING into rallies and SELLING into dips → Momentum acceleration"
-        
-        return {
-            "strikes": strikes,
-            "call_wall": max_call_gamma_strike["strike"],  # Resistance
-            "put_wall": max_put_gamma_strike["strike"],     # Support
-            "zero_gamma_strike": zero_gamma_strike,
-            "total_net_gamma": total_net_gamma,
-            "total_call_gamma": total_call_gamma,
-            "total_put_gamma": total_put_gamma,
-            "mm_position": mm_position,
-            "volatility_impact": volatility_impact,
-            "current_price": current_price,
-            "error": None
-        }
-        
-    except Exception as e:
-        return {"error": f"Error analyzing GEX: {str(e)}"}
 def get_enhanced_options_analysis(ticker: str) -> Dict:
     """Comprehensive options analysis using UW data and yfinance fallback"""
     try:
@@ -4416,6 +4341,62 @@ def analyze_hottest_chains(hottest_chains_data: Dict) -> Dict:
         
     except Exception as e:
         return {"error": f"Error analyzing hottest chains: {str(e)}"}
+def analyze_gex_by_strike(gex_data: Dict, current_price: float) -> Dict:
+    """Analyze GEX data by strike to find key levels"""
+    
+    if gex_data.get("error") or not gex_data.get("data"):
+        return {"error": gex_data.get("error", "No GEX data available")}
+    
+    try:
+        data = gex_data["data"]
+        if not data:
+            return {"error": "No GEX data points"}
+        
+        # Get the most recent data point
+        latest = data[-1] if isinstance(data, list) else data
+        
+        # Extract gamma values
+        call_gamma_oi = float(latest.get("call_gamma_oi", 0))
+        put_gamma_oi = float(latest.get("put_gamma_oi", 0))
+        call_gamma_vol = float(latest.get("call_gamma_vol", 0))
+        put_gamma_vol = float(latest.get("put_gamma_vol", 0))
+        
+        # Calculate net gamma
+        total_call_gamma = call_gamma_oi + call_gamma_vol
+        total_put_gamma = put_gamma_oi + put_gamma_vol
+        net_gamma = total_call_gamma - total_put_gamma
+        
+        # Determine market maker positioning
+        if net_gamma > 0:
+            mm_position = "Long Gamma (Volatility Suppression)"
+            volatility_impact = "MM will sell rallies and buy dips → Price tends to pin"
+        else:
+            mm_position = "Short Gamma (Volatility Amplification)"
+            volatility_impact = "MM will buy rallies and sell dips → Increased volatility"
+        
+        # Price from data
+        price = float(latest.get("price", current_price))
+        
+        return {
+            "total_net_gamma": net_gamma,
+            "call_gamma_total": total_call_gamma,
+            "put_gamma_total": total_put_gamma,
+            "call_gamma_oi": call_gamma_oi,
+            "call_gamma_vol": call_gamma_vol,
+            "put_gamma_oi": put_gamma_oi,
+            "put_gamma_vol": put_gamma_vol,
+            "mm_position": mm_position,
+            "volatility_impact": volatility_impact,
+            "current_price": price,
+            "call_delta_oi": float(latest.get("call_delta_oi", 0)),
+            "put_delta_oi": float(latest.get("put_delta_oi", 0)),
+            "call_vanna_oi": float(latest.get("call_vanna_oi", 0)),
+            "put_vanna_oi": float(latest.get("put_vanna_oi", 0)),
+            "timestamp": latest.get("time", "N/A")
+        }
+    
+    except Exception as e:
+        return {"error": f"Error analyzing GEX: {str(e)}"}        
 def analyze_darkpool_trades(darkpool_data, ticker=None):
     """
     Analyze darkpool trades from Unusual Whales
@@ -6261,15 +6242,15 @@ with tabs[6]:
         if uw_client:
             st.divider()
             st.markdown("## ⚡ Gamma Exposure (GEX) Analysis")
-            st.caption("Real-time gamma levels showing market maker positioning and key support/resistance")
+            st.caption("Real-time gamma levels showing market maker positioning")
             
             with st.spinner(f"Loading GEX data for {flow_ticker}..."):
-                # Get GEX by strike (aggregated)
+                # Get GEX by strike
                 gex_by_strike = uw_client.get_spot_gex_by_strike(flow_ticker)
-                gex_analysis = analyze_gex_levels(gex_by_strike, quote['last'])
+                gex_analysis = analyze_gex_by_strike(gex_by_strike, quote['last'])
                 
                 # Get GEX time series
-                gex_timeseries = uw_client.get_spot_gex_timeseries(flow_ticker)
+                gex_timeseries = uw_client.get_spot_gex(flow_ticker)
             
             if not gex_analysis.get("error"):
                 # Summary metrics
@@ -6277,22 +6258,22 @@ with tabs[6]:
                 
                 gex_col1, gex_col2, gex_col3, gex_col4 = st.columns(4)
                 
-                # Format net gamma with color
+                # Net gamma
                 net_gamma = gex_analysis["total_net_gamma"]
-                net_gamma_str = f"${net_gamma:,.0f}"
-                
-                gex_col1.metric("Net Gamma", net_gamma_str, 
+                gex_col1.metric("Net Gamma", f"${net_gamma/1e9:.2f}B",
                                help="Positive = Long Gamma (Suppresses Vol), Negative = Short Gamma (Amplifies Vol)")
-                gex_col2.metric("Call Wall (Resistance)", f"${gex_analysis['call_wall']:.2f}",
-                               help="Strike with highest call gamma - acts as resistance")
-                gex_col3.metric("Put Wall (Support)", f"${gex_analysis['put_wall']:.2f}",
-                               help="Strike with highest put gamma - acts as support")
                 
-                if gex_analysis['zero_gamma_strike']:
-                    gex_col4.metric("Zero Gamma Strike", f"${gex_analysis['zero_gamma_strike']:.2f}",
-                                   help="Where net gamma flips - critical pivot level")
-                else:
-                    gex_col4.metric("Zero Gamma Strike", "N/A")
+                # Total call gamma
+                gex_col2.metric("Call Gamma", f"${gex_analysis['call_gamma_total']/1e9:.2f}B",
+                               help="Total call gamma exposure")
+                
+                # Total put gamma  
+                gex_col3.metric("Put Gamma", f"${gex_analysis['put_gamma_total']/1e9:.2f}B",
+                               help="Total put gamma exposure")
+                
+                # Current price
+                gex_col4.metric("Reference Price", f"${gex_analysis['current_price']:.2f}",
+                               help="Price at time of GEX calculation")
                 
                 # Market maker positioning
                 st.markdown("### 🏦 Market Maker Positioning")
@@ -6308,67 +6289,38 @@ with tabs[6]:
                 with mm_col2:
                     st.info(f"💡 **Impact:** {gex_analysis['volatility_impact']}")
                 
-                # GEX Levels Chart
-                with st.expander("📊 GEX by Strike (Visual)", expanded=True):
-                    import plotly.graph_objects as go
+                # Detailed breakdown
+                with st.expander("📊 Detailed GEX Breakdown"):
+                    detail_col1, detail_col2 = st.columns(2)
                     
-                    strikes_data = gex_analysis["strikes"]
+                    with detail_col1:
+                        st.markdown("**📞 Call Gamma:**")
+                        st.write(f"- From OI: ${gex_analysis['call_gamma_oi']/1e9:.2f}B")
+                        st.write(f"- From Vol: ${gex_analysis['call_gamma_vol']/1e9:.2f}B")
+                        st.write(f"- Call Delta OI: ${gex_analysis['call_delta_oi']/1e6:.2f}M")
+                        st.write(f"- Call Vanna OI: ${gex_analysis['call_vanna_oi']/1e9:.2f}B")
                     
-                    fig = go.Figure()
+                    with detail_col2:
+                        st.markdown("**📉 Put Gamma:**")
+                        st.write(f"- From OI: ${gex_analysis['put_gamma_oi']/1e9:.2f}B")
+                        st.write(f"- From Vol: ${gex_analysis['put_gamma_vol']/1e9:.2f}B")
+                        st.write(f"- Put Delta OI: ${gex_analysis['put_delta_oi']/1e6:.2f}M")
+                        st.write(f"- Put Vanna OI: ${gex_analysis['put_vanna_oi']/1e9:.2f}B")
                     
-                    # Call gamma (positive, green)
-                    fig.add_trace(go.Bar(
-                        x=[s["strike"] for s in strikes_data],
-                        y=[s["call_gamma"] / 1e9 for s in strikes_data],  # Billions
-                        name="Call Gamma",
-                        marker_color='green',
-                        opacity=0.6
-                    ))
-                    
-                    # Put gamma (negative, red)
-                    fig.add_trace(go.Bar(
-                        x=[s["strike"] for s in strikes_data],
-                        y=[-s["put_gamma"] / 1e9 for s in strikes_data],  # Negative for visual separation
-                        name="Put Gamma",
-                        marker_color='red',
-                        opacity=0.6
-                    ))
-                    
-                    # Current price line
-                    fig.add_vline(x=quote['last'], line_dash="dash", line_color="yellow",
-                                 annotation_text=f"Current: ${quote['last']:.2f}")
-                    
-                    # Call wall line
-                    fig.add_vline(x=gex_analysis['call_wall'], line_dash="dot", line_color="green",
-                                 annotation_text=f"Call Wall: ${gex_analysis['call_wall']:.2f}")
-                    
-                    # Put wall line
-                    fig.add_vline(x=gex_analysis['put_wall'], line_dash="dot", line_color="red",
-                                 annotation_text=f"Put Wall: ${gex_analysis['put_wall']:.2f}")
-                    
-                    fig.update_layout(
-                        title=f"GEX Distribution for {flow_ticker}",
-                        xaxis_title="Strike Price",
-                        yaxis_title="Gamma Exposure (Billions)",
-                        barmode='relative',
-                        height=400,
-                        hovermode='x unified'
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.caption(f"📅 Data from: {gex_analysis['timestamp']}")
                 
                 # GEX Throughout the Day
-                if not gex_timeseries.get("error"):
+                if not gex_timeseries.get("error") and gex_timeseries.get("data"):
                     with st.expander("⏰ GEX Throughout the Day"):
-                        timeseries_data = gex_timeseries.get("data", [])
+                        import pandas as pd
+                        import plotly.express as px
+                        
+                        timeseries_data = gex_timeseries["data"]
                         
                         if timeseries_data:
-                            import pandas as pd
-                            import plotly.express as px
-                            
                             df = pd.DataFrame(timeseries_data)
                             df['time'] = pd.to_datetime(df['time'])
-                            df['net_gamma'] = (df['gamma_per_one_percent_move_dir'].astype(float))
+                            df['net_gamma'] = df['gamma_per_one_percent_move_dir'].astype(float)
                             
                             fig = px.line(df, x='time', y='net_gamma',
                                          title=f"Net Gamma Evolution - {flow_ticker}",
@@ -6379,49 +6331,32 @@ with tabs[6]:
                             
                             st.plotly_chart(fig, use_container_width=True)
                             
-                            st.caption(f"💡 **Interpretation:** Crossing zero indicates gamma flip. "
-                                     f"Rapid changes = increased volatility risk.")
+                            st.caption("💡 Crossing zero indicates gamma flip. Rapid changes = increased volatility risk.")
                 
                 # Trading implications
                 with st.expander("💡 GEX Trading Guide"):
                     st.markdown(f"""
                     **Current Setup for {flow_ticker}:**
                     
-                    📍 **Key Levels:**
+                    📍 **Key Metrics:**
                     - Current Price: ${quote['last']:.2f}
-                    - Call Wall (Resistance): ${gex_analysis['call_wall']:.2f}
-                    - Put Wall (Support): ${gex_analysis['put_wall']:.2f}
-                    - Zero Gamma: ${gex_analysis['zero_gamma_strike']:.2f if gex_analysis['zero_gamma_strike'] else 'N/A'}
+                    - Net Gamma: ${net_gamma/1e9:.2f}B
+                    - MM Position: {gex_analysis['mm_position']}
                     
                     🎯 **Trading Strategy:**
                     
-                    **If Net Gamma is POSITIVE (Long Gamma):**
-                    - Price tends to PIN between call wall and put wall
-                    - Volatility is SUPPRESSED (market makers hedge by selling rallies, buying dips)
-                    - Best for: Range-bound strategies (iron condors, strangles)
-                    - Avoid: Directional momentum plays
+                    **Current Environment: {"LONG GAMMA" if net_gamma > 0 else "SHORT GAMMA"}**
                     
-                    **If Net Gamma is NEGATIVE (Short Gamma):**
-                    - Price can break out violently in either direction
-                    - Volatility is AMPLIFIED (market makers hedge by buying rallies, selling dips)
-                    - Best for: Directional plays, breakout trading
-                    - Caution: Rapid moves possible, use wider stops
+                    {"✅ **Long Gamma Environment:**" if net_gamma > 0 else "⚠️ **Short Gamma Environment:**"}
+                    {gex_analysis['volatility_impact']}
                     
-                    🔥 **Call Wall as Resistance:**
-                    - Heavy call gamma at ${gex_analysis['call_wall']:.2f}
-                    - Market makers will sell stock as price approaches
-                    - Acts as strong resistance level
+                    {"📌 **Best for:** Range-bound strategies (iron condors, credit spreads)" if net_gamma > 0 else "🚀 **Best for:** Directional plays, breakout trading"}
+                    {"⚠️ **Avoid:** Directional momentum plays" if net_gamma > 0 else "⚠️ **Caution:** Rapid moves possible, use wider stops"}
                     
-                    🛡️ **Put Wall as Support:**
-                    - Heavy put gamma at ${gex_analysis['put_wall']:.2f}
-                    - Market makers will buy stock as price approaches
-                    - Acts as strong support level
-                    
-                    ⚡ **Zero Gamma Strike:**
-                    - Critical pivot level at ${gex_analysis['zero_gamma_strike']:.2f if gex_analysis['zero_gamma_strike'] else 'N/A'}
-                    - Above this level: Different gamma dynamics
-                    - Below this level: Opposite gamma dynamics
-                    - Watch for whipsaws near this level
+                    📊 **Additional Context:**
+                    - Call Gamma: ${gex_analysis['call_gamma_total']/1e9:.2f}B
+                    - Put Gamma: ${gex_analysis['put_gamma_total']/1e9:.2f}B
+                    - Ratio: {gex_analysis['call_gamma_total']/gex_analysis['put_gamma_total']:.2f}x more call gamma
                     """)
             else:
                 st.error(f"Unable to load GEX data: {gex_analysis.get('error')}")
